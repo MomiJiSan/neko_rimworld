@@ -1,0 +1,201 @@
+"""Build model tools from the Mod-owned schema and template directory."""
+
+from __future__ import annotations
+
+import asyncio
+import copy
+import json
+from collections.abc import Callable
+from typing import Any
+
+from .agent.tools import ToolExecutionError, ToolHandler, ToolSetup, ToolSpec
+from .bridge import BridgeServer
+from .observation import Observation
+
+
+def make_game_tools(catalog: dict[str, Any], query: ToolHandler) -> ToolSetup:
+    async def templates(arguments: dict[str, Any]):
+        return await query({"operation": "template_query", "arguments": arguments})
+
+    async def exact(arguments: dict[str, Any]):
+        return await query({"operation": "graphql", "arguments": arguments})
+
+    descriptions: dict[tuple, dict[str, Any]] = {}
+
+    async def describe(arguments: dict[str, Any]):
+        names = arguments.get("types")
+        include = arguments.get("include_templates", False)
+        if (
+            set(arguments) - {"types", "include_templates"}
+            or not isinstance(names, list)
+            or not 1 <= len(names) <= 8
+            or any(not isinstance(name, str) or not name or len(name) > 128 for name in names)
+            or type(include) is not bool
+        ):
+            raise ToolExecutionError(
+                "invalid_arguments", "Select 1..8 type names and an optional include_templates boolean."
+            )
+        key = (tuple(sorted(set(names))), include)
+        # Cached metadata still checks connection/schema through the scoped query on first read.
+        # The per-run cache is not game state and is never converted into a live Observation.
+        if key in descriptions:
+            return copy.deepcopy(descriptions[key])
+        observation = await query({"operation": "describe_schema", "arguments": arguments})
+        if not isinstance(observation, Observation):
+            raise ToolExecutionError("invalid_schema", "Expected a schema description response.")
+        payload = observation.value["response"]["payload"]
+        if payload.get("status") != "ok":
+            raise ToolExecutionError(
+                str(payload.get("error_code") or "schema_unavailable"),
+                str(payload.get("message") or "Schema description failed."),
+            )
+        data = payload.get("data")
+        if (
+            not isinstance(data, dict)
+            or data.get("schema_id") != catalog["schema_id"]
+            or data.get("metadata_only") is not True
+        ):
+            raise ToolExecutionError("schema_changed", "Description does not match this run's schema.")
+        descriptions[key] = copy.deepcopy(data)
+        return copy.deepcopy(data)
+
+    return ToolSetup(
+        tools=(
+            ToolSpec(
+                name="get_game_info",
+                description=(
+                    "Select an object, then one or more of its available information sections. "
+                    "The supplied schema describes each target and the fields its section templates return. "
+                    "Combine sections for the same object to inspect related facts together, or include multiple targets. "
+                    "Repeated targets merge into one nested object; execution.bindings links each request to its result. "
+                    "All requests share one sample and total budget. Native members and holder/storage relations retain their meanings; haulable groups are not pawn-specific permission. "
+                    "Use query_game for fields or nested pages not covered by section templates."
+                ),
+                parameters=copy.deepcopy(catalog["template_parameters"]),
+                handler=templates,
+            ),
+            ToolSpec(
+                name="query_game",
+                description="Read precisely selected game fields using the supplied GraphQL schema. Multiple fields and roots are allowed in one query.",
+                parameters=copy.deepcopy(catalog["query_parameters"]),
+                handler=exact,
+            ),
+            ToolSpec(
+                name="describe_game_schema",
+                description="Read supported native types, original member semantics, arguments, component projections and optional section templates. Metadata only; not a live game observation. Use for exact fields not described by the common templates.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "types": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1, "maxLength": 128},
+                            "minItems": 1,
+                            "maxItems": 8,
+                        },
+                        "include_templates": {"type": "boolean"},
+                    },
+                    "required": ["types"],
+                    "additionalProperties": False,
+                },
+                handler=describe,
+            ),
+        ),
+        context=(
+            "Read-only game query directory (schema_id="
+            + catalog["schema_id"]
+            + "):\n"
+            + json.dumps({"types": catalog["type_index"], "roots": catalog["query_roots"]}, ensure_ascii=False)
+            + "\n"
+            + catalog["query_rules"]
+            + "\nChoose the target object first, then combine the sections that answer the question. "
+            "Use returned object IDs for follow-up queries; names can match multiple objects. "
+            "Use describe_game_schema for exact member types and original semantics; the full SDL is not injected by default. "
+            "Prefer section templates when they cover the needed facts; otherwise query exact fields. "
+            "Do not read the same facts again merely to follow a tool order. "
+            "Keep related evidence joined by object identity, not display name. "
+            "Inspect collection coverage and issue paths before interpreting missing data; an unread page is not an empty collection. "
+            "Follow the catalog's paging rules and retry incomplete objects with fewer fields."
+        ),
+    )
+
+
+class CatalogTools:
+    """Connection-scoped, single-flight cache of Mod-authored descriptions; not agent memory."""
+
+    def __init__(self, bridge: Callable[[], BridgeServer | None], query: ToolHandler):
+        self._bridge = bridge
+        self._query = query
+        self._lock = asyncio.Lock()
+        self._key: tuple[BridgeServer, str] | None = None
+        self._catalog: dict[str, Any] | None = None
+
+    async def load(self) -> ToolSetup:
+        async with self._lock:
+            bridge = self._bridge()
+            epoch = bridge.connection_key if bridge is not None else None
+            if bridge is None or epoch is None:
+                self._key = None
+                self._catalog = None
+                return ToolSetup(
+                    (), "Game query tools are unavailable: no authenticated game connection. Do not invent live state."
+                )
+            key = (bridge, epoch)
+            if key != self._key:
+                self._catalog = None
+                self._key = None
+                try:
+                    observation = await self._query({"operation": "query_catalog", "arguments": {}})
+                    if not isinstance(observation, Observation):
+                        raise ToolExecutionError("invalid_catalog", "The game did not return a query catalog.")
+                    response = observation.value["response"]
+                    if (
+                        self._bridge() is not bridge
+                        or bridge.connection_key != epoch
+                        or response["connection_epoch"] != epoch
+                    ):
+                        raise ToolExecutionError(
+                            "connection_changed", "The game connection changed while loading its schema."
+                        )
+                    payload = response["payload"]
+                    if payload["status"] != "ok":
+                        raise ToolExecutionError(
+                            "catalog_unavailable", str(payload.get("message") or "Query catalog is unavailable.")
+                        )
+                    catalog = payload["data"]
+                    self._validate(catalog)
+                    self._catalog = copy.deepcopy(catalog)
+                    self._key = key
+                except ToolExecutionError as error:
+                    return ToolSetup(
+                        (), "Game query tools are unavailable: " + str(error) + " Do not invent live state."
+                    )
+            assert self._catalog is not None
+
+            # Bind tools to this connection. A reconnect requires a new run/schema, not silent reuse.
+            async def scoped_query(arguments: dict[str, Any]):
+                if self._bridge() is not bridge or bridge.connection_key != epoch:
+                    raise ToolExecutionError(
+                        "connection_changed",
+                        "Game connection changed; start a fresh consultation to reload the schema.",
+                    )
+                result = await self._query(arguments)
+                if isinstance(result, Observation) and result.value["response"]["connection_epoch"] != epoch:
+                    raise ToolExecutionError("connection_changed", "The response belongs to a new connection.")
+                return result
+
+            return make_game_tools(self._catalog, scoped_query)
+
+    @staticmethod
+    def _validate(catalog: object) -> None:
+        if not isinstance(catalog, dict):
+            raise ToolExecutionError("invalid_catalog", "Catalog must be an object.")
+        for key in ("schema_id", "schema", "query_rules"):
+            if not isinstance(catalog.get(key), str) or not catalog[key].strip():
+                raise ToolExecutionError("invalid_catalog", "Catalog is missing " + key + ".")
+        for key in ("template_parameters", "query_parameters"):
+            if not isinstance(catalog.get(key), dict) or catalog[key].get("type") != "object":
+                raise ToolExecutionError("invalid_catalog", "Catalog has an invalid tool parameter schema.")
+        if not isinstance(catalog.get("type_index"), list) or not isinstance(catalog.get("query_roots"), list):
+            raise ToolExecutionError("invalid_catalog", "Update the RimWorld Mod: native schema directory is missing.")
+        if len(json.dumps(catalog, ensure_ascii=False)) > 256_000:
+            raise ToolExecutionError("invalid_catalog", "Catalog exceeds the schema context limit.")

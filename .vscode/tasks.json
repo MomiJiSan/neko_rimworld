@@ -1,0 +1,41 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "N.E.K.O: check neko_rimworld",
+      "type": "shell",
+      "command": "uv run neko-plugin check neko_rimworld",
+      "options": {
+        "cwd": "${config:nekoPlugin.repoRoot}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "N.E.K.O: sync neko_rimworld",
+      "type": "shell",
+      "command": "uv run --with pip neko-plugin sync neko_rimworld --clean",
+      "options": {
+        "cwd": "${config:nekoPlugin.repoRoot}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "N.E.K.O: check -r neko_rimworld",
+      "type": "shell",
+      "command": "uv run neko-plugin check -r neko_rimworld",
+      "options": {
+        "cwd": "${config:nekoPlugin.repoRoot}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "N.E.K.O: build neko_rimworld",
+      "type": "shell",
+      "command": "uv run neko-plugin build neko_rimworld",
+      "options": {
+        "cwd": "${config:nekoPlugin.repoRoot}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

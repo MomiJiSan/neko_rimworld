@@ -1,0 +1,1279 @@
+{
+  "schema": "\"Supported native component members. Derived runtime classes preserve runtimeType and use this base projection.\"\r\ntype CompQuality implements ThingComp {\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  ref: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  runtimeType: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  supportedType: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  supported: Boolean\r\n  \"Native CompQuality.Quality; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  Quality: String\r\n}\r\n\r\n\"Supported native component members. Derived runtime classes preserve runtimeType and use this base projection.\"\r\ntype CompRottable implements ThingComp {\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  ref: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  runtimeType: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  supportedType: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  supported: Boolean\r\n  \"Native CompRottable.RotProgress; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  RotProgress: Float\r\n  \"Native CompRottable.RotProgressPct; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  RotProgressPct: Float\r\n  \"Native CompRottable.Stage; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  Stage: String\r\n  \"Native CompRottable.TicksUntilRotAtCurrentTemp; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  TicksUntilRotAtCurrentTemp: Int\r\n}\r\n\r\n\"Supported native component members. Derived runtime classes preserve runtimeType and use this base projection.\"\r\ntype CompForbiddable implements ThingComp {\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  ref: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  runtimeType: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  supportedType: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  supported: Boolean\r\n  \"Native CompForbiddable.Forbidden; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  Forbidden: Boolean\r\n}\r\n\r\n\"Supported native component members. Derived runtime classes preserve runtimeType and use this base projection.\"\r\ntype CompIngredients implements ThingComp {\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  ref: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  runtimeType: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  supportedType: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  supported: Boolean\r\n  ingredients(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): CompIngredientsIngredientsSlice\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype CompIngredientsIngredientsSlice {\r\n  items: [ThingDef]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Verse.ThingDef definition, not an instance. Native category, content category tree and query groups are distinct.\"\r\ntype ThingDef {\r\n  \"Native ThingDef.defName; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  defName: String\r\n  \"Native ThingDef.label; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  label: String\r\n  \"Native ThingDef.thingClass; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  thingClass: String\r\n  \"Native ThingDef.category; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  category: String\r\n  \"Native ThingDef.stackLimit; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  stackLimit: Int\r\n  \"Native ThingDef.alwaysHaulable; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  alwaysHaulable: Boolean\r\n  \"Native ThingDef.designateHaulable; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  designateHaulable: Boolean\r\n  \"Native ThingDef.EverHaulable; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  EverHaulable: Boolean\r\n  \"Native ThingDef.IsMedicine; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  IsMedicine: Boolean\r\n  \"Native ThingDef.IsWeapon; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  IsWeapon: Boolean\r\n  \"Native ThingDef.IsIngestible; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  IsIngestible: Boolean\r\n  \"Native ThingDef.CountAsResource; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  CountAsResource: Boolean\r\n  thingCategories(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): ThingDefThingCategoriesSlice\r\n  comps(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): ThingDefCompsSlice\r\n  \"Native ThingDef.ingestible reference; only selected child members are read.\"\r\n  ingestible: IngestibleProperties\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype ThingDefThingCategoriesSlice {\r\n  items: [ThingCategoryDef]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Verse.ThingCategoryDef reference and parent; not the ThingCategory enum.\"\r\ntype ThingCategoryDef {\r\n  \"Native ThingCategoryDef.defName; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  defName: String\r\n  \"Native ThingCategoryDef.label; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  label: String\r\n  \"Native ThingCategoryDef.parent reference; only selected child members are read.\"\r\n  parent: ThingCategoryDef\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype ThingDefCompsSlice {\r\n  items: [CompProperties]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Verse.CompProperties metadata. compClass names the component class; runtimeType names its properties class. Unknown fields are not reflected.\"\r\ntype CompProperties {\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  runtimeType: String\r\n  \"Native CompProperties.compClass; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  compClass: String\r\n}\r\n\r\n\"RimWorld.IngestibleProperties definition data; HumanEdible is not a pawn-specific permission.\"\r\ntype IngestibleProperties {\r\n  \"Native IngestibleProperties.foodType; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  foodType: String\r\n  \"Native IngestibleProperties.drugCategory; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  drugCategory: String\r\n  \"Native IngestibleProperties.HumanEdible; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  HumanEdible: Boolean\r\n  \"Native IngestibleProperties.IsMeal; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  IsMeal: Boolean\r\n  \"Native IngestibleProperties.CachedNutrition; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  CachedNutrition: Float\r\n  \"Native IngestibleProperties.maxNumToIngestAtOnce; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  maxNumToIngestAtOnce: Int\r\n}\r\n\r\n\"Unknown component; no custom getters are invoked.\"\r\ntype UnsupportedThingComp implements ThingComp {\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  ref: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  runtimeType: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  supportedType: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  supported: Boolean\r\n}\r\n\r\ntype Query {\r\n  game: Game\r\n  maps(\r\n    \"Exact IDs; at most 50. Empty list matches nothing.\"\r\n    ids: [ID!]): [Map]\r\n  pawn(\r\n    \"Exact pawn ID.\"\r\n    id: ID!): Pawn\r\n  colonists(\r\n    \"Exact IDs; at most 50. Empty list matches nothing.\"\r\n    ids: [ID!],\r\n    \"Restrict to one loaded map.\"\r\n    mapId: ID,\r\n    \"Case-insensitive display-name substring, at most 128 characters.\"\r\n    name: String,\r\n    \"Page size 1..50, default 20.\"\r\n    first: Int = 20,\r\n    \"Cursor from the previous complete page, same load and filters.\"\r\n    after: String): ColonistPage\r\n  colony: Colony\r\n  thing(\r\n    \"Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.\"\r\n    id: String!,\r\n    \"Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.\"\r\n    mapId: String): Thing\r\n  things(\r\n    \"Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.\"\r\n    mapId: String!,\r\n    \"Native query group: HaulableEver, HaulableAlways, HaulableEverOrMinifiable or Everything. This is not pawn-specific usability.\"\r\n    requestGroup: String = \"HaulableEver\",\r\n    \"Exact IDs; at most 50. Empty list matches nothing.\"\r\n    defNames: [ID!],\r\n    \"Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.\"\r\n    name: String,\r\n    \"Default true: exclude fogged map things.\"\r\n    visibleOnly: Boolean = true,\r\n    \"Returned page size 1..50. Identity scanning is separately bounded by the game-thread deadline.\"\r\n    first: Int = 20,\r\n    \"Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.\"\r\n    after: String): ThingPage\r\n  thing_def(\r\n    \"Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.\"\r\n    defName: String!): ThingDef\r\n  thing_defs(\r\n    \"Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.\"\r\n    name: String,\r\n    \"Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.\"\r\n    categoryDefName: String,\r\n    \"Returned page size 1..50. Identity scanning is separately bounded by the game-thread deadline.\"\r\n    first: Int = 20,\r\n    \"Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.\"\r\n    after: String): ThingDefPage\r\n  map(\r\n    \"Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.\"\r\n    id: String!): NativeMap\r\n}\r\n\r\n\"Active game's directly observed state.\"\r\ntype Game {\r\n  \"Whether the game is paused.\"\r\n  paused: Boolean\r\n  \"Current viewed map; null if none.\"\r\n  currentMapId: ID\r\n}\r\n\r\n\"An active, loaded map.\"\r\ntype Map {\r\n  \"Stable map ID within the save.\"\r\n  id: ID!\r\n  \"Display name; not a unique identifier.\"\r\n  name: String\r\n  \"Whether this is the currently viewed map.\"\r\n  isCurrent: Boolean\r\n  \"Game's player-home map flag.\"\r\n  isPlayerHome: Boolean\r\n  \"Number of spawned free colonists; excludes caravans/prisoners.\"\r\n  colonistCount: Int\r\n  \"Game-provided active visible hostile threat signal, not an overall safety assessment.\"\r\n  hasVisibleThreat: Boolean\r\n}\r\n\r\n\"Currently addressable spawned free colonist on a loaded map. Stable identity joins selected nested sections.\"\r\ntype Pawn {\r\n  id: ID!\r\n  name: String\r\n  mapId: String\r\n  status: Status\r\n  mood: Mood\r\n  health: Health\r\n  equipment: Pawn_EquipmentTracker\r\n  apparel: Pawn_ApparelTracker\r\n  inventory: Pawn_InventoryTracker\r\n  carryTracker: Pawn_CarryTracker\r\n  profile: Profile\r\n  statDefinitions(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0,\r\n    \"Case-insensitive substring of definition name or label. Does not compute stat values.\"\r\n    search: String): PawnStatDefinitionsSlice\r\n  stats(\r\n    \"Slice size 1..16.\"\r\n    first: Int = 16,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0,\r\n    \"Explicit StatDef names, 1..16. No automatic relevance selection.\"\r\n    defNames: [String!]!): PawnStatsSlice\r\n}\r\n\r\n\"Current flags, job targets, position and needs. This is observation, not a risk score.\"\r\ntype Status {\r\n  downed: Boolean\r\n  drafted: Boolean\r\n  dead: Boolean\r\n  inMentalState: Boolean\r\n  mentalState: String\r\n  position: Position\r\n  currentJob: Job\r\n  needs(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): StatusNeedsSlice\r\n}\r\n\r\ntype Position {\r\n  x: Int\r\n  y: Int\r\n  z: Int\r\n  mapId: String\r\n}\r\n\r\ntype Job {\r\n  id: String\r\n  defName: String\r\n  report: String\r\n  targets(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): JobTargetsSlice\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype JobTargetsSlice {\r\n  items: [JobTarget]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"A target can be a Thing or a cell; fields not applicable to that kind are null.\"\r\ntype JobTarget {\r\n  slot: String\r\n  kind: String\r\n  thingId: String\r\n  mapId: String\r\n  x: Int\r\n  y: Int\r\n  z: Int\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype StatusNeedsSlice {\r\n  items: [Need]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Actual need record: level is raw, maxLevel is its maximum, percentage is 0..1. Food is not stock.\"\r\ntype Need {\r\n  defName: String\r\n  label: String\r\n  level: Float\r\n  maxLevel: Float\r\n  percentage: Float\r\n}\r\n\r\n\"Mood tracker; null if this pawn does not have one.\"\r\ntype Mood {\r\n  \"Current mood need fraction, not the instantaneous target.\"\r\n  level: Float\r\n  \"Game CurInstantLevelPercentage: current instantaneous/target mood from thoughts, not a historical observation.\"\r\n  instant: Float\r\n  breakThresholds: Thresholds\r\n  thoughtGroups(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0,\r\n    \"Default true: UI-visible facts. Set false explicitly to inspect internal records.\"\r\n    visibleOnly: Boolean = true): MoodThoughtGroupsSlice\r\n  memories(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0,\r\n    \"Default true: UI-visible facts. Set false explicitly to inspect internal records.\"\r\n    visibleOnly: Boolean = true): MoodMemoriesSlice\r\n}\r\n\r\n\"Game-calculated mental break thresholds, not plugin risk classifications.\"\r\ntype Thresholds {\r\n  minor: Float\r\n  major: Float\r\n  extreme: Float\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype MoodThoughtGroupsSlice {\r\n  items: [ThoughtGroup]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Current effective mood grouping, with the game-calculated group contribution; not the sum of every memory.\"\r\ntype ThoughtGroup {\r\n  defName: String\r\n  label: String\r\n  stageIndex: Int\r\n  \"Effective mood offset for this group as computed by the game. Do not sum raw memory offsets as a substitute.\"\r\n  moodOffset: Float\r\n  memberCount: Int\r\n  members(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): ThoughtGroupMembersSlice\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype ThoughtGroupMembersSlice {\r\n  items: [Thought]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Thought instance. ref is valid within this observation only, not across queries or saves.\"\r\ntype Thought {\r\n  ref: String\r\n  referenceScope: String\r\n  defName: String\r\n  label: String\r\n  description: String\r\n  stageIndex: Int\r\n  \"Individual thought offset; grouping/stacking can change its effective contribution.\"\r\n  moodOffset: Float\r\n  kind: String\r\n  otherPawnId: String\r\n  \"Memory age in game ticks; null for non-memory thoughts.\"\r\n  ageTicks: Int\r\n  \"Game memory duration in ticks; null for non-memory thoughts.\"\r\n  durationTicks: Int\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype MoodMemoriesSlice {\r\n  items: [Thought]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Hediffs include injuries, diseases, implants and other health conditions.\"\r\ntype Health {\r\n  summary: HealthSummary\r\n  capacities(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): HealthCapacitiesSlice\r\n  conditions(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0,\r\n    \"Default true: UI-visible facts. Set false explicitly to inspect internal records.\"\r\n    visibleOnly: Boolean = true): HealthConditionsSlice\r\n  bodyParts(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): HealthBodyPartsSlice\r\n}\r\n\r\ntype HealthSummary {\r\n  healthPercent: Float\r\n  \"Game PainTotal value, distinct from injury severity and health percentage.\"\r\n  pain: Float\r\n  \"Raw game BleedRateTotal, not a health percentage or a computed survival-time estimate.\"\r\n  bleedRate: Float\r\n  downed: Boolean\r\n  inPainShock: Boolean\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype HealthCapacitiesSlice {\r\n  items: [Capacity]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\ntype Capacity {\r\n  defName: String\r\n  label: String\r\n  level: Float\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype HealthConditionsSlice {\r\n  items: [Condition]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\ntype Condition {\r\n  id: String\r\n  defName: String\r\n  label: String\r\n  description: String\r\n  \"Raw Hediff severity; meaning/range depends on its definition. Not a universal 0..1 health fraction.\"\r\n  severity: Float\r\n  severityLabel: String\r\n  visible: Boolean\r\n  part: BodyPart\r\n  tending: Tending\r\n  immunity: Immunity\r\n}\r\n\r\n\"Part key is scoped to the owner pawn and body definition/index; label/defName alone is not a unique part.\"\r\ntype BodyPart {\r\n  key: String\r\n  defName: String\r\n  label: String\r\n  index: Int\r\n  parentKey: String\r\n  health: Float\r\n  maxHealth: Float\r\n}\r\n\r\n\"Only present for conditions with a tending component.\"\r\ntype Tending {\r\n  isTended: Boolean\r\n  quality: Float\r\n  \"Remaining tending duration in game ticks; null when not tended.\"\r\n  ticksLeft: Int\r\n}\r\n\r\n\"Only present for conditions with an immunity component.\"\r\ntype Immunity {\r\n  level: Float\r\n  fullyImmune: Boolean\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype HealthBodyPartsSlice {\r\n  items: [BodyPart]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Verse.Pawn_EquipmentTracker; equipped things, not inventory or hauling.\"\r\ntype Pawn_EquipmentTracker {\r\n  \"Native Pawn_EquipmentTracker.Primary reference; only selected child members are read.\"\r\n  Primary: ThingReference\r\n  AllEquipmentListForReading(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): Pawn_EquipmentTrackerAllEquipmentListForReadingSlice\r\n}\r\n\r\n\"Detached Thing identity. Resolve id through thing; no recursive object expansion.\"\r\ntype ThingReference {\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  id: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  runtimeType: String\r\n  \"Native ThingReference.def reference; only selected child members are read.\"\r\n  def: ThingDef\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype Pawn_EquipmentTrackerAllEquipmentListForReadingSlice {\r\n  items: [Thing]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Verse.Thing native members. id/runtimeType are transport metadata; subtype members are nullable when inapplicable. References preserve identity; not a claim of ownership or usability.\"\r\ntype Thing {\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  id: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  runtimeType: String\r\n  \"Native Thing.Label; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  Label: String\r\n  \"Native Thing.stackCount; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  stackCount: Int\r\n  \"Native Thing.HitPoints; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  HitPoints: Int\r\n  \"Native Thing.MaxHitPoints; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  MaxHitPoints: Int\r\n  \"Native Thing.Spawned; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  Spawned: Boolean\r\n  \"Native Thing.Destroyed; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  Destroyed: Boolean\r\n  \"Native Thing.IngestibleNow; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  IngestibleNow: Boolean\r\n  \"Native Thing.def reference; only selected child members are read.\"\r\n  def: ThingDef\r\n  \"Native Thing.Stuff reference; only selected child members are read.\"\r\n  Stuff: ThingDef\r\n  \"Native Thing.Map reference; only selected child members are read.\"\r\n  Map: NativeMap\r\n  \"Native Thing.MapHeld reference; only selected child members are read.\"\r\n  MapHeld: NativeMap\r\n  \"Native Thing.Position reference; only selected child members are read.\"\r\n  Position: IntVec3\r\n  \"Native Thing.PositionHeld reference; only selected child members are read.\"\r\n  PositionHeld: IntVec3\r\n  \"Native Thing.holdingOwner reference; only selected child members are read.\"\r\n  holdingOwner: ThingOwner\r\n  \"Native Thing.ParentHolder reference; only selected child members are read.\"\r\n  ParentHolder: ThingHolder\r\n  \"RimWorld.MinifiedThing.InnerThing; null for other runtime types. Outer and inner identity are not interchangeable.\"\r\n  InnerThing: ThingReference\r\n  \"Verse.Corpse.InnerPawn; reference only, null for other runtime types.\"\r\n  InnerPawn: ThingReference\r\n  \"IThingHolder.GetDirectlyHeldThings for supported holders. Unsupported holders produce an issue, not an empty container.\"\r\n  GetDirectlyHeldThings: ThingOwner\r\n  stats(\r\n    \"Slice size 1..16.\"\r\n    first: Int = 16,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0,\r\n    \"Explicit StatDef names; no automatic relevance selection.\"\r\n    defNames: [String!]!): ThingStatsSlice\r\n  AllComps(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): ThingAllCompsSlice\r\n}\r\n\r\n\"Native map reference with explicitly selected storage and resource-counter members.\"\r\ntype NativeMap {\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  id: String\r\n  \"Native NativeMap.haulDestinationManager reference; only selected child members are read.\"\r\n  haulDestinationManager: HaulDestinationManager\r\n  \"Native NativeMap.resourceCounter reference; only selected child members are read.\"\r\n  resourceCounter: ResourceCounter\r\n}\r\n\r\n\"Native map storage groups, not arbitrary ThingOwner containers.\"\r\ntype HaulDestinationManager {\r\n  AllGroupsListForReading(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): HaulDestinationManagerAllGroupsListForReadingSlice\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype HaulDestinationManagerAllGroupsListForReadingSlice {\r\n  items: [SlotGroup]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Native SlotGroup: HeldThings reads storage cells; these things remain map things. ref is observation-scoped.\"\r\ntype SlotGroup {\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  ref: String\r\n  \"Native SlotGroup.GroupingLabel; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  GroupingLabel: String\r\n  \"Native SlotGroup.HeldThingsCount; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  HeldThingsCount: Int\r\n  \"Native SlotGroup.parent reference; only selected child members are read.\"\r\n  parent: StorageParent\r\n  CellsList(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): SlotGroupCellsListSlice\r\n  HeldThings(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): SlotGroupHeldThingsSlice\r\n  \"Native SlotGroup.Settings reference; only selected child members are read.\"\r\n  Settings: StorageSettings\r\n}\r\n\r\n\"Native ISlotGroupParent reference (zone or storage building); not necessarily an IThingHolder.\"\r\ntype StorageParent {\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  ref: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  runtimeType: String\r\n  \"Native StorageParent.thingId; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  thingId: String\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype SlotGroupCellsListSlice {\r\n  items: [IntVec3]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Verse.IntVec3 integer coordinates; map identity is read separately.\"\r\ntype IntVec3 {\r\n  \"Native IntVec3.x; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  x: Int\r\n  \"Native IntVec3.y; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  y: Int\r\n  \"Native IntVec3.z; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  z: Int\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype SlotGroupHeldThingsSlice {\r\n  items: [Thing]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Native settings: AllowedToAccept and filter are acceptance policy, not actual contents.\"\r\ntype StorageSettings {\r\n  \"Native StorageSettings.Priority; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  Priority: String\r\n  \"Native StorageSettings.filter reference; only selected child members are read.\"\r\n  filter: ThingFilter\r\n}\r\n\r\n\"Native ThingFilter; AllowedThingDefs enumerates definition acceptance only, not instance quality/HP acceptance.\"\r\ntype ThingFilter {\r\n  AllowedThingDefs(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): ThingFilterAllowedThingDefsSlice\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype ThingFilterAllowedThingDefsSlice {\r\n  items: [ThingDef]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Game's cached stored-resource counts; not all map things or held inventory. Game filters and update cadence apply. Read never forces an update.\"\r\ntype ResourceCounter {\r\n  AllCountedAmounts(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): ResourceCounterAllCountedAmountsSlice\r\n  \"Native ResourceCounter.TotalHumanEdibleNutrition; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  TotalHumanEdibleNutrition: Float\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype ResourceCounterAllCountedAmountsSlice {\r\n  items: [ResourceCountEntry]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Dictionary entry wrapper from ResourceCounter.AllCountedAmounts; key and value retain native meaning.\"\r\ntype ResourceCountEntry {\r\n  \"Native ResourceCountEntry.key reference; only selected child members are read.\"\r\n  key: ThingDef\r\n  \"Native ResourceCountEntry.value; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  value: Int\r\n}\r\n\r\n\"Verse.ThingOwner native holder and contents. items is a bounded enumeration wrapper.\"\r\ntype ThingOwner {\r\n  \"Native ThingOwner.Owner reference; only selected child members are read.\"\r\n  Owner: ThingHolder\r\n  \"Native ThingOwner.Count; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  Count: Int\r\n  \"Native ThingOwner.TotalStackCount; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  TotalStackCount: Int\r\n  items(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): ThingOwnerItemsSlice\r\n}\r\n\r\n\"IThingHolder reference. ref is observation-scoped; runtimeType does not imply Pawn. Thing id is present only for Thing holders.\"\r\ntype ThingHolder {\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  ref: String\r\n  \"Transport metadata; not a native gameplay member.\"\r\n  runtimeType: String\r\n  \"Native ThingHolder.thingId; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  thingId: String\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype ThingOwnerItemsSlice {\r\n  items: [Thing]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype ThingStatsSlice {\r\n  items: [NativeStat]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Explicit game-computed StatDef value for a Thing; valueText is game formatted. This is not a raw instance field.\"\r\ntype NativeStat {\r\n  \"Native NativeStat.defName; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  defName: String\r\n  \"Native NativeStat.label; selected getter only. Null without issue means not applicable; issue means failed/unavailable.\"\r\n  label: String\r\n  \"Derived read via Thing.GetStatValue(selected StatDef); not a native stored scalar.\"\r\n  value: Float\r\n  \"Derived display via StatDef.ValueToString for the same requested stat value.\"\r\n  valueText: String\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype ThingAllCompsSlice {\r\n  items: [ThingComp]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"One actual component instance. runtimeType preserves Mod subtype, supportedType names the supported base projection. ref is scoped to this observation. UnsupportedThingComp reports discovery only.\"\r\ninterface ThingComp {\r\n  ref: String\r\n  runtimeType: String\r\n  supportedType: String\r\n  supported: Boolean\r\n}\r\n\r\n\"RimWorld.Pawn_ApparelTracker; worn apparel.\"\r\ntype Pawn_ApparelTracker {\r\n  WornApparel(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): Pawn_ApparelTrackerWornApparelSlice\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype Pawn_ApparelTrackerWornApparelSlice {\r\n  items: [Thing]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Verse.Pawn_InventoryTracker; carried inventory, not the active hauling container.\"\r\ntype Pawn_InventoryTracker {\r\n  \"Native Pawn_InventoryTracker.innerContainer reference; only selected child members are read.\"\r\n  innerContainer: ThingOwner\r\n}\r\n\r\n\"Verse.Pawn_CarryTracker; active carried thing and its container.\"\r\ntype Pawn_CarryTracker {\r\n  \"Native Pawn_CarryTracker.innerContainer reference; only selected child members are read.\"\r\n  innerContainer: ThingOwner\r\n  \"Native Pawn_CarryTracker.CarriedThing reference; only selected child members are read.\"\r\n  CarriedThing: Thing\r\n}\r\n\r\ntype Profile {\r\n  gender: String\r\n  raceDefName: String\r\n  kindDefName: String\r\n  age: Age\r\n  backstories(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): ProfileBackstoriesSlice\r\n  traits(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): ProfileTraitsSlice\r\n  skills(\r\n    \"Slice size 1..100.\"\r\n    first: Int = 20,\r\n    \"Start index in this observation; 0..8192.\"\r\n    offset: Int = 0): ProfileSkillsSlice\r\n}\r\n\r\ntype Age {\r\n  biologicalYears: Float\r\n  chronologicalYears: Float\r\n  lifeStage: String\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype ProfileBackstoriesSlice {\r\n  items: [Backstory]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\ntype Backstory {\r\n  slot: String\r\n  defName: String\r\n  title: String\r\n  description: String\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype ProfileTraitsSlice {\r\n  items: [Trait]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Traits preserve degree and suppression; suppressed traits are not silently treated as active.\"\r\ntype Trait {\r\n  defName: String\r\n  label: String\r\n  description: String\r\n  degree: Int\r\n  suppressed: Boolean\r\n  sourceGeneDefName: String\r\n  suppressedByGeneDefName: String\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype ProfileSkillsSlice {\r\n  items: [Skill]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Learned skill, passion and aptitude. Not a calculated StatDef value or a body capacity.\"\r\ntype Skill {\r\n  defName: String\r\n  label: String\r\n  level: Int\r\n  passion: String\r\n  \"Game skill Aptitude, distinct from learned level, XP and passion.\"\r\n  aptitude: Int\r\n  totallyDisabled: Boolean\r\n  permanentlyDisabled: Boolean\r\n  xpSinceLastLevel: Float\r\n  xpRequiredForLevelUp: Float\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype PawnStatDefinitionsSlice {\r\n  items: [StatDefinition]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Available StatDef metadata; looking up a definition does not calculate any pawn stat.\"\r\ntype StatDefinition {\r\n  defName: String\r\n  label: String\r\n  description: String\r\n}\r\n\r\n\"A bounded slice of this query's list. Offset continuation is a fresh observation, not a frozen snapshot. Null means unavailable/not applicable, empty items with total=0 means observed empty.\"\r\ntype PawnStatsSlice {\r\n  items: [Stat]\r\n  total: Int\r\n  offset: Int\r\n  returned: Int\r\n  hasMore: Boolean\r\n  nextOffset: Int\r\n  complete: Boolean\r\n}\r\n\r\n\"Game-calculated StatDef value and formatted valueText. Requested explicitly by defNames, never all stats.\"\r\ntype Stat {\r\n  defName: String\r\n  label: String\r\n  value: Float\r\n  \"Game-formatted stat value including its display unit; use with raw value rather than guessing percent units.\"\r\n  valueText: String\r\n}\r\n\r\ntype ColonistPage {\r\n  nodes: [Pawn]\r\n  pageInfo: PageInfo\r\n}\r\n\r\n\"A cursor applies to the same load and filters; partial pages return no advancing cursor.\"\r\ntype PageInfo {\r\n  hasNextPage: Boolean!\r\n  endCursor: String\r\n}\r\n\r\n\"Game and loaded-map overview.\"\r\ntype Colony {\r\n  game: Game\r\n  maps: [Map]\r\n}\r\n\r\n\"Bounded collection wrapper. No global total is implied; field errors disable continuation.\"\r\ntype ThingPage {\r\n  nodes: [Thing]\r\n  pageInfo: ThingPageInfo\r\n}\r\n\r\n\"Load/filter-bound keyset cursor. Different pages are fresh observations, not one snapshot.\"\r\ntype ThingPageInfo {\r\n  hasNextPage: Boolean\r\n  endCursor: String\r\n}\r\n\r\n\"Bounded collection wrapper. No global total is implied; field errors disable continuation.\"\r\ntype ThingDefPage {\r\n  nodes: [ThingDef]\r\n  pageInfo: ThingDefPageInfo\r\n}\r\n\r\n\"Load/filter-bound keyset cursor. Different pages are fresh observations, not one snapshot.\"\r\ntype ThingDefPageInfo {\r\n  hasNextPage: Boolean\r\n  endCursor: String\r\n}\r\n",
+  "type_index": [
+    "Age",
+    "Backstory",
+    "BodyPart",
+    "Boolean",
+    "Capacity",
+    "ColonistPage",
+    "Colony",
+    "CompForbiddable",
+    "CompIngredients",
+    "CompIngredientsIngredientsSlice",
+    "CompProperties",
+    "CompQuality",
+    "CompRottable",
+    "Condition",
+    "Float",
+    "Game",
+    "HaulDestinationManager",
+    "HaulDestinationManagerAllGroupsListForReadingSlice",
+    "Health",
+    "HealthBodyPartsSlice",
+    "HealthCapacitiesSlice",
+    "HealthConditionsSlice",
+    "HealthSummary",
+    "ID",
+    "Immunity",
+    "IngestibleProperties",
+    "Int",
+    "IntVec3",
+    "Job",
+    "JobTarget",
+    "JobTargetsSlice",
+    "Map",
+    "Mood",
+    "MoodMemoriesSlice",
+    "MoodThoughtGroupsSlice",
+    "NativeMap",
+    "NativeStat",
+    "Need",
+    "PageInfo",
+    "Pawn",
+    "Pawn_ApparelTracker",
+    "Pawn_ApparelTrackerWornApparelSlice",
+    "Pawn_CarryTracker",
+    "Pawn_EquipmentTracker",
+    "Pawn_EquipmentTrackerAllEquipmentListForReadingSlice",
+    "Pawn_InventoryTracker",
+    "PawnStatDefinitionsSlice",
+    "PawnStatsSlice",
+    "Position",
+    "Profile",
+    "ProfileBackstoriesSlice",
+    "ProfileSkillsSlice",
+    "ProfileTraitsSlice",
+    "Query",
+    "ResourceCountEntry",
+    "ResourceCounter",
+    "ResourceCounterAllCountedAmountsSlice",
+    "Skill",
+    "SlotGroup",
+    "SlotGroupCellsListSlice",
+    "SlotGroupHeldThingsSlice",
+    "Stat",
+    "StatDefinition",
+    "Status",
+    "StatusNeedsSlice",
+    "StorageParent",
+    "StorageSettings",
+    "String",
+    "Tending",
+    "Thing",
+    "ThingAllCompsSlice",
+    "ThingCategoryDef",
+    "ThingComp",
+    "ThingDef",
+    "ThingDefCompsSlice",
+    "ThingDefPage",
+    "ThingDefPageInfo",
+    "ThingDefThingCategoriesSlice",
+    "ThingFilter",
+    "ThingFilterAllowedThingDefsSlice",
+    "ThingHolder",
+    "ThingOwner",
+    "ThingOwnerItemsSlice",
+    "ThingPage",
+    "ThingPageInfo",
+    "ThingReference",
+    "ThingStatsSlice",
+    "Thought",
+    "ThoughtGroup",
+    "ThoughtGroupMembersSlice",
+    "Thresholds",
+    "Trait",
+    "UnsupportedThingComp"
+  ],
+  "query_roots": [
+    {
+      "name": "game",
+      "type": "Game",
+      "arguments": []
+    },
+    {
+      "name": "maps",
+      "type": "[Map]",
+      "arguments": [
+        {
+          "name": "ids",
+          "type": "[ID!]",
+          "description": "Exact IDs; at most 50. Empty list matches nothing.",
+          "default": null,
+          "limits": {
+            "maxItems": 50
+          }
+        }
+      ]
+    },
+    {
+      "name": "pawn",
+      "type": "Pawn",
+      "arguments": [
+        {
+          "name": "id",
+          "type": "ID!",
+          "description": "Exact pawn ID.",
+          "default": null,
+          "limits": {}
+        }
+      ]
+    },
+    {
+      "name": "colonists",
+      "type": "ColonistPage",
+      "arguments": [
+        {
+          "name": "ids",
+          "type": "[ID!]",
+          "description": "Exact IDs; at most 50. Empty list matches nothing.",
+          "default": null,
+          "limits": {
+            "maxItems": 50
+          }
+        },
+        {
+          "name": "mapId",
+          "type": "ID",
+          "description": "Restrict to one loaded map.",
+          "default": null,
+          "limits": {}
+        },
+        {
+          "name": "name",
+          "type": "String",
+          "description": "Case-insensitive display-name substring, at most 128 characters.",
+          "default": null,
+          "limits": {
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "first",
+          "type": "Int",
+          "description": "Page size 1..50, default 20.",
+          "default": 20,
+          "limits": {
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        {
+          "name": "after",
+          "type": "String",
+          "description": "Cursor from the previous complete page, same load and filters.",
+          "default": null,
+          "limits": {
+            "maxLength": 1024
+          }
+        }
+      ]
+    },
+    {
+      "name": "colony",
+      "type": "Colony",
+      "arguments": []
+    },
+    {
+      "name": "thing",
+      "type": "Thing",
+      "arguments": [
+        {
+          "name": "id",
+          "type": "String!",
+          "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+          "default": null,
+          "limits": {
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "mapId",
+          "type": "String",
+          "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+          "default": null,
+          "limits": {
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      ]
+    },
+    {
+      "name": "things",
+      "type": "ThingPage",
+      "arguments": [
+        {
+          "name": "mapId",
+          "type": "String!",
+          "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+          "default": null,
+          "limits": {
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "requestGroup",
+          "type": "String",
+          "description": "Native query group: HaulableEver, HaulableAlways, HaulableEverOrMinifiable or Everything. This is not pawn-specific usability.",
+          "default": "HaulableEver",
+          "limits": {
+            "enum": [
+              "HaulableEver",
+              "HaulableAlways",
+              "HaulableEverOrMinifiable",
+              "Everything"
+            ]
+          }
+        },
+        {
+          "name": "defNames",
+          "type": "[ID!]",
+          "description": "Exact IDs; at most 50. Empty list matches nothing.",
+          "default": null,
+          "limits": {
+            "maxItems": 50
+          }
+        },
+        {
+          "name": "name",
+          "type": "String",
+          "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+          "default": null,
+          "limits": {
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "visibleOnly",
+          "type": "Boolean",
+          "description": "Default true: exclude fogged map things.",
+          "default": true,
+          "limits": {}
+        },
+        {
+          "name": "first",
+          "type": "Int",
+          "description": "Returned page size 1..50. Identity scanning is separately bounded by the game-thread deadline.",
+          "default": 20,
+          "limits": {
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        {
+          "name": "after",
+          "type": "String",
+          "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+          "default": null,
+          "limits": {
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      ]
+    },
+    {
+      "name": "thing_def",
+      "type": "ThingDef",
+      "arguments": [
+        {
+          "name": "defName",
+          "type": "String!",
+          "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+          "default": null,
+          "limits": {
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      ]
+    },
+    {
+      "name": "thing_defs",
+      "type": "ThingDefPage",
+      "arguments": [
+        {
+          "name": "name",
+          "type": "String",
+          "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+          "default": null,
+          "limits": {
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "categoryDefName",
+          "type": "String",
+          "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+          "default": null,
+          "limits": {
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "first",
+          "type": "Int",
+          "description": "Returned page size 1..50. Identity scanning is separately bounded by the game-thread deadline.",
+          "default": 20,
+          "limits": {
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        {
+          "name": "after",
+          "type": "String",
+          "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+          "default": null,
+          "limits": {
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      ]
+    },
+    {
+      "name": "map",
+      "type": "NativeMap",
+      "arguments": [
+        {
+          "name": "id",
+          "type": "String!",
+          "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+          "default": null,
+          "limits": {
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "target": "pawn",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "pawn"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "Exact pawn ID."
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "sections": [
+        {
+          "name": "status",
+          "description": "Current detailed flags, location, job targets and needs with mood/health overview. Need levels are not stock quantities.",
+          "returns": "status { downed drafted dead inMentalState mentalState position { x y z mapId } currentJob { id defName report targets(first:3) { items { slot kind thingId mapId x y z } total offset returned hasMore nextOffset complete } } needs(first:20) { items { defName label level maxLevel percentage } total offset returned hasMore nextOffset complete } } mood { level } health { summary { healthPercent pain } }"
+        },
+        {
+          "name": "mood",
+          "description": "Current/instant mood, game break thresholds and effective thought groups. Raw memories/group members are available through exact queries. Groups use the game's contribution, not a sum of memories.",
+          "returns": "mood { level instant breakThresholds { minor major extreme } thoughtGroups(first:20) { items { defName label stageIndex moodOffset memberCount } total offset returned hasMore nextOffset complete } }"
+        },
+        {
+          "name": "health",
+          "description": "Health summary, body capacities and UI-visible conditions with body-part references and optional tending/immunity. Conditions include implants, not only wounds. Full body tree via exact query.",
+          "returns": "health { summary { healthPercent pain bleedRate downed inPainShock } capacities(first:20) { items { defName label level } total offset returned hasMore nextOffset complete } conditions(first:20) { items { id defName label severity severityLabel visible part { key defName label index parentKey } tending { isTended quality ticksLeft } immunity { level fullyImmune } } total offset returned hasMore nextOffset complete } }"
+        },
+        {
+          "name": "equipment",
+          "description": "Equipped weapons, worn apparel and carried inventory, with item identity and basic item properties. Quality null means not applicable.",
+          "returns": "equipment { Primary { id } AllEquipmentListForReading(first:5) { items { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } total offset returned hasMore nextOffset complete } } apparel { WornApparel(first:10) { items { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } total offset returned hasMore nextOffset complete } } inventory { innerContainer { items(first:10) { items { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } total offset returned hasMore nextOffset complete } } } carryTracker { CarriedThing { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } }"
+        },
+        {
+          "name": "profile",
+          "description": "Age, background, traits including suppression, and learned skills. Calculated stats are separate: discover statDefinitions then request stats(defNames).",
+          "returns": "profile { gender raceDefName kindDefName age { biologicalYears chronologicalYears lifeStage } backstories(first:2) { items { slot defName title description } total offset returned hasMore nextOffset complete } traits(first:20) { items { defName label description degree suppressed sourceGeneDefName suppressedByGeneDefName } total offset returned hasMore nextOffset complete } skills(first:32) { items { defName label level passion aptitude totallyDisabled permanentlyDisabled } total offset returned hasMore nextOffset complete } }"
+        }
+      ]
+    },
+    {
+      "target": "colony",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "colony"
+            ]
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "sections": [
+        {
+          "name": "overview",
+          "description": "Current game and loaded-map overview, not a complete colony safety assessment.",
+          "returns": "game { paused currentMapId } maps { id name isCurrent isPlayerHome colonistCount hasVisibleThreat }"
+        }
+      ]
+    },
+    {
+      "target": "colonists",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "colonists"
+            ]
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exact IDs; at most 50. Empty list matches nothing.",
+            "maxItems": 50
+          },
+          "map_id": {
+            "type": "string",
+            "description": "Restrict to one loaded map."
+          },
+          "name": {
+            "type": "string",
+            "description": "Case-insensitive display-name substring, at most 128 characters.",
+            "maxLength": 128
+          },
+          "first": {
+            "type": "integer",
+            "description": "Page size 1..50, default 20.",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 50
+          },
+          "after": {
+            "type": "string",
+            "description": "Cursor from the previous complete page, same load and filters.",
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "sections": [
+        {
+          "name": "summary",
+          "description": "Find spawned free colonists on loaded maps and inspect a compact summary before selecting IDs for details. Name substring may match multiple people.",
+          "returns": "nodes { id name mapId status { downed drafted inMentalState mentalState } mood { level } health { summary { healthPercent } } } pageInfo { hasNextPage endCursor }"
+        }
+      ]
+    },
+    {
+      "target": "thing",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "thing"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "map_id": {
+            "type": "string",
+            "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "sections": [
+        {
+          "name": "basic",
+          "description": "Native Thing identity, def reference, stackCount, Stuff and HP; not a flattened Item DTO.",
+          "returns": "id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints"
+        },
+        {
+          "name": "placement",
+          "description": "Native Spawned/Map/MapHeld/Position/PositionHeld and holder references. Storage position is not container ownership.",
+          "returns": "Spawned Map { id } MapHeld { id } Position { x y z } PositionHeld { x y z } holdingOwner { Owner { ref runtimeType thingId } } ParentHolder { ref runtimeType thingId }"
+        },
+        {
+          "name": "components",
+          "description": "Actual component instances, runtime type and supported native base members. Unknown components remain visible as unsupported metadata.",
+          "returns": "AllComps(first:10) { items { ref runtimeType supported supportedType ... on CompQuality { Quality } ... on CompRottable { RotProgress Stage TicksUntilRotAtCurrentTemp } ... on CompForbiddable { Forbidden } ... on CompIngredients { ingredients(first:10) { items { defName label } total offset returned hasMore nextOffset complete } } } total offset returned hasMore nextOffset complete }"
+        },
+        {
+          "name": "contents",
+          "description": "Direct IThingHolder contents and special MinifiedThing/Corpse references; no recursive full expansion.",
+          "returns": "InnerThing { id runtimeType def { defName } } InnerPawn { id runtimeType } GetDirectlyHeldThings { Owner { ref runtimeType } items(first:10) { items { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } total offset returned hasMore nextOffset complete } }"
+        }
+      ]
+    },
+    {
+      "target": "things",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "things"
+            ]
+          },
+          "map_id": {
+            "type": "string",
+            "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "request_group": {
+            "type": "string",
+            "description": "Native query group: HaulableEver, HaulableAlways, HaulableEverOrMinifiable or Everything. This is not pawn-specific usability.",
+            "default": "HaulableEver",
+            "enum": [
+              "HaulableEver",
+              "HaulableAlways",
+              "HaulableEverOrMinifiable",
+              "Everything"
+            ]
+          },
+          "def_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exact IDs; at most 50. Empty list matches nothing.",
+            "maxItems": 50
+          },
+          "name": {
+            "type": "string",
+            "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "visible_only": {
+            "type": "boolean",
+            "description": "Default true: exclude fogged map things.",
+            "default": true
+          },
+          "first": {
+            "type": "integer",
+            "description": "Returned page size 1..50. Identity scanning is separately bounded by the game-thread deadline.",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 50
+          },
+          "after": {
+            "type": "string",
+            "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "type",
+          "map_id"
+        ],
+        "additionalProperties": false
+      },
+      "sections": [
+        {
+          "name": "basic",
+          "description": "Spawned map things from a native query group, optional definitions/name and cursor. Excludes held contents. No promise of current pawn-specific hauling eligibility.",
+          "returns": "nodes { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } pageInfo { hasNextPage endCursor }"
+        },
+        {
+          "name": "placement",
+          "description": "Map thing placement and holder references, with per-page continuation.",
+          "returns": "nodes { id Spawned Map { id } MapHeld { id } Position { x y z } PositionHeld { x y z } holdingOwner { Owner { ref runtimeType thingId } } ParentHolder { ref runtimeType thingId } } pageInfo { hasNextPage endCursor }"
+        },
+        {
+          "name": "components",
+          "description": "Bounded component data for the selected page; narrow first for expensive combinations.",
+          "returns": "nodes { id AllComps(first:10) { items { ref runtimeType supported supportedType ... on CompQuality { Quality } ... on CompRottable { RotProgress Stage TicksUntilRotAtCurrentTemp } ... on CompForbiddable { Forbidden } ... on CompIngredients { ingredients(first:10) { items { defName label } total offset returned hasMore nextOffset complete } } } total offset returned hasMore nextOffset complete } } pageInfo { hasNextPage endCursor }"
+        }
+      ]
+    },
+    {
+      "target": "thing_def",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "thing_def"
+            ]
+          },
+          "def_name": {
+            "type": "string",
+            "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "type",
+          "def_name"
+        ],
+        "additionalProperties": false
+      },
+      "sections": [
+        {
+          "name": "basic",
+          "description": "Native ThingDef identity, runtime class, category and stack limit.",
+          "returns": "defName label thingClass category stackLimit"
+        },
+        {
+          "name": "hauling",
+          "description": "Definition-level native hauling properties, not current pawn eligibility.",
+          "returns": "defName alwaysHaulable designateHaulable EverHaulable CountAsResource"
+        },
+        {
+          "name": "ingestible",
+          "description": "Native ingestible definition data; null if absent, not a pawn-specific food permission.",
+          "returns": "defName ingestible { foodType drugCategory HumanEdible IsMeal CachedNutrition maxNumToIngestAtOnce }"
+        },
+        {
+          "name": "component_definitions",
+          "description": "Declared CompProperties and content-category references; no reflection of custom members.",
+          "returns": "defName comps(first:20) { items { runtimeType compClass } total offset returned hasMore nextOffset complete } thingCategories(first:20) { items { defName label parent { defName } } total offset returned hasMore nextOffset complete }"
+        }
+      ]
+    },
+    {
+      "target": "thing_defs",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "thing_defs"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "category_def_name": {
+            "type": "string",
+            "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "first": {
+            "type": "integer",
+            "description": "Returned page size 1..50. Identity scanning is separately bounded by the game-thread deadline.",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 50
+          },
+          "after": {
+            "type": "string",
+            "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "sections": [
+        {
+          "name": "basic",
+          "description": "Native ThingDef identity, runtime class, category and stack limit.",
+          "returns": "nodes { defName label thingClass category stackLimit } pageInfo { hasNextPage endCursor }"
+        },
+        {
+          "name": "hauling",
+          "description": "Definition-level native hauling properties, not current pawn eligibility.",
+          "returns": "nodes { defName alwaysHaulable designateHaulable EverHaulable CountAsResource } pageInfo { hasNextPage endCursor }"
+        },
+        {
+          "name": "ingestible",
+          "description": "Native ingestible definition data; null if absent, not a pawn-specific food permission.",
+          "returns": "nodes { defName ingestible { foodType drugCategory HumanEdible IsMeal CachedNutrition maxNumToIngestAtOnce } } pageInfo { hasNextPage endCursor }"
+        },
+        {
+          "name": "component_definitions",
+          "description": "Declared CompProperties and content-category references; no reflection of custom members.",
+          "returns": "nodes { defName comps(first:20) { items { runtimeType compClass } total offset returned hasMore nextOffset complete } thingCategories(first:20) { items { defName label parent { defName } } total offset returned hasMore nextOffset complete } } pageInfo { hasNextPage endCursor }"
+        }
+      ]
+    },
+    {
+      "target": "map",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "map"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "sections": [
+        {
+          "name": "storage_groups",
+          "description": "Native SlotGroup references, settings priority and currently stored things. HeldThings overlap map things, do not double-count. Settings are not actual contents.",
+          "returns": "haulDestinationManager { AllGroupsListForReading(first:5) { items { ref GroupingLabel parent { ref runtimeType thingId } Settings { Priority } HeldThings(first:10) { items { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } total offset returned hasMore nextOffset complete } } total offset returned hasMore nextOffset complete } }"
+        },
+        {
+          "name": "resource_counter",
+          "description": "Game cached ResourceCounter entries. Stored-resource rules apply; not all-map totals, not held inventory. Does not force a game counter update.",
+          "returns": "resourceCounter { AllCountedAmounts(first:30) { items { key { defName label } value } total offset returned hasMore nextOffset complete } }"
+        }
+      ]
+    }
+  ],
+  "template_parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "requests"
+    ],
+    "properties": {
+      "requests": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 4,
+        "items": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "sections"
+              ],
+              "properties": {
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "pawn"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "description": "Exact pawn ID."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "sections": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 5,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "status",
+                      "mood",
+                      "health",
+                      "equipment",
+                      "profile"
+                    ]
+                  },
+                  "description": "status: Current detailed flags, location, job targets and needs with mood/health overview. Need levels are not stock quantities. Returns status { downed drafted dead inMentalState mentalState position { x y z mapId } currentJob { id defName report targets(first:3) { items { slot kind thingId mapId x y z } total offset returned hasMore nextOffset complete } } needs(first:20) { items { defName label level maxLevel percentage } total offset returned hasMore nextOffset complete } } mood { level } health { summary { healthPercent pain } }\nmood: Current/instant mood, game break thresholds and effective thought groups. Raw memories/group members are available through exact queries. Groups use the game's contribution, not a sum of memories. Returns mood { level instant breakThresholds { minor major extreme } thoughtGroups(first:20) { items { defName label stageIndex moodOffset memberCount } total offset returned hasMore nextOffset complete } }\nhealth: Health summary, body capacities and UI-visible conditions with body-part references and optional tending/immunity. Conditions include implants, not only wounds. Full body tree via exact query. Returns health { summary { healthPercent pain bleedRate downed inPainShock } capacities(first:20) { items { defName label level } total offset returned hasMore nextOffset complete } conditions(first:20) { items { id defName label severity severityLabel visible part { key defName label index parentKey } tending { isTended quality ticksLeft } immunity { level fullyImmune } } total offset returned hasMore nextOffset complete } }\nequipment: Equipped weapons, worn apparel and carried inventory, with item identity and basic item properties. Quality null means not applicable. Returns equipment { Primary { id } AllEquipmentListForReading(first:5) { items { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } total offset returned hasMore nextOffset complete } } apparel { WornApparel(first:10) { items { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } total offset returned hasMore nextOffset complete } } inventory { innerContainer { items(first:10) { items { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } total offset returned hasMore nextOffset complete } } } carryTracker { CarriedThing { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } }\nprofile: Age, background, traits including suppression, and learned skills. Calculated stats are separate: discover statDefinitions then request stats(defNames). Returns profile { gender raceDefName kindDefName age { biologicalYears chronologicalYears lifeStage } backstories(first:2) { items { slot defName title description } total offset returned hasMore nextOffset complete } traits(first:20) { items { defName label description degree suppressed sourceGeneDefName suppressedByGeneDefName } total offset returned hasMore nextOffset complete } skills(first:32) { items { defName label level passion aptitude totallyDisabled permanentlyDisabled } total offset returned hasMore nextOffset complete } }"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "sections"
+              ],
+              "properties": {
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "colony"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                "sections": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "overview"
+                    ]
+                  },
+                  "description": "overview: Current game and loaded-map overview, not a complete colony safety assessment. Returns game { paused currentMapId } maps { id name isCurrent isPlayerHome colonistCount hasVisibleThreat }"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "sections"
+              ],
+              "properties": {
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "colonists"
+                      ]
+                    },
+                    "ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Exact IDs; at most 50. Empty list matches nothing.",
+                      "maxItems": 50
+                    },
+                    "map_id": {
+                      "type": "string",
+                      "description": "Restrict to one loaded map."
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "Case-insensitive display-name substring, at most 128 characters.",
+                      "maxLength": 128
+                    },
+                    "first": {
+                      "type": "integer",
+                      "description": "Page size 1..50, default 20.",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "after": {
+                      "type": "string",
+                      "description": "Cursor from the previous complete page, same load and filters.",
+                      "maxLength": 1024
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                "sections": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "summary"
+                    ]
+                  },
+                  "description": "summary: Find spawned free colonists on loaded maps and inspect a compact summary before selecting IDs for details. Name substring may match multiple people. Returns nodes { id name mapId status { downed drafted inMentalState mentalState } mood { level } health { summary { healthPercent } } } pageInfo { hasNextPage endCursor }"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "sections"
+              ],
+              "properties": {
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "thing"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "map_id": {
+                      "type": "string",
+                      "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "sections": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 4,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "basic",
+                      "placement",
+                      "components",
+                      "contents"
+                    ]
+                  },
+                  "description": "basic: Native Thing identity, def reference, stackCount, Stuff and HP; not a flattened Item DTO. Returns id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints\nplacement: Native Spawned/Map/MapHeld/Position/PositionHeld and holder references. Storage position is not container ownership. Returns Spawned Map { id } MapHeld { id } Position { x y z } PositionHeld { x y z } holdingOwner { Owner { ref runtimeType thingId } } ParentHolder { ref runtimeType thingId }\ncomponents: Actual component instances, runtime type and supported native base members. Unknown components remain visible as unsupported metadata. Returns AllComps(first:10) { items { ref runtimeType supported supportedType ... on CompQuality { Quality } ... on CompRottable { RotProgress Stage TicksUntilRotAtCurrentTemp } ... on CompForbiddable { Forbidden } ... on CompIngredients { ingredients(first:10) { items { defName label } total offset returned hasMore nextOffset complete } } } total offset returned hasMore nextOffset complete }\ncontents: Direct IThingHolder contents and special MinifiedThing/Corpse references; no recursive full expansion. Returns InnerThing { id runtimeType def { defName } } InnerPawn { id runtimeType } GetDirectlyHeldThings { Owner { ref runtimeType } items(first:10) { items { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } total offset returned hasMore nextOffset complete } }"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "sections"
+              ],
+              "properties": {
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "things"
+                      ]
+                    },
+                    "map_id": {
+                      "type": "string",
+                      "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "request_group": {
+                      "type": "string",
+                      "description": "Native query group: HaulableEver, HaulableAlways, HaulableEverOrMinifiable or Everything. This is not pawn-specific usability.",
+                      "default": "HaulableEver",
+                      "enum": [
+                        "HaulableEver",
+                        "HaulableAlways",
+                        "HaulableEverOrMinifiable",
+                        "Everything"
+                      ]
+                    },
+                    "def_names": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Exact IDs; at most 50. Empty list matches nothing.",
+                      "maxItems": 50
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "visible_only": {
+                      "type": "boolean",
+                      "description": "Default true: exclude fogged map things.",
+                      "default": true
+                    },
+                    "first": {
+                      "type": "integer",
+                      "description": "Returned page size 1..50. Identity scanning is separately bounded by the game-thread deadline.",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "after": {
+                      "type": "string",
+                      "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+                      "minLength": 1,
+                      "maxLength": 1024
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "map_id"
+                  ],
+                  "additionalProperties": false
+                },
+                "sections": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 3,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "basic",
+                      "placement",
+                      "components"
+                    ]
+                  },
+                  "description": "basic: Spawned map things from a native query group, optional definitions/name and cursor. Excludes held contents. No promise of current pawn-specific hauling eligibility. Returns nodes { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } pageInfo { hasNextPage endCursor }\nplacement: Map thing placement and holder references, with per-page continuation. Returns nodes { id Spawned Map { id } MapHeld { id } Position { x y z } PositionHeld { x y z } holdingOwner { Owner { ref runtimeType thingId } } ParentHolder { ref runtimeType thingId } } pageInfo { hasNextPage endCursor }\ncomponents: Bounded component data for the selected page; narrow first for expensive combinations. Returns nodes { id AllComps(first:10) { items { ref runtimeType supported supportedType ... on CompQuality { Quality } ... on CompRottable { RotProgress Stage TicksUntilRotAtCurrentTemp } ... on CompForbiddable { Forbidden } ... on CompIngredients { ingredients(first:10) { items { defName label } total offset returned hasMore nextOffset complete } } } total offset returned hasMore nextOffset complete } } pageInfo { hasNextPage endCursor }"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "sections"
+              ],
+              "properties": {
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "thing_def"
+                      ]
+                    },
+                    "def_name": {
+                      "type": "string",
+                      "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "def_name"
+                  ],
+                  "additionalProperties": false
+                },
+                "sections": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 4,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "basic",
+                      "hauling",
+                      "ingestible",
+                      "component_definitions"
+                    ]
+                  },
+                  "description": "basic: Native ThingDef identity, runtime class, category and stack limit. Returns defName label thingClass category stackLimit\nhauling: Definition-level native hauling properties, not current pawn eligibility. Returns defName alwaysHaulable designateHaulable EverHaulable CountAsResource\ningestible: Native ingestible definition data; null if absent, not a pawn-specific food permission. Returns defName ingestible { foodType drugCategory HumanEdible IsMeal CachedNutrition maxNumToIngestAtOnce }\ncomponent_definitions: Declared CompProperties and content-category references; no reflection of custom members. Returns defName comps(first:20) { items { runtimeType compClass } total offset returned hasMore nextOffset complete } thingCategories(first:20) { items { defName label parent { defName } } total offset returned hasMore nextOffset complete }"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "sections"
+              ],
+              "properties": {
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "thing_defs"
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "category_def_name": {
+                      "type": "string",
+                      "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "first": {
+                      "type": "integer",
+                      "description": "Returned page size 1..50. Identity scanning is separately bounded by the game-thread deadline.",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "after": {
+                      "type": "string",
+                      "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+                      "minLength": 1,
+                      "maxLength": 1024
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                "sections": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 4,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "basic",
+                      "hauling",
+                      "ingestible",
+                      "component_definitions"
+                    ]
+                  },
+                  "description": "basic: Native ThingDef identity, runtime class, category and stack limit. Returns nodes { defName label thingClass category stackLimit } pageInfo { hasNextPage endCursor }\nhauling: Definition-level native hauling properties, not current pawn eligibility. Returns nodes { defName alwaysHaulable designateHaulable EverHaulable CountAsResource } pageInfo { hasNextPage endCursor }\ningestible: Native ingestible definition data; null if absent, not a pawn-specific food permission. Returns nodes { defName ingestible { foodType drugCategory HumanEdible IsMeal CachedNutrition maxNumToIngestAtOnce } } pageInfo { hasNextPage endCursor }\ncomponent_definitions: Declared CompProperties and content-category references; no reflection of custom members. Returns nodes { defName comps(first:20) { items { runtimeType compClass } total offset returned hasMore nextOffset complete } thingCategories(first:20) { items { defName label parent { defName } } total offset returned hasMore nextOffset complete } } pageInfo { hasNextPage endCursor }"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "sections"
+              ],
+              "properties": {
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "map"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "description": "Exact identifier, or case-insensitive substring for name. after is a load/filter-bound cursor.",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "sections": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 2,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "storage_groups",
+                      "resource_counter"
+                    ]
+                  },
+                  "description": "storage_groups: Native SlotGroup references, settings priority and currently stored things. HeldThings overlap map things, do not double-count. Settings are not actual contents. Returns haulDestinationManager { AllGroupsListForReading(first:5) { items { ref GroupingLabel parent { ref runtimeType thingId } Settings { Priority } HeldThings(first:10) { items { id runtimeType def { defName label category thingClass } stackCount Stuff { defName } HitPoints MaxHitPoints } total offset returned hasMore nextOffset complete } } total offset returned hasMore nextOffset complete } }\nresource_counter: Game cached ResourceCounter entries. Stored-resource rules apply; not all-map totals, not held inventory. Does not force a game counter update. Returns resourceCounter { AllCountedAmounts(first:30) { items { key { defName label } value } total offset returned hasMore nextOffset complete } }"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "query_parameters": {
+    "type": "object",
+    "properties": {
+      "document": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 16384
+      },
+      "variables": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "document"
+    ],
+    "additionalProperties": false
+  },
+  "query_rules": "Read-only query; one operation. Aliases, variables and bounded inline type fragments supported; named fragments/directives/introspection/mutation unavailable. Native things/thing_defs/map targets expose selected original members, holders and storage groups. Thing group HaulableEver is not current hauling eligibility. Unknown component classes return metadata, not reflected fields. Exact native type/member descriptions are available using describe_game_schema. Target pawn by stable ID, then combine status/mood/health/equipment/profile. colonists locates spawned free colonists (not caravans/prisoners); first 1..50 default20. Nested slices use first 1..100 default20, offset 0..8192; offset continuation samples current data, not frozen history. Slice complete=false means selected fields failed; nextOffset is then null. Thought ref is observation-local. UI-visible thoughts/conditions are default; visibleOnly=false must be explicit. Discover StatDef names via pawn.statDefinitions(search), then request stats(defNames). Null without an issue can mean not applicable; observed empty lists have total=0. Limits: depth12, fields512, combined nested cost20000.",
+  "schema_id": "02e5fe3882e2868e5aac5699dcfe5a26a7a622ec19e2ecc28c74559e665a8973"
+}
