@@ -97,7 +97,20 @@ async def test_fragmented_utf8_and_interleaved_tools_wait_for_usage_and_done():
 async def test_truncated_stream_cannot_return_executable_tools(body):
     with pytest.raises(ModelClientError) as error:
         await client_for(Chunks([body])).complete([], [], timeout=2)
-    assert error.value.code in {"model_incomplete_stream", "model_output_incomplete"}
+    assert error.value.code in {"model_incomplete_stream", "model_output_limit"}
+
+
+@pytest.mark.asyncio
+async def test_length_failure_retains_requested_limit_finish_reason_and_usage():
+    body = event({"content": "partial"}, "length") + event(usage={
+        "completion_tokens": 32768, "completion_tokens_details": {"reasoning_tokens": 32000}
+    }) + b"data: [DONE]\n\n"
+    with pytest.raises(ModelClientError) as caught:
+        await client_for(Chunks([body])).complete([], [], timeout=2)
+    assert caught.value.code == "model_output_limit"
+    assert caught.value.diagnostics["finish_reason"] == "length"
+    assert caught.value.diagnostics["max_output_tokens"] == 32768
+    assert caught.value.usage["reasoning_tokens"] == 32000
 
 
 @pytest.mark.asyncio
@@ -109,6 +122,32 @@ async def test_usage_received_before_incomplete_eof_survives_as_known_usage():
         await client_for(Chunks([body])).complete([], [], timeout=2)
     assert error.value.code == "model_incomplete_stream"
     assert error.value.usage["total_tokens"] == 8
+
+
+@pytest.mark.asyncio
+async def test_provider_stream_error_retains_bounded_redacted_diagnostics():
+    api_key = "private-provider-key"
+    provider_error = {
+        "message": f"upstream quota exhausted; api_key={api_key}",
+        "type": "insufficient_quota",
+        "param": "model",
+        "code": "quota_exceeded",
+    }
+    body = ("data: " + json.dumps({"error": provider_error}) + "\n\n").encode()
+
+    with pytest.raises(ModelClientError) as caught:
+        await client_for(Chunks([body]), api_key=api_key).complete([], [], timeout=2)
+
+    assert caught.value.code == "model_stream_error"
+    diagnostics = caught.value.diagnostics["provider_error"]
+    assert diagnostics["code"] == "quota_exceeded"
+    assert diagnostics["type"] == "insufficient_quota"
+    assert diagnostics["param"] == "model"
+    assert diagnostics["message"] == "upstream quota exhausted; api_key=<redacted>"
+    assert diagnostics["shape"] == "object"
+    assert diagnostics["bytes"] > 0
+    assert len(diagnostics["sha256"]) == 64
+    assert api_key not in json.dumps(caught.value.diagnostics)
 
 
 @pytest.mark.asyncio

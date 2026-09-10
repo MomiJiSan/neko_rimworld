@@ -94,3 +94,33 @@ def test_completed_duration_does_not_grow_while_panel_is_open(monkeypatch):
     ledger.transition(AgentRunState.COMPLETED, "run_completed")
     now[0] = 999.0
     assert ledger.summary()["duration_ms"] == 5000.0
+
+
+def test_ledger_summary_exposes_small_monotonic_progress_projection():
+    ledger = AgentAuditLedger("progress")
+    ledger.transition(
+        AgentRunState.MODEL_REQUESTING,
+        "model_request_started",
+        {"attempt": 2, "max_attempts": 3, "messages": [{"content": "large private payload"}]},
+    )
+
+    active = ledger.summary()
+    assert active["revision"] == 2
+    assert active["terminal"] is False
+    assert active["stage"] == "model_requesting"
+    assert active["latest_event"] == {
+        "event_seq": 2,
+        "event": "model_request_started",
+        "cycle": 0,
+        "elapsed_ms": active["latest_event"]["elapsed_ms"],
+    }
+    assert active["latest_event_summary"] == "Requesting the model (attempt 2/3)."
+    assert "large private payload" not in str(active["latest_event"])
+
+    ledger.transition(AgentRunState.MODEL_RESPONDED, "model_response_received")
+    ledger.transition(AgentRunState.FINALIZING, "final_received")
+    ledger.transition(AgentRunState.COMPLETED, "run_completed")
+    completed = ledger.summary()
+    assert completed["revision"] == 5
+    assert completed["terminal"] is True
+    assert completed["latest_event_summary"] == "Run completed."

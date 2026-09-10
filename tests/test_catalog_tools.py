@@ -27,6 +27,25 @@ def response():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("version", ["resource_evidence.v1", "resource_evidence.v2"])
+async def test_resource_evidence_mode_preserves_three_tools_and_raw_observation(version):
+    source=catalog()
+    source["resource_parameters"]={"type":"object","properties":{"map_id":{"type":"string"}}}
+    source["resource_contract"]={"version":version,"scope_rules":{"stored":"overlaps ground"}}
+    calls=[]
+    async def query(arguments):
+        calls.append(arguments)
+        return Observation.from_response(arguments["operation"],arguments["arguments"],response())
+    setup=make_game_tools(source,query)
+    assert [t.name for t in setup.tools]==["get_game_info","query_game","describe_game_schema"]
+    assert "resources" in setup.tools[0].parameters["properties"]
+    result=await setup.tools[0].handler({"resources":{"map_id":"Map_0"}})
+    assert calls==[{"operation":"resource_report","arguments":{"map_id":"Map_0"}}]
+    assert result.value["response"]==response().to_dict()
+    assert version in setup.context
+
+
+@pytest.mark.asyncio
 async def test_mod_catalog_generates_both_tools_and_forwards_without_rewriting():
     calls = []
 

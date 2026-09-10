@@ -1,7 +1,8 @@
 import { Alert, Button, Card, EmptyState, Grid, Stack, StatCard, StatusBadge, TextBlock, Toolbar, ToolbarGroup } from "@neko/plugin-ui"
 import type { PanelController } from "../controller"
 import { UsageSummary } from "../components/usage-summary"
-import { statusTone, text } from "../format"
+import { FailureNotice } from "../components/failure-notice"
+import { progressText, statusTone, text, timing } from "../format"
 
 export function HomePage({ c }: { c: PanelController }) {
   const state = c.state
@@ -20,6 +21,8 @@ export function HomePage({ c }: { c: PanelController }) {
       {latest ? <Stack>
         <TextBlock text={text(latest.question, "咨询", 300)} />
         <StatusBadge tone={statusTone(text(latest.result_status || latest.state))} label={text(latest.result_status || latest.state)} />
+        {!latest.terminal ? <Alert tone="info">{progressText(latest)} · 已运行 {timing(latest.duration_ms)}</Alert> : null}
+        {latest.result_status && latest.result_status !== "ok" ? <FailureNotice summary={latest.failure_summary} compact /> : null}
         <TextBlock text={text(latest.result_summary, "尚未返回最终交接文本。", 1000)} />
         <Button onClick={() => c.openRun(latest.run_id!)}>查看本次详情</Button>
       </Stack> : <EmptyState title="还没有运行记录" description="在调试页发起一次咨询，或从 NEKO 对话中调用插件。" />}

@@ -14,7 +14,48 @@ from .observation import Observation
 
 
 def make_game_tools(catalog: dict[str, Any], query: ToolHandler) -> ToolSetup:
+    resource_contract = catalog.get("resource_contract")
+    resources_available = (
+        isinstance(resource_contract, dict)
+        and resource_contract.get("version") in {"resource_evidence.v1", "resource_evidence.v2"}
+        and isinstance(catalog.get("resource_parameters"), dict)
+    )
+    info_parameters = copy.deepcopy(catalog["template_parameters"])
+    resource_description = ""
+    resource_context = ""
+    if resources_available:
+        info_parameters["properties"]["resources"] = copy.deepcopy(catalog["resource_parameters"])
+        info_parameters.pop("required", None)
+        info_parameters["oneOf"] = [{"required": ["resources"]}, {"required": ["requests"]}]
+        resource_description = (
+            "For colony resources, stocks, inventory or quantities, use resources:{} for a bounded "
+            "supplies overview on the current map, or resources:{def_names:[...]} for exact definitions. "
+            "The game computes quantities, ID deduplication and scope overlaps. Use this instead of paging "
+            "through raw map things or a resource-counter dictionary. Choose exactly one mode: resources OR requests. "
+            "Use observed def_names; if an exact definition is unknown and needed, discover it with the existing "
+            "requests target thing_defs (name filter, basic section). Definition names are not category names. "
+        )
+        lower_bound_field = "known_units" if resource_contract["version"] == "resource_evidence.v2" else "known_quantities"
+        page_field = "row_page" if resource_contract["version"] == "resource_evidence.v2" else "view"
+        resource_context = (
+            "\n\nResource evidence contract:\n" + json.dumps(resource_contract, ensure_ascii=False)
+            + "\nUse get_game_info(resources={}) first for a resource overview; no preliminary colony query is necessary. "
+            "Default supplies excludes rock/corpse noise but includes stored-resource definitions, weapons and apparel. "
+            "Explicit def_names bypass only focus, retaining selected map/scopes and ground visibility. "
+            "Use exact queries only to drill into needed details. Do not repeat arithmetic already computed by the game. "
+            f"Respect coverage and {page_field} completeness. A missing cached entry is not a zero; a partial physical quantity "
+            f"is unknown, with {lower_bound_field} as a lower bound. Report each quantity with its observed scope. "
+            "An item scan does not count facilities; differing scope totals do not diagnose a cache failure. "
+            "Specific zero-valued definitions do not establish a zero for a broader category."
+        )
+
     async def templates(arguments: dict[str, Any]):
+        if "resources" in arguments:
+            if not resources_available:
+                raise ToolExecutionError("resource_report_unavailable", "Upgrade the game Mod for resource evidence; legacy queries remain available.")
+            if set(arguments) != {"resources"} or not isinstance(arguments["resources"], dict):
+                raise ToolExecutionError("invalid_arguments", "Choose resources object OR legacy requests, not both.")
+            return await query({"operation": "resource_report", "arguments": copy.deepcopy(arguments["resources"])})
         return await query({"operation": "template_query", "arguments": arguments})
 
     async def exact(arguments: dict[str, Any]):
@@ -63,7 +104,7 @@ def make_game_tools(catalog: dict[str, Any], query: ToolHandler) -> ToolSetup:
         tools=(
             ToolSpec(
                 name="get_game_info",
-                description=(
+                description=resource_description + (
                     "Select an object, then one or more of its available information sections. "
                     "The supplied schema describes each target and the fields its section templates return. "
                     "Combine sections for the same object to inspect related facts together, or include multiple targets. "
@@ -71,7 +112,7 @@ def make_game_tools(catalog: dict[str, Any], query: ToolHandler) -> ToolSetup:
                     "All requests share one sample and total budget. Native members and holder/storage relations retain their meanings; haulable groups are not pawn-specific permission. "
                     "Use query_game for fields or nested pages not covered by section templates."
                 ),
-                parameters=copy.deepcopy(catalog["template_parameters"]),
+                parameters=info_parameters,
                 handler=templates,
             ),
             ToolSpec(
@@ -115,6 +156,7 @@ def make_game_tools(catalog: dict[str, Any], query: ToolHandler) -> ToolSetup:
             "Keep related evidence joined by object identity, not display name. "
             "Inspect collection coverage and issue paths before interpreting missing data; an unread page is not an empty collection. "
             "Follow the catalog's paging rules and retry incomplete objects with fewer fields."
+            + resource_context
         ),
     )
 

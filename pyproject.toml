@@ -1,4 +1,8 @@
 [project]
 name = "neko_rimworld"
-version = "0.8.0"
+version = "1.0.0"
 dependencies = ["httpx>=0.28.1,<0.29"]
+
+[tool.neko.build]
+# Historical experiments are archived outside the distributable plugin.
+exclude_dirs = ["evaluations", ".bench-data", ".bench-results", "rimworld-bench"]

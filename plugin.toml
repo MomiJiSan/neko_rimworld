@@ -1,7 +1,7 @@
 [plugin]
 id = "neko_rimworld"
 name = "N.E.K.O RimWorld"
-version = "0.8.0"
+version = "1.0.0"
 type = "plugin"
 entry = "plugin.plugins.neko_rimworld:NekoRimworldPlugin"
 description = "Independent memoryless RimWorld research agent with a read-only local game bridge."
@@ -46,7 +46,7 @@ finalization_reserve_seconds = 15.0
 stream_include_usage = true
 run_budget_seconds = 90.0
 preferred_cycles = 4
-max_output_tokens = 1200
+max_output_tokens = 32768
 temperature = 0.2
 
 # Static discovery metadata: Hosted UI validates these without importing plugin code.
@@ -94,7 +94,7 @@ description = "Hosted UI configuration action for the plugin-owned model client.
 timeout = 15.0
 llm_result_fields = ["summary"]
 metadata = { "agent_auto" = false }
-input_schema = { "type" = "object", "properties" = { "base_url" = { "type" = "string", "minLength" = 1, "maxLength" = 2048 }, "model" = { "type" = "string", "minLength" = 1, "maxLength" = 256 }, "api_key" = { "type" = "string", "writeOnly" = true, "maxLength" = 4096, "description" = "Leave empty to retain the currently configured API key." }, "ui_nonce" = { "type" = "string", "writeOnly" = true, "minLength" = 1 }, "budgets" = { "type" = "object", "additionalProperties" = false, "properties" = { "connect_timeout_seconds" = { "type" = "number", "minimum" = 1, "maximum" = 30 }, "first_response_timeout_seconds" = { "type" = "number", "minimum" = 1, "maximum" = 60 }, "stream_idle_timeout_seconds" = { "type" = "number", "minimum" = 1, "maximum" = 60 }, "request_timeout_seconds" = { "type" = "number", "minimum" = 3, "maximum" = 60 }, "run_budget_seconds" = { "type" = "number", "minimum" = 10, "maximum" = 90 }, "finalization_reserve_seconds" = { "type" = "number", "minimum" = 0, "maximum" = 30 } } } }, "required" = ["base_url", "model", "api_key", "ui_nonce"], "additionalProperties" = false }
+input_schema = { "type" = "object", "properties" = { "base_url" = { "type" = "string", "minLength" = 1, "maxLength" = 2048 }, "model" = { "type" = "string", "minLength" = 1, "maxLength" = 256 }, "api_key" = { "type" = "string", "writeOnly" = true, "maxLength" = 4096, "description" = "Leave empty to retain the currently configured API key." }, "ui_nonce" = { "type" = "string", "writeOnly" = true, "minLength" = 1 }, "budgets" = { "type" = "object", "additionalProperties" = false, "properties" = { "connect_timeout_seconds" = { "type" = "number", "minimum" = 1, "maximum" = 30 }, "first_response_timeout_seconds" = { "type" = "number", "minimum" = 1, "maximum" = 60 }, "stream_idle_timeout_seconds" = { "type" = "number", "minimum" = 1, "maximum" = 60 }, "request_timeout_seconds" = { "type" = "number", "minimum" = 3, "maximum" = 60 }, "run_budget_seconds" = { "type" = "number", "minimum" = 10, "maximum" = 90 }, "finalization_reserve_seconds" = { "type" = "number", "minimum" = 0, "maximum" = 30 }, "max_output_tokens" = { "type" = "integer", "minimum" = 64, "maximum" = 131072 } } } }, "required" = ["base_url", "model", "api_key", "ui_nonce"], "additionalProperties" = false }
 
 [[entries]]
 id = "save_bridge_settings"

@@ -1,5 +1,10 @@
 # Object sections and native Thing data path (Mod 0.6.0 / plugin 0.8.0)
 
+Current addition (Mod/plugin1.0): `get_game_info(resources)` forwards the
+Mod-owned `resource_report` operation, with computed quantities, scope coverage,
+ID unions and overlap evidence. See `docs/resource-evidence.md`. The legacy
+data path below remains supported for precise queries and other gameplay domains.
+
 ## Agent-facing tools
 
 `get_game_info(requests)` selects a target object, then one or more of its
@@ -166,7 +171,8 @@ or silently crops them. Only agent-authored natural language reaches outer NEKO.
 Root `colonists` discovery uses stable-ID ordering and a cursor bound to the load
 and normalized filters. A new load or changed filter rejects an old cursor;
 changing page size is allowed. A successful page can have `hasNextPage=true`
-without being partial. Field failures clear selected advancing endCursor values,
+without being partial. Field failures preserve the discovered hasNextPage value
+and clear selected advancing endCursor values,
 including aliases, so paging cannot silently skip failed people. Retry affected
 IDs with fewer fields or restart discovery.
 

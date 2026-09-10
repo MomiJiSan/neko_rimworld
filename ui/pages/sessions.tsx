@@ -5,7 +5,7 @@ import type { PanelController } from "../controller"
 import { EventDetails } from "../components/event-details"
 import { RunResult } from "../components/run-result"
 import { UsageSummary } from "../components/usage-summary"
-import { levelTone, shortId, statusTone, text, timing } from "../format"
+import { levelTone, progressText, shortId, statusTone, text, timing } from "../format"
 
 export function SessionsPage({ c }: { c: PanelController }) {
   const detail = c.detail
@@ -56,12 +56,12 @@ export function SessionsPage({ c }: { c: PanelController }) {
         </Stack></Card>
         <Card title="会话详情"><Stack>
           <Toolbar><ToolbarGroup><TextBlock text={shortId(c.selectedRunId)} /></ToolbarGroup><ToolbarGroup><Button disabled={!c.selectedRunId || c.detailLoading} onClick={c.loadDetail}>{c.detailLoading ? "读取中…" : "刷新详情"}</Button></ToolbarGroup></Toolbar>
-          {c.detailError ? <InlineError title="会话详情不可用" error={c.detailError} details="记录可能已被淘汰或因插件重载而清空。不会自动切换到其他会话。" /> : null}
+          {c.detailError ? <InlineError title="详情刷新暂时失败" error={c.detailError} details="已保留上次成功读取的内容；运行跟踪不会停止，也不会自动切换到其他会话。" /> : null}
           {detail ? <Stack>
             <TextBlock text={text(detail.question, "咨询", 300)} />
             <UsageSummary run={detail} />
             <NavigationTabs id="rimworld-run-view" activeId={c.runView} onChange={id => c.setRunView(id as any)} items={[{ id: "result", label: "结果" }, { id: "events", label: "事件" }, { id: "observations", label: "观察" }, { id: "model", label: "模型请求" }]}>
-              {c.runView === "result" ? <RunResult result={detail.result} draft={detail.draft} onOpenReport={c.openReport} /> : c.runView === "observations" ? (
+              {c.runView === "result" ? <RunResult result={detail.result} draft={detail.draft} failureSummary={detail.failure_summary} onOpenReport={c.openReport} /> : c.runView === "observations" ? (
                 detail.result?.observations?.length ? <Stack><TextBlock text="每份观察保留各自的目标、采样、完整性与返回数据，不把不同时间的数据伪装为同一快照。" /><JsonView data={detail.result.observations} /></Stack> : <EmptyState title="尚无最终观察集合" description="运行中可在事件页查看已完成的工具结果。" />
               ) : <Stack>
                 <Field label="当前事件页内筛选"><Input value={c.eventFilter} onChange={c.setEventFilter} placeholder="例如 failed / model_request" /></Field>
@@ -75,6 +75,17 @@ export function SessionsPage({ c }: { c: PanelController }) {
                 <EventDetails event={event} />
               </Stack>}
             </NavigationTabs>
+          </Stack> : c.selectedSummary ? <Stack>
+            <TextBlock text={text(c.selectedSummary.question, "咨询", 300)} />
+            <UsageSummary run={c.selectedSummary} />
+            <StatusBadge tone={statusTone(text(c.selectedSummary.result_status || c.selectedSummary.state))} label={text(c.selectedSummary.result_status || c.selectedSummary.state)} />
+            <KeyValue items={[
+              { key: "progress", label: "当前进度", value: progressText(c.selectedSummary) },
+              { key: "cycle", label: "Agent 轮次", value: text(c.selectedSummary.cycle) },
+              { key: "revision", label: "进度版本", value: text(c.selectedSummary.revision, text(c.selectedSummary.event_count)) },
+              { key: "event", label: "最新事件", value: text(c.selectedSummary.latest_event?.event) },
+            ]} />
+            {!c.selectedSummary.terminal ? <TextBlock text="运行中仅刷新轻量进度；结束后会自动读取一次完整详情。也可以手动读取当前详情。" /> : null}
           </Stack> : !c.detailError && !c.detailLoading ? <EmptyState title="选择一条运行记录" /> : null}
         </Stack></Card>
       </Grid>}

@@ -28,8 +28,9 @@ export function SettingsPage({ c }: { c: PanelController }) {
       </Field>
     </Stack></Card>
     <Card title="运行预算"><Stack>
-      <TextBlock text="单位为秒。实际等待还受单次请求和整个运行的剩余预算限制；结束预留用于提示 Agent 尽快提交。" />
-      <Grid cols={2}>{BUDGET_FIELDS.map(field => <Field key={field.key} label={field.label} help={`${field.min}–${field.max} 秒`} required>
+      <TextBlock text="时间预算单位为秒；输出上限单位为 token，可能包含模型思考用量。默认 32768，需符合供应商支持范围。实际等待仍受请求和运行时间限制。" />
+      <TextBlock text="瞬时模型故障仅在尚无有效输出时自动重试，最多尝试 3 次；每次尝试都计入运行时间与 token 统计。" />
+      <Grid cols={2}>{BUDGET_FIELDS.map(field => <Field key={field.key} label={field.label} help={`${field.min}–${field.max} ${field.key === "max_output_tokens" ? "token（整数）" : "秒"}`} required>
         <NumberInput value={c.budgets[field.key]} min={field.min} max={field.max} step={1} disabled={busy} onChange={value => c.changeBudget(field.key, value === "" ? "" : Number(value))} />
       </Field>)}</Grid>
       {invalidBudget ? <Alert tone="warning">{invalidBudget}</Alert> : null}

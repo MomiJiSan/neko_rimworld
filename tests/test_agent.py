@@ -21,6 +21,7 @@ from plugin.plugins.neko_rimworld.agent import (
     build_agent_model_settings,
     parse_agent_model_settings,
 )
+from plugin.plugins.neko_rimworld.agent import loop as agent_loop
 from plugin.plugins.neko_rimworld.agent.audit import MAX_EVENTS_PER_RUN
 from plugin.plugins.neko_rimworld.agent.tools import ToolSpec
 from plugin.plugins.neko_rimworld.observation import Observation
@@ -79,13 +80,13 @@ class ScriptedModel:
         return item
 
 
-def settings(*, preferred_cycles: int = 4) -> AgentModelSettings:
+def settings(*, preferred_cycles: int = 4, run_budget_seconds: float = 10) -> AgentModelSettings:
     return build_agent_model_settings(
         base_url="http://127.0.0.1:11434/v1",
         model="test-model",
         preferred_cycles=preferred_cycles,
         request_timeout_seconds=3,
-        run_budget_seconds=10,
+        run_budget_seconds=run_budget_seconds,
     )
 
 
@@ -360,12 +361,107 @@ async def test_empty_model_turn_gets_auditable_recovery_prompt() -> None:
 
 @pytest.mark.asyncio
 async def test_model_failure_returns_degraded_result_without_stopping_runtime() -> None:
-    model = ScriptedModel([ModelClientError("model_timeout", "The model timed out.")])
+    secret = "private-provider-key"
+    model = ScriptedModel(
+        [
+            ModelClientError(
+                "model_stream_error",
+                "The provider reported a stream error.",
+                diagnostics={
+                    "request_id": "request-123",
+                    "phase": "first_response",
+                    "provider_error": {
+                        "code": "quota_exceeded",
+                        "type": "insufficient_quota",
+                        "message": f"quota exhausted; api_key={secret}",
+                    },
+                },
+            )
+        ]
+    )
 
     async def digest(_args: dict[str, Any]) -> dict[str, Any]:
         return digest_view()
 
     registry = AgentAuditRegistry()
+    logger = FakeLogger()
+    runtime = AgentRuntime(
+        observation_tools=[query_tool(digest)],
+        audit_registry=registry,
+        logger=logger,
+        model_factory=lambda _settings: model,
+    )
+    result = await runtime.run("How is the colony?", settings())
+
+    assert result["status"] == "degraded"
+    assert result["audit"]["error_code"] == "model_stream_error"
+    latest = registry.snapshot()["latest_run"]
+    assert latest["state"] == "completed"
+    assert any(event["event"] == "model_request_failed" for event in latest["events"])
+    rendered_logs = json.dumps(logger.records)
+    assert "provider_code=quota_exceeded" in rendered_logs
+    assert "provider_type=insufficient_quota" in rendered_logs
+    assert "provider_message=quota exhausted; api_key=<redacted>" in rendered_logs
+    assert "request_id=request-123" in rendered_logs
+    assert secret not in rendered_logs
+
+
+@pytest.mark.asyncio
+async def test_transient_provider_failure_is_retried_before_any_useful_delta() -> None:
+    transient = ModelClientError(
+        "model_stream_error",
+        "The provider reported a stream error.",
+        diagnostics={
+            "request_id": "request-overloaded",
+            "phase": "first_response",
+            "provider_error": {
+                "type": "upstream_error",
+                "message": "Our servers are currently overloaded. Please try again later.",
+            },
+        },
+    )
+    model = ScriptedModel([transient, turn("The colony is available after retry.")])
+    registry = AgentAuditRegistry()
+
+    async def digest(_args: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("no game tool should run")
+
+    runtime = AgentRuntime(
+        observation_tools=[query_tool(digest)],
+        audit_registry=registry,
+        logger=FakeLogger(),
+        model_factory=lambda _settings: model,
+    )
+    result = await runtime.run("How is the colony?", settings(run_budget_seconds=30))
+
+    assert result["status"] == "ok"
+    assert result["answer"] == "The colony is available after retry."
+    assert len(model.requests) == 2
+    assert model.requests[0] == model.requests[1]
+    latest = registry.snapshot()["latest_run"]
+    assert latest["model_calls"] == 2
+    assert latest["model_failures"] == 1
+    assert [event["event"] for event in latest["events"]].count("model_retry_scheduled") == 1
+
+
+@pytest.mark.asyncio
+async def test_transient_failure_after_useful_delta_is_not_retried() -> None:
+    transient_after_output = ModelClientError(
+        "model_stream_error",
+        "The provider reported a stream error.",
+        diagnostics={
+            "request_id": "request-partial",
+            "phase": "stream_read",
+            "first_useful_delta_ms": 50.0,
+            "provider_error": {"type": "upstream_error", "message": "overloaded"},
+        },
+    )
+    model = ScriptedModel([transient_after_output, turn("must not be used")])
+    registry = AgentAuditRegistry()
+
+    async def digest(_args: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("no game tool should run")
+
     runtime = AgentRuntime(
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
@@ -375,10 +471,94 @@ async def test_model_failure_returns_degraded_result_without_stopping_runtime() 
     result = await runtime.run("How is the colony?", settings())
 
     assert result["status"] == "degraded"
-    assert result["audit"]["error_code"] == "model_timeout"
+    assert len(model.requests) == 1
+    assert not any(
+        event["event"] == "model_retry_scheduled"
+        for event in registry.snapshot()["latest_run"]["events"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_non_retryable_http_failure_is_not_retried() -> None:
+    permanent = ModelClientError(
+        "model_http_error",
+        "The agent model endpoint returned HTTP 400.",
+        diagnostics={"request_id": "request-invalid", "phase": "response_headers", "http_status": 400},
+    )
+    model = ScriptedModel([permanent, turn("must not be used")])
+    registry = AgentAuditRegistry()
+
+    async def digest(_args: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("no game tool should run")
+
+    runtime = AgentRuntime(
+        observation_tools=[query_tool(digest)],
+        audit_registry=registry,
+        logger=FakeLogger(),
+        model_factory=lambda _settings: model,
+    )
+    result = await runtime.run("How is the colony?", settings(run_budget_seconds=30))
+
+    assert result["status"] == "degraded"
+    assert len(model.requests) == 1
+    failure = next(
+        event for event in registry.snapshot()["latest_run"]["events"]
+        if event["event"] == "model_request_failed"
+    )
+    assert failure["data"]["retryable"] is False
+
+
+@pytest.mark.asyncio
+async def test_transient_retries_are_bounded_and_usage_is_accumulated(monkeypatch) -> None:
+    monkeypatch.setattr(agent_loop, "MODEL_RETRY_DELAYS_SECONDS", (0.0, 0.0))
+
+    def overloaded(request_id: str, tokens: int) -> ModelClientError:
+        return ModelClientError(
+            "model_stream_error",
+            "The provider reported a stream error.",
+            diagnostics={
+                "request_id": request_id,
+                "phase": "first_response",
+                "provider_error": {"type": "upstream_error", "message": "servers overloaded"},
+            },
+            usage={"prompt_tokens": tokens, "completion_tokens": 0, "total_tokens": tokens},
+        )
+
+    model = ScriptedModel([overloaded("request-1", 2), overloaded("request-2", 3), overloaded("request-3", 5)])
+    registry = AgentAuditRegistry()
+
+    async def digest(_args: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("no game tool should run")
+
+    runtime = AgentRuntime(
+        observation_tools=[query_tool(digest)],
+        audit_registry=registry,
+        logger=FakeLogger(),
+        model_factory=lambda _settings: model,
+    )
+    result = await runtime.run("How is the colony?", settings(run_budget_seconds=30))
+
+    assert result["status"] == "degraded"
+    assert len(model.requests) == agent_loop.MAX_MODEL_ATTEMPTS == 3
     latest = registry.snapshot()["latest_run"]
-    assert latest["state"] == "completed"
-    assert any(event["event"] == "model_request_failed" for event in latest["events"])
+    assert latest["model_calls"] == 3
+    assert latest["model_failures"] == 3
+    assert latest["usage"]["total_tokens"] == 10
+    assert [event["event"] for event in latest["events"]].count("model_retry_scheduled") == 2
+    assert latest["failure_summary"] == {
+        "finish_reason": None,
+        "max_output_tokens": None,
+        "usage": {"completion_tokens": 0, "prompt_tokens": 5, "total_tokens": 5},
+        "error_code": "model_stream_error",
+        "message": "The provider reported a stream error.",
+        "phase": "first_response",
+        "attempts": 3,
+        "current_cycle_attempts": 3,
+        "failed_attempts": 3,
+        "retries": 2,
+        "provider_failures": 3,
+        "provider_error": {"type": "upstream_error", "message": "servers overloaded"},
+    }
 
 
 @pytest.mark.asyncio
@@ -508,6 +688,51 @@ def test_audit_capacity_records_its_terminal_reason() -> None:
     snapshot = ledger.snapshot()
     assert snapshot["state"] == "failed"
     assert snapshot["events"][-1]["event"] == "audit_capacity_reached"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["empty", "provider_failure", "success"])
+@pytest.mark.parametrize("capacity", [22, 23, 24, 25])
+async def test_runtime_audit_capacity_retains_observations_draft_and_result(monkeypatch, ending, capacity):
+    from plugin.plugins.neko_rimworld.agent import audit
+    from plugin.plugins.neko_rimworld.reports import ReportStore
+
+    monkeypatch.setattr(audit, "MAX_EVENTS_PER_RUN", capacity)
+    registry = AgentAuditRegistry()
+    store = ReportStore()
+
+    class Model:
+        count = 0
+
+        async def complete(self, *args, **kwargs):
+            self.count += 1
+            if self.count == 1:
+                return turn("", ToolCall("read", "query_game", "{}"))
+            if self.count == 2:
+                return turn("", ToolCall("draft", "submit_response", '{"full_text":"Retained evidence report"}'))
+            if ending == "provider_failure":
+                raise ModelClientError("model_http_error", "HTTP 400")
+            return turn("Brief answer" if ending == "success" else "")
+
+    async def read(_):
+        return digest_view()
+
+    async def save(record):
+        return store.save(record)
+
+    runtime = AgentRuntime(observation_tools=[query_tool(read)], audit_registry=registry,
+                           logger=FakeLogger(), model_factory=lambda _: Model(), report_sink=save)
+    result = await runtime.run("Inspect", settings())
+    latest = registry.snapshot()["latest_run"]
+    assert latest["result"] is not None
+    assert result["observations"] == [digest_view().to_dict()]
+    assert result["answer"] == "Retained evidence report"
+    assert registry.snapshot()["active_count"] == 0
+    assert len(latest["events"]) <= capacity
+    if latest["events"][-1]["event"] == "audit_capacity_reached":
+        assert result["status"] == "degraded"
+        assert result["audit"]["error_code"] == "audit_capacity_reached"
+        assert store.read(result["report"]["report_id"])["state"] == "draft"
 
 
 def test_agent_settings_are_independent_and_safely_validated() -> None:
@@ -672,3 +897,39 @@ async def test_http_model_tool_loop_end_to_end() -> None:
     assert result["audit"]["model_calls"] == 2
     assert result["audit"]["tool_calls"] == 1
     assert len(request_bodies) == 2
+
+
+@pytest.mark.asyncio
+async def test_audit_limit_on_tool_completion_keeps_just_read_observation(monkeypatch):
+    from plugin.plugins.neko_rimworld.agent import audit
+    monkeypatch.setattr(audit, "MAX_EVENTS_PER_RUN", 8)
+    registry = AgentAuditRegistry()
+    async def read(_):
+        return digest_view()
+    runtime = AgentRuntime(observation_tools=[query_tool(read)], audit_registry=registry,
+        logger=FakeLogger(), model_factory=lambda _: ScriptedModel([turn("", ToolCall("q", "query_game", "{}"))]))
+    result = await runtime.run("Inspect", settings())
+    assert result["audit"]["error_code"] == "audit_capacity_reached"
+    assert result["observations"] == [digest_view().to_dict()]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_at_audit_limit_still_propagates(monkeypatch):
+    from plugin.plugins.neko_rimworld.agent import audit
+    monkeypatch.setattr(audit, "MAX_EVENTS_PER_RUN", 3)
+    started = asyncio.Event()
+    class Model:
+        async def complete(self, *args, **kwargs):
+            started.set()
+            await asyncio.Event().wait()
+    registry = AgentAuditRegistry()
+    runtime = AgentRuntime(observation_tools=[], audit_registry=registry,
+        logger=FakeLogger(), model_factory=lambda _: Model())
+    task = asyncio.create_task(runtime.run("Cancel", settings()))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    snapshot = registry.snapshot()
+    assert snapshot["active_count"] == 0
+    assert snapshot["latest_run"]["result"]["status"] == "cancelled"

@@ -6,13 +6,45 @@ import codecs
 import hashlib
 import json
 import re
+from collections.abc import Mapping, Sequence
 from typing import Any
+
+from ..state import redact_text
 
 
 class StreamProtocolError(ValueError):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, *, diagnostics: Mapping[str, Any] | None = None):
         super().__init__(message)
         self.code = code
+        self.diagnostics = dict(diagnostics or {})
+
+
+def _provider_error_diagnostics(value: object, redact_values: Sequence[str]) -> dict[str, Any]:
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, default=str).encode("utf-8")
+    except (TypeError, ValueError, RecursionError):
+        encoded = type(value).__name__.encode("utf-8")
+
+    def safe_text(raw: object, limit: int) -> str | None:
+        if raw is None or isinstance(raw, (Mapping, list, tuple, set)):
+            return None
+        text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(raw)).strip()
+        for secret in redact_values:
+            if secret:
+                text = text.replace(secret, "<redacted>")
+        return redact_text(text, limit)
+
+    source = value if isinstance(value, Mapping) else {}
+    result: dict[str, Any] = {
+        "shape": "object" if isinstance(value, Mapping) else type(value).__name__,
+        "bytes": len(encoded),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+    for key, limit in (("code", 128), ("type", 128), ("param", 128), ("message", 512)):
+        field = safe_text(source.get(key), limit) if source else safe_text(value, limit) if key == "message" else None
+        if field:
+            result[key] = field
+    return result
 
 
 class SSEDecoder:
@@ -49,9 +81,10 @@ class SSEDecoder:
 
 
 class StreamAssembler:
-    def __init__(self, max_tools: int, max_arguments: int):
+    def __init__(self, max_tools: int, max_arguments: int, *, redact_values: Sequence[str] = ()):
         self.max_tools = max_tools
         self.max_arguments = max_arguments
+        self.redact_values = tuple(value for value in redact_values if value)
         self.done = False
         self.finish_reason: str | None = None
         self.response_id = ""
@@ -76,7 +109,11 @@ class StreamAssembler:
         if not isinstance(value, dict):
             raise StreamProtocolError("model_invalid_stream", "Stream events must be objects.")
         if value.get("error"):
-            raise StreamProtocolError("model_stream_error", "The provider reported a stream error.")
+            raise StreamProtocolError(
+                "model_stream_error",
+                "The provider reported a stream error.",
+                diagnostics={"provider_error": _provider_error_diagnostics(value["error"], self.redact_values)},
+            )
         if value.get("id"):
             self.response_id = str(value["id"])[:256]
         if value.get("model"):
@@ -151,6 +188,8 @@ class StreamAssembler:
                 "model_incomplete_stream",
                 "Stream ended before complete finalization; no partial tool call was executed.",
             )
+        if self.finish_reason == "length":
+            raise StreamProtocolError("model_output_limit", "The model reached the output token limit before completing its answer.")
         if self.finish_reason not in {"stop", "tool_calls"}:
             raise StreamProtocolError(
                 "model_output_incomplete", "The model output was truncated or could not finish normally."

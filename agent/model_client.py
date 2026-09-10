@@ -19,7 +19,7 @@ from .streaming import SSEDecoder, StreamAssembler, StreamProtocolError
 DEFAULT_MODEL_TIMEOUT_SECONDS = 60.0
 DEFAULT_RUN_BUDGET_SECONDS = 90.0
 DEFAULT_PREFERRED_CYCLES = 4
-DEFAULT_MAX_OUTPUT_TOKENS = 1200
+DEFAULT_MAX_OUTPUT_TOKENS = 32768
 DEFAULT_TEMPERATURE = 0.2
 MAX_MODEL_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_TOOL_CALLS_PER_TURN = 32
@@ -156,8 +156,8 @@ def build_agent_model_settings(
 
     if isinstance(max_output_tokens, bool) or not isinstance(max_output_tokens, int):
         raise AgentConfigurationError("Agent output token limit must be an integer.")
-    if not 64 <= max_output_tokens <= 4096:
-        raise AgentConfigurationError("Agent output token limit must be between 64 and 4096.")
+    if not 64 <= max_output_tokens <= 131072:
+        raise AgentConfigurationError("Agent output token limit must be between 64 and 131072.")
 
     if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
         raise AgentConfigurationError("Agent temperature must be a number.")
@@ -286,9 +286,14 @@ class OpenAICompatibleModelClient:
             "stream": True,
             "endpoint_host": urlsplit(self._settings.endpoint).hostname,
             "request_timeout_seconds": timeout,
+            "max_output_tokens": self._settings.max_output_tokens,
             "first_response_timeout_seconds": min(timeout, self._settings.first_response_timeout_seconds),
         }
-        assembler = StreamAssembler(MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_ARGUMENT_CHARS)
+        assembler = StreamAssembler(
+            MAX_TOOL_CALLS_PER_TURN,
+            MAX_TOOL_ARGUMENT_CHARS,
+            redact_values=(self._settings.api_key,),
+        )
         decoder = SSEDecoder()
 
         def elapsed() -> float:
@@ -418,10 +423,12 @@ class OpenAICompatibleModelClient:
             self.last_usage = parse_usage(assembler.usage)
             raise
         except Exception as error:
+            diagnostics.update(finish_reason=assembler.finish_reason, usage=parse_usage(assembler.usage))
             diagnostics.update(exception_type=type(error).__name__, total_ms=elapsed(), response_bytes=bytes_read)
             if isinstance(error, ModelClientError):
                 code, message = error.code, str(error)
             elif isinstance(error, StreamProtocolError):
+                diagnostics.update(error.diagnostics)
                 code, message = error.code, str(error)
             elif isinstance(error, TimeoutError):
                 code = (

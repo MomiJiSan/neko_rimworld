@@ -1,5 +1,39 @@
 # N.E.K.O RimWorld
 
+## Current development state (1.2 candidate, not a release)
+
+The current plugin accepts both resource_evidence.v1 and v2 from the companion
+Mod. V2 groups quantities with their scope, completeness and lower bounds. The
+Mod also exposes native medicine filtering through the existing thing_defs
+target; the three game-query tools remain unchanged. See
+[Resource evidence](docs/resource-evidence.md) for compatibility and usage.
+
+Development experiments show better medicine classification evidence, but
+answers can still confuse aggregate scopes or lose qualifications in the short
+handoff. This candidate does not establish overall answer correctness.
+
+The working source clarifies the existing tool scopes and asks full reports and
+short handoffs to preserve the same subjects, scope and uncertainty. It adds no
+model-visible tool. Model experiments remain in the separate bench; these
+changes do not certify every natural-language explanation as correct.
+
+Audit-capacity failures now retain a structured terminal result, collected
+observations and any report draft. The companion Mod repairs coverage metadata
+inside inline GraphQL fragments, preserves the discovered `hasNextPage` value
+when only detail fields fail, and reports every invalid requested resource
+definition through the existing `issues` array. Unknown definitions remain a
+failed batch and are never silently dropped or treated as zero.
+
+Version metadata remains at 1.0.0 during development. Sources
+require their normal reload/rebuild to activate; editing this directory does
+not update already loaded game assemblies.
+
+Output budget defaults to 32768 tokens and is editable under Settings → running
+budgets (64–131072, subject to provider limits). Reasoning may consume this budget.
+Length termination is reported as output-budget exhaustion with finish_reason,
+requested limit and actual completion/reasoning usage. Existing explicit runtime
+overrides remain in effect until saved through Settings. Time limits are separate.
+
 Independent, memoryless RimWorld specialist agent backed by a read-only local
 game bridge.
 
@@ -104,6 +138,10 @@ outer Agent. The entry returns `agent_text` as both `summary` and `reply`, and m
 reconstruction cannot silently degrade the callback to the run-status message.
 
 ## Development checks
+
+This is a plugin repository, not a standalone N.E.K.O installation. Check it
+out at `plugin/plugins/neko_rimworld` inside a configured N.E.K.O checkout; its
+SDK, build commands and Hosted UI tests use the host project's dependencies.
 
 From the N.E.K.O repository root:
 
@@ -312,3 +350,50 @@ exact members. describe_game_schema supplies supported type/member details on
 demand without creating game observations. See DATA_PATH.md for examples and
 paging. This version removes flattened Item fields; no old-schema compatibility
 branch is provided. No inventory management or hauling actions were added.
+
+## Bridge restart reliability (0.8.1)
+
+On POSIX systems the loopback listener can immediately reclaim its configured
+port after closing an authenticated Mod connection. Saving unchanged bridge
+settings keeps the active listener instead of disconnecting the game, while a
+real token or port change still performs the transactional stop, start and
+configuration update. A failed save refreshes the Hosted panel so connection
+badges reflect the backend state without discarding the user's draft.
+
+## Provider stream diagnostics (0.8.2)
+
+Structured provider error events now retain bounded, sanitized `code`, `type`,
+`param` and `message` fields in the run audit, together with payload size and a
+SHA-256 fingerprint. The same safe fields are written to the plugin log with
+the run ID, model request ID and request phase. Raw error bodies, request
+content, Authorization values and API keys are not logged.
+
+## Safe model request retries (0.8.3)
+
+Each Agent cycle may make at most three provider attempts. Retries use short
+backoff and are limited to transient transport failures, first-response
+timeouts, retryable HTTP statuses, incomplete empty streams, and provider error
+events that identify overload, rate limiting, timeout or temporary upstream
+unavailability. A request is never retried after any useful text or tool-call
+delta. Retry attempts reuse the same messages and tool schemas, remain inside
+the run budget, preserve finalization time, and are audited and metered
+separately. Permanent request/authentication/format failures degrade immediately.
+
+## Actionable failure summaries (0.8.4)
+
+The Home and run-result views show a direct diagnosis without requiring users
+to inspect raw audit events. The summary identifies provider overload versus a
+final timeout or other request failure, reports attempts and retries, preserves
+the latest sanitized provider message, states whether game observations were
+already collected, and recommends the next action. Only unresolved failures
+after the most recent successful model response contribute to this diagnosis.
+
+## Lightweight live progress (0.8.5)
+
+Run summaries expose a monotonic revision, terminal flag, current stage and a
+payload-free latest-event projection. While a run is active the Hosted panel
+polls only this lightweight context with a single in-flight refresh, displays
+progress at a one-second foreground cadence, and does not repeatedly download
+the full audit. Full details load once when the run becomes terminal or when the
+user explicitly requests them. Detail reads are single-flight, coalesce one
+pending refresh, and retain the last successful content after a timeout.

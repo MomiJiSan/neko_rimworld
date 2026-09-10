@@ -81,12 +81,18 @@ export type AgentRun = {
   cycle?: number
   duration_ms?: number
   event_count?: number
+  revision?: number
+  terminal?: boolean
+  stage?: string
+  latest_event?: AgentAuditEvent | null
+  latest_event_summary?: string | null
   model_calls?: number
   model_responses?: number
   model_failures?: number
   model_cancellations?: number
   usage?: UsageTotals
   latest_request?: Record<string, any> | null
+  failure_summary?: Record<string, any> | null
   tool_calls?: number
   tool_failures?: number
   events?: AgentAuditEvent[]
@@ -140,4 +146,5 @@ export const BUDGET_FIELDS = [
   { key: "request_timeout_seconds", label: "单次模型请求上限", min: 3, max: 60, initial: 60 },
   { key: "run_budget_seconds", label: "整个 Agent 运行上限", min: 10, max: 90, initial: 90 },
   { key: "finalization_reserve_seconds", label: "结束提交预留", min: 0, max: 30, initial: 15 },
+  { key: "max_output_tokens", label: "单次模型输出上限（token）", min: 64, max: 131072, initial: 32768 },
 ]

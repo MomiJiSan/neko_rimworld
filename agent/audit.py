@@ -151,6 +151,41 @@ def audit_safe(value: object, *, _depth: int = 0) -> Any:
     return f"<{type(value).__name__}>"
 
 
+def _progress_summary(event: Mapping[str, Any]) -> str:
+    name = str(event.get("event") or "unknown")
+    data = event.get("data") if isinstance(event.get("data"), Mapping) else {}
+    if name == "run_created":
+        return "Run created."
+    if name == "model_request_started":
+        attempt = data.get("attempt")
+        maximum = data.get("max_attempts")
+        suffix = f" (attempt {attempt}/{maximum})" if attempt and maximum else ""
+        return f"Requesting the model{suffix}."
+    if name == "model_retry_scheduled":
+        return f"Retrying the model in {data.get('delay_seconds', '?')} seconds."
+    if name in {"model_request_attempt_failed", "model_request_failed"}:
+        return f"Model request failed ({data.get('error_code') or 'unknown'})."
+    if name == "model_response_received":
+        return "Model response received."
+    if name == "tool_batch_started":
+        return f"Executing {data.get('count', '?')} tool call(s)."
+    if name == "tool_started":
+        return f"Tool started: {data.get('name') or 'unknown'}."
+    if name == "tool_completed":
+        return f"Tool completed: {data.get('name') or 'unknown'}."
+    if name == "tool_failed":
+        return f"Tool failed: {data.get('name') or 'unknown'}."
+    if name == "tool_batch_completed":
+        return "Tool batch completed."
+    if name in {"final_received", "degraded_final_created"}:
+        return "Preparing the final result."
+    if name == "run_completed":
+        return "Run completed."
+    if name == "run_cancelled":
+        return "Run cancelled."
+    return name.replace("_", " ").capitalize() + "."
+
+
 class AgentAuditLedger:
     """One run's immutable event sequence plus a derived current state."""
 
@@ -238,6 +273,58 @@ class AgentAuditLedger:
             for item in self._events:
                 name = str(item.get("event") or "unknown")
                 event_counts[name] = event_counts.get(name, 0) + 1
+            last_response_index = max(
+                (index for index, event in enumerate(self._events) if event["event"] == "model_response_received"),
+                default=-1,
+            )
+            unresolved_events = self._events[last_response_index + 1 :]
+            failure_events = [
+                event
+                for event in unresolved_events
+                if event["event"] in {"model_request_attempt_failed", "model_request_failed"}
+            ]
+            last_failure = failure_events[-1]["data"] if failure_events else {}
+            provider_failures = [
+                event["data"]["diagnostics"]["provider_error"]
+                for event in failure_events
+                if isinstance(event["data"].get("diagnostics"), Mapping)
+                and isinstance(event["data"]["diagnostics"].get("provider_error"), Mapping)
+            ]
+            failure_summary = (
+                {
+                    "error_code": last_failure.get("error_code"),
+                    "finish_reason": last_failure.get("diagnostics", {}).get("finish_reason"),
+                    "max_output_tokens": last_failure.get("diagnostics", {}).get("max_output_tokens"),
+                    "usage": last_failure.get("usage", {}),
+                    "message": last_failure.get("message"),
+                    "phase": (
+                        last_failure.get("diagnostics", {}).get("phase")
+                        if isinstance(last_failure.get("diagnostics"), Mapping)
+                        else None
+                    ),
+                    "attempts": event_counts.get("model_request_started", 0),
+                    "current_cycle_attempts": sum(
+                        1 for event in unresolved_events if event["event"] == "model_request_started"
+                    ),
+                    "failed_attempts": len(failure_events),
+                    "retries": sum(1 for event in unresolved_events if event["event"] == "model_retry_scheduled"),
+                    "provider_failures": len(provider_failures),
+                    "provider_error": provider_failures[-1] if provider_failures else None,
+                }
+                if failure_events
+                else None
+            )
+            latest_event = self._events[-1] if self._events else None
+            latest_event_header = (
+                {
+                    "event_seq": latest_event.get("event_seq"),
+                    "event": latest_event.get("event"),
+                    "cycle": latest_event.get("cycle"),
+                    "elapsed_ms": latest_event.get("elapsed_ms"),
+                }
+                if latest_event is not None
+                else None
+            )
             return {
                 "run_id": self.run_id,
                 "question": self._question_preview,
@@ -250,9 +337,16 @@ class AgentAuditLedger:
                 "updated_at": self._updated_at,
                 "duration_ms": round(self.elapsed_seconds * 1000.0, 2),
                 "event_count": len(self._events),
+                "revision": len(self._events),
+                "terminal": self._state
+                in {AgentRunState.COMPLETED, AgentRunState.CANCELLED, AgentRunState.FAILED},
+                "stage": self._state.value,
+                "latest_event": latest_event_header,
+                "latest_event_summary": _progress_summary(latest_event) if latest_event is not None else None,
                 "model_calls": event_counts.get("model_request_started", 0),
                 "model_responses": event_counts.get("model_response_received", 0),
-                "model_failures": event_counts.get("model_request_failed", 0),
+                "model_failures": event_counts.get("model_request_failed", 0)
+                + event_counts.get("model_request_attempt_failed", 0),
                 "model_cancellations": event_counts.get("model_request_cancelled", 0),
                 "usage": summarize_usage(
                     event_counts.get("model_request_started", 0),
@@ -260,7 +354,12 @@ class AgentAuditLedger:
                         event["data"].get("usage")
                         for event in self._events
                         if event["event"]
-                        in {"model_response_received", "model_request_failed", "model_request_cancelled"}
+                        in {
+                            "model_response_received",
+                            "model_request_attempt_failed",
+                            "model_request_failed",
+                            "model_request_cancelled",
+                        }
                     ),
                 ),
                 "latest_request": next(
@@ -268,11 +367,17 @@ class AgentAuditLedger:
                         event["data"].get("diagnostics")
                         for event in reversed(self._events)
                         if event["event"]
-                        in {"model_response_received", "model_request_failed", "model_request_cancelled"}
+                        in {
+                            "model_response_received",
+                            "model_request_attempt_failed",
+                            "model_request_failed",
+                            "model_request_cancelled",
+                        }
                         and event["data"].get("diagnostics")
                     ),
                     None,
                 ),
+                "failure_summary": failure_summary,
                 "tool_calls": event_counts.get("tool_call_requested", 0),
                 "tool_failures": event_counts.get("tool_failed", 0),
             }
@@ -328,6 +433,8 @@ class AgentAuditLedger:
     def _ensure_capacity_locked(self) -> None:
         if len(self._events) < MAX_EVENTS_PER_RUN - 1:
             return
+        if len(self._events) >= MAX_EVENTS_PER_RUN:
+            raise AgentAuditCapacityError("agent audit event capacity reached")
         before = self._state
         self._state = AgentRunState.FAILED
         self._ended_monotonic = time.monotonic()

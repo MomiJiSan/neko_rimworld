@@ -397,6 +397,57 @@ async def test_blank_token_retains_saved_token_while_moving_listener() -> None:
 
 
 @pytest.mark.asyncio
+async def test_unchanged_bridge_settings_keep_the_active_listener() -> None:
+    port = reserve_port()
+    plugin, _reports = make_plugin(
+        {"neko_rimworld": {"port": port, "pairing_token": TOKEN, "diagnostic_log_capacity": 20}}
+    )
+    await plugin.startup()
+    bridge = plugin._bridge
+
+    result = await plugin.save_bridge_settings(
+        port=port,
+        pairing_token="",
+        ui_nonce=plugin._settings_action_nonce,
+    )
+    try:
+        assert result.value["status"] == "listening"
+        assert plugin._bridge is bridge
+        assert plugin.config.updates == []
+    finally:
+        await plugin.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_same_port_token_change_restarts_with_an_authenticated_client() -> None:
+    from plugin.plugins.neko_rimworld.tests.test_bridge import connect_and_challenge, finish_authentication
+
+    replacement_token = "fedcba9876543210fedcba9876543210"
+    port = reserve_port()
+    plugin, _reports = make_plugin(
+        {"neko_rimworld": {"port": port, "pairing_token": TOKEN, "diagnostic_log_capacity": 20}}
+    )
+    await plugin.startup()
+    original_bridge = plugin._bridge
+    client, hello, challenge = connect_and_challenge(port)
+    finish_authentication(client, hello, challenge, TOKEN)
+
+    try:
+        result = await plugin.save_bridge_settings(
+            port=port,
+            pairing_token=replacement_token,
+            ui_nonce=plugin._settings_action_nonce,
+        )
+        assert result.value["status"] == "listening"
+        assert plugin._bridge is not None and plugin._bridge is not original_bridge
+        assert plugin._bridge.running
+        assert plugin.config.value["neko_rimworld"]["pairing_token"] == replacement_token
+    finally:
+        client.close()
+        await plugin.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_blank_token_is_rejected_when_no_token_exists() -> None:
     plugin, _reports = make_plugin({"neko_rimworld": {"pairing_token": ""}})
 
@@ -613,6 +664,21 @@ async def test_consult_requires_model_configuration() -> None:
     plugin, _reports = make_plugin({})
     result = await plugin.rimworld_consult(question="How is the colony?")
     assert result.error.code == "agent_not_configured"
+
+
+@pytest.mark.asyncio
+async def test_output_budget_save_validate_and_context():
+    plugin, _ = make_plugin({})
+    for value in (True, 64.5, 131073):
+        result = await plugin.save_agent_settings(base_url="https://example.com/v1", model="test",
+            budgets={"max_output_tokens": value}, ui_nonce=plugin._settings_action_nonce)
+        assert result.error.code == "invalid_agent_settings"
+    result = await plugin.save_agent_settings(base_url="https://example.com/v1", model="test",
+        budgets={"max_output_tokens": 32768}, ui_nonce=plugin._settings_action_nonce)
+    assert result.is_ok()
+    assert plugin.config.updates[-1]["neko_rimworld"]["agent"]["max_output_tokens"] == 32768
+    context = await plugin.dashboard_ui_context()
+    assert context["configuration"]["agent_budgets"]["max_output_tokens"] == 32768
 
 
 @pytest.mark.asyncio

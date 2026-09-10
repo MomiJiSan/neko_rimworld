@@ -33,18 +33,19 @@ function setup() {
   const root=window.document.createElement("main");window.document.body.append(root);
   const state={ action_nonce:"test-nonce", status:"ready", port:48919, configuration:{token_configured:true,agent_configured:true,agent_api_key_configured:true,agent_base_url:"https://example.com/v1",agent_model:"test"}, agent:{active_count:0,recent_count:0,active_runs:[],recent_runs:[],latest_run:null} };
   const calls=[];
+  let refreshes=0;
   let invoke=async (id,args) => ({ result:{ status:"ok" } });
-  const props={ state, plugin:{id:"neko_rimworld",name:"RimWorld"}, actions:["rimworld_report","get_agent_run_details","rimworld_consult","probe_game_overview","save_agent_settings","save_bridge_settings"].map(id=>({id,entry_id:id})), warnings:[], locale:"zh-CN", api:{call:async(id,args)=>{calls.push({id,args});return invoke(id,args)}, refresh:async()=>render()} };
+  const props={ state, plugin:{id:"neko_rimworld",name:"RimWorld"}, actions:["rimworld_report","get_agent_run_details","rimworld_consult","probe_game_overview","save_agent_settings","save_bridge_settings"].map(id=>({id,entry_id:id})), warnings:[], locale:"zh-CN", api:{call:async(id,args)=>{calls.push({id,args});return invoke(id,args)}, refresh:async()=>{refreshes++;render()}} };
   function render(){ui.render(ui.h(window.TestPanel,props),root)}
   function button(label, selector="button") { const found=[...root.querySelectorAll(selector)].find(x=>x.textContent===label);assert.ok(found,`Missing ${label}: ${root.textContent}`);return found; }
   async function click(label,selector="button"){button(label,selector).click();await flush()}
   async function tab(label){await click(label,'[role="tab"]')}
   async function type(input,value){assert.ok(input);input.value=value;input.dispatchEvent(new window.Event("input",{bubbles:true}));await flush()}
   render();
-  return {window,root,props,state,calls,render,button,click,tab,type,setInvoke(fn){invoke=fn},async close(){ui.render(null,root);await window.happyDOM.abort();window.close()}};
+  return {window,root,props,state,calls,render,button,click,tab,type,refreshes:()=>refreshes,setInvoke(fn){invoke=fn},async close(){ui.render(null,root);await window.happyDOM.abort();window.close()}};
 }
 
-function summary(id,question){return {run_id:id,question,state:"completed",result_status:"ok",result_summary:question+" summary",event_count:61,model_calls:1,tool_calls:1,duration_ms:1000}}
+function summary(id,question){return {run_id:id,question,state:"completed",result_status:"ok",result_summary:question+" summary",event_count:61,revision:61,terminal:true,stage:"completed",latest_event:{event_seq:61,event:"run_completed",cycle:1,elapsed_ms:1000},latest_event_summary:"Run completed.",model_calls:1,tool_calls:1,duration_ms:1000}}
 function detail(id,question,offset=0){return {...summary(id,question),events:[{event_seq:offset+1,event:"model_response_received",elapsed_ms:100,data:{content:question}}],events_page:{offset,limit:50,total:61,has_more:offset===0},result:{status:"ok",answer:question+" full",summary:question+" summary",observations:[]}}}
 
 test("four pages preserve drafts across navigation and server refresh",async()=>{
@@ -76,9 +77,59 @@ test("running consultation survives navigation and prevents duplicate submit",as
     await h.tab("主页");assert.match(h.root.textContent,/Agent 运行中/);
     finish({result:{status:"degraded",summary:"A limited result",audit:{run_id:"run-new"}}});await flush();
     await h.tab("调试");assert.match(h.root.textContent,/A limited result/);
-    await h.click("打开本次会话详情");assert.match(h.root.textContent,/completed question full/);
+    await h.click("打开本次会话详情");await flush();assert.match(h.root.textContent,/completed question full/);
     assert.equal(h.root.querySelector('#rimworld-main-nav-tab-sessions').getAttribute("aria-selected"),"true");
     assert.equal(h.calls.filter(x=>x.id==="get_agent_run_details").length,1);
+  }finally{await h.close()}
+});
+
+test("degraded runs explain the provider failure and next action without opening raw events",async()=>{
+  const h=setup();try{
+    const failed={...summary("failed-run","Colony status"),result_status:"degraded",model_calls:4,model_failures:3,tool_calls:2,failure_summary:{
+      error_code:"model_request_deadline",phase:"first_response",attempts:4,failed_attempts:3,retries:2,provider_failures:2,
+      provider_error:{type:"upstream_error",message:"Our servers are currently overloaded. Please try again later."}
+    }};
+    h.state.agent.recent_runs=[failed];h.state.agent.latest_run=failed;h.render();await flush();
+    assert.match(h.root.textContent,/模型服务过载/);
+    assert.match(h.root.textContent,/已自动重试 2 次/);
+    assert.match(h.root.textContent,/稍后重试或更换模型服务/);
+    h.setInvoke(async()=>({result:{...detail("failed-run","Colony status"),...failed,result:{status:"degraded",answer:"fallback",summary:"fallback",observations:[{}]}}}));
+    await h.click("查看本次详情");await flush();
+    assert.match(h.root.textContent,/已取得 1 份游戏观察/);
+    assert.match(h.root.textContent,/Our servers are currently overloaded/);
+  }finally{await h.close()}
+});
+
+test("active runs use lightweight progress and fetch full detail once on completion",async()=>{
+  const h=setup();try{
+    const active={...summary("active-run","Live progress"),state:"model_requesting",result_status:null,result_summary:null,terminal:false,revision:4,event_count:4,stage:"model_requesting",latest_event:{event_seq:4,event:"model_retry_scheduled",cycle:1,elapsed_ms:2500},latest_event_summary:"Retrying the model in 0.5 seconds.",duration_ms:2500};
+    h.state.agent.active_count=1;h.state.agent.active_runs=[active];h.state.agent.recent_runs=[];h.state.agent.latest_run=active;h.render();await flush();
+    assert.match(h.root.textContent,/正在重试模型/);
+    await h.tab("会话与事件");await flush();
+    assert.match(h.root.textContent,/正在重试模型/);
+    assert.match(h.root.textContent,/进度版本.*4/);
+    assert.equal(h.calls.filter(x=>x.id==="get_agent_run_details").length,0);
+
+    const completed={...summary("active-run","Live progress"),revision:9,event_count:9};
+    h.setInvoke(async(id,args)=>id==="get_agent_run_details"?{result:{...detail(args.run_id,"Live progress",args.event_offset),revision:9,terminal:true}}:{result:{status:"ok"}});
+    h.state.agent.active_count=0;h.state.agent.active_runs=[];h.state.agent.recent_runs=[completed];h.state.agent.latest_run=completed;h.render();await flush();
+    assert.match(h.root.textContent,/Live progress full/);
+    assert.equal(h.calls.filter(x=>x.id==="get_agent_run_details").length,1);
+    h.render();await flush();
+    assert.equal(h.calls.filter(x=>x.id==="get_agent_run_details").length,1);
+  }finally{await h.close()}
+});
+
+test("detail refresh failure preserves the last successful detail",async()=>{
+  const h=setup();try{
+    const run=summary("stable-run","Stable detail");h.state.agent.recent_runs=[run];h.state.agent.latest_run=run;
+    h.setInvoke(async()=>({result:detail("stable-run","Stable detail")}));h.render();await flush();await h.tab("会话与事件");await flush();
+    assert.match(h.root.textContent,/Stable detail full/);
+    h.setInvoke(async()=>{throw new Error("Hosted surface request timed out.")});
+    await h.click("刷新详情");
+    assert.match(h.root.textContent,/Stable detail full/);
+    assert.match(h.root.textContent,/详情刷新暂时失败/);
+    assert.match(h.root.textContent,/已保留上次成功读取的内容/);
   }finally{await h.close()}
 });
 
@@ -114,6 +165,26 @@ test("budget edits are included in save and secret inputs clear only after succe
 });
 
 
+test("failed bridge save refreshes backend state and preserves the draft",async()=>{
+  const h=setup();try{
+    h.setInvoke(async(id)=>{
+      if(id==="save_bridge_settings"){
+        h.state.status="error";
+        throw new Error("candidate listener failed to start");
+      }
+      return {result:{status:"ok"}};
+    });
+    await h.tab("设置");
+    const port=h.root.querySelector('input[type="number"]');await h.type(port,"48920");
+    await h.click("保存并重启桥接");
+    assert.equal(h.refreshes(),1);
+    assert.equal(port.value,"48920");
+    assert.match(h.root.textContent,/candidate listener failed to start/);
+    assert.match(h.root.textContent,/error/);
+  }finally{await h.close()}
+});
+
+
 test("late run detail replies cannot replace a newer selection",async()=>{
   const h=setup();try{
     const first=summary("r1","First");const second=summary("r2","Second");
@@ -134,6 +205,22 @@ test("top navigation supports keyboard selection",async()=>{
     tab.dispatchEvent(new h.window.KeyboardEvent("keydown",{key:"End",bubbles:true}));await flush();
     assert.equal(h.root.querySelector("#rimworld-main-nav-tab-settings").getAttribute("aria-selected"),"true");
     assert.ok(h.root.querySelector('input[type="password"]'));
+  }finally{await h.close()}
+});
+
+test("output budget is editable and length errors display actual limits",async()=>{
+  const h=setup();try{
+    await h.tab("设置");
+    const input=h.root.querySelectorAll('input[type="number"]')[7];
+    assert.equal(input.value,"32768");await h.type(input,"65536");
+    await h.click("保存模型与运行预算");
+    assert.equal(h.calls.at(-1).args.budgets.max_output_tokens,65536);
+    const run={...summary("length-run","Budget failure"),result_status:"degraded",failure_summary:{error_code:"model_output_limit",finish_reason:"length",max_output_tokens:32768,usage:{completion_tokens:32768,reasoning_tokens:32000}}};
+    h.state.agent.latest_run=run;h.state.agent.recent_runs=[run];h.render();await flush();
+    h.setInvoke(async()=>({result:{...detail("length-run","Budget failure"),...run,result:{status:"degraded"}}}));
+    await h.tab("主页");await h.click("查看本次详情");await flush();
+    assert.match(h.root.textContent,/输出预算不足/);assert.match(h.root.textContent,/32768 \/ 32000/);
+    assert.match(h.root.textContent,/length/);
   }finally{await h.close()}
 });
 

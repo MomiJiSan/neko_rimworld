@@ -44,7 +44,7 @@ from .query_tools import CatalogTools
 from .reports import ReportError, ReportStore
 from .state import BridgeStateStore, BridgeStatus, DiagnosticRing, json_safe_copy, utc_now
 
-PLUGIN_VERSION = "0.8.0"
+PLUGIN_VERSION = "1.0.0"
 DEFAULT_PORT = 48919
 DEFAULT_DIAGNOSTIC_CAPACITY = 200
 MIN_TOKEN_LENGTH = 32
@@ -225,6 +225,7 @@ class NekoRimworldPlugin(NekoPluginBase):
                         "request_timeout_seconds",
                         "run_budget_seconds",
                         "finalization_reserve_seconds",
+                        "max_output_tokens",
                     )
                 },
             }
@@ -383,6 +384,18 @@ class NekoRimworldPlugin(NekoPluginBase):
                 pairing_token=effective_token,
                 diagnostic_log_capacity=current_settings.diagnostic_log_capacity,
             )
+            bridge = self._bridge
+            if self._settings == next_settings and bridge is not None and bridge.running:
+                active_port = bridge.address[1]
+                self._settings_action_nonce = secrets.token_urlsafe(32)
+                return Ok(
+                    {
+                        "status": "listening",
+                        "summary": f"RimWorld bridge is already listening on 127.0.0.1:{active_port}.",
+                        "port": active_port,
+                        "token_configured": True,
+                    }
+                )
             if not await self._stop_existing_bridge():
                 self._state_store.transition(
                     BridgeStatus.ERROR,
@@ -528,6 +541,7 @@ class NekoRimworldPlugin(NekoPluginBase):
                         "request_timeout_seconds": {"type": "number", "minimum": 3, "maximum": 60},
                         "run_budget_seconds": {"type": "number", "minimum": 10, "maximum": 90},
                         "finalization_reserve_seconds": {"type": "number", "minimum": 0, "maximum": 30},
+                        "max_output_tokens": {"type": "integer", "minimum": 64, "maximum": 131072},
                     },
                 },
             },
@@ -563,6 +577,7 @@ class NekoRimworldPlugin(NekoPluginBase):
             "request_timeout_seconds",
             "run_budget_seconds",
             "finalization_reserve_seconds",
+            "max_output_tokens",
         }
         if budgets is not None and (not isinstance(budgets, dict) or set(budgets) - allowed_budgets):
             return Err(SdkError("Unsupported budget fields.", code="invalid_agent_settings"))
@@ -577,7 +592,7 @@ class NekoRimworldPlugin(NekoPluginBase):
                 request_timeout_seconds=selected_budgets["request_timeout_seconds"],
                 run_budget_seconds=selected_budgets["run_budget_seconds"],
                 preferred_cycles=self._agent_settings.preferred_cycles,
-                max_output_tokens=self._agent_settings.max_output_tokens,
+                max_output_tokens=selected_budgets["max_output_tokens"],
                 temperature=self._agent_settings.temperature,
                 connect_timeout_seconds=selected_budgets["connect_timeout_seconds"],
                 first_response_timeout_seconds=selected_budgets["first_response_timeout_seconds"],

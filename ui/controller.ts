@@ -22,11 +22,16 @@ export function usePanelController(props: PluginSurfaceProps<DashboardState>) {
   const [detailError, setDetailError] = useState<Error | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const detailSequence = useRef(0)
+  const detailInFlight = useRef<Record<string, boolean>>({})
+  const detailPending = useRef<Record<string, boolean>>({})
+  const detailTarget = useRef({ runId: selectedRunId, eventOffset })
+  detailTarget.current = { runId: selectedRunId, eventOffset }
   const mounted = useRef(true)
   const latestProps = useRef(props)
   latestProps.current = props
   const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<Error | null>(null)
+  const refreshInFlight = useRef<Promise<void> | null>(null)
   const [reportPage, setReportPage] = useState<Record<string, any> | null>(null)
   const [reportOffset, setReportOffset] = useState(0)
   const [selectedReportId, setSelectedReportId] = useLocalState<string>("rimworld:selected-report", "")
@@ -77,11 +82,19 @@ export function usePanelController(props: PluginSurfaceProps<DashboardState>) {
     }
   }, [latestRun?.run_id, followLatest, selectedRunId])
 
-  async function refresh() {
-    setRefreshing(true); setRefreshError(null)
-    try { await latestProps.current.api.refresh() }
-    catch (error) { if (mounted.current) setRefreshError(normalizedError(error)) }
-    finally { if (mounted.current) setRefreshing(false) }
+  function refresh(): Promise<void> {
+    if (refreshInFlight.current) return refreshInFlight.current
+    const request = (async () => {
+      setRefreshing(true); setRefreshError(null)
+      try { await latestProps.current.api.refresh() }
+      catch (error) { if (mounted.current) setRefreshError(normalizedError(error)) }
+      finally {
+        refreshInFlight.current = null
+        if (mounted.current) setRefreshing(false)
+      }
+    })()
+    refreshInFlight.current = request
+    return request
   }
   async function call(id: string, args: Record<string, any>, timeoutMs = 15_000) {
     const current = latestProps.current
@@ -90,22 +103,32 @@ export function usePanelController(props: PluginSurfaceProps<DashboardState>) {
     return current.api.call(action.entry_id || action.id, args, { timeoutMs, userInitiated: true })
   }
   async function loadDetail() {
-    if (!selectedRunId) return
+    const target = detailTarget.current
+    if (!target.runId) return
+    if (detailInFlight.current[target.runId]) { detailPending.current[target.runId] = true; return }
+    detailInFlight.current[target.runId] = true
     const sequence = ++detailSequence.current
     setDetailLoading(true); setDetailError(null)
     try {
-      const result = actionPayload(await call("get_agent_run_details", { run_id: selectedRunId, event_offset: eventOffset, event_limit: 50 }, 8_000))
+      const result = actionPayload(await call("get_agent_run_details", { run_id: target.runId, event_offset: target.eventOffset, event_limit: 50 }, 12_000))
       if (!mounted.current || sequence !== detailSequence.current) return
-      if (result?.run_id !== selectedRunId) throw new Error("返回的会话与当前选择不匹配。")
+      if (result?.run_id !== target.runId) throw new Error("返回的会话与当前选择不匹配。")
       setDetail(result)
     } catch (error) {
-      if (mounted.current && sequence === detailSequence.current) { setDetail(null); setDetailError(normalizedError(error)) }
-    } finally { if (mounted.current && sequence === detailSequence.current) setDetailLoading(false) }
+      if (mounted.current && sequence === detailSequence.current) setDetailError(normalizedError(error))
+    } finally {
+      delete detailInFlight.current[target.runId]
+      if (mounted.current && sequence === detailSequence.current) setDetailLoading(false)
+      if (detailPending.current[target.runId] && mounted.current && detailTarget.current.runId === target.runId) {
+        delete detailPending.current[target.runId]
+        void loadDetail()
+      }
+    }
   }
   useEffect(() => {
-    if (page === "sessions" && sessionMode === "runs" && selectedRunId) void loadDetail()
+    if (page === "sessions" && sessionMode === "runs" && selectedRunId && selectedSummary?.terminal) void loadDetail()
     return () => { detailSequence.current++ }
-  }, [page, sessionMode, selectedRunId, eventOffset, selectedSummary?.event_count, selectedSummary?.result_status, state.action_nonce])
+  }, [page, sessionMode, selectedRunId, eventOffset, selectedSummary?.terminal, selectedSummary?.revision, state.action_nonce])
   async function loadReports() {
     const sequence = ++reportSequence.current
     setReportLoading(true); setReportError(null)
@@ -138,9 +161,9 @@ export function usePanelController(props: PluginSurfaceProps<DashboardState>) {
     let timer: any
     async function tick() {
       await refresh()
-      if (!stopped) timer = setTimeout(tick, 2500)
+      if (!stopped) timer = setTimeout(tick, typeof document !== "undefined" && document.hidden ? 4000 : 1000)
     }
-    timer = setTimeout(tick, 2500)
+    timer = setTimeout(tick, typeof document !== "undefined" && document.hidden ? 4000 : 1000)
     return () => { stopped = true; clearTimeout(timer) }
   }, [active])
 
@@ -148,7 +171,11 @@ export function usePanelController(props: PluginSurfaceProps<DashboardState>) {
     detailSequence.current++; setDetail(null); setDetailError(null)
     setSelectedRunId(id); setEventOffset(0); setSelectedEvent(null); setFollowLatest(false)
   }
-  function openRun(id: string) { selectRun(id); setSessionMode("runs"); setPage("sessions") }
+  function openRun(id: string) {
+    selectRun(id); setSessionMode("runs"); setPage("sessions")
+    detailTarget.current = { runId: id, eventOffset: 0 }
+    setTimeout(() => { void loadDetail() }, 0)
+  }
   function changeEventPage(offset: number) { setEventOffset(Math.max(0, offset)); setSelectedEvent(null) }
   function changePort(value: number | "") { setPort(value); setBridgeDirty(true); setBridgeSaved(false) }
   function changeToken(value: string) { setPairingToken(value); setBridgeDirty(true); setBridgeSaved(false) }
@@ -168,7 +195,10 @@ export function usePanelController(props: PluginSurfaceProps<DashboardState>) {
       actionSummary(await call("save_bridge_settings", { port, pairing_token: token, ui_nonce: latestProps.current.state?.action_nonce }))
       setPairingToken(""); setBridgeDirty(false); setBridgeSaved(true)
       await refresh()
-    } catch (error) { setBridgeError(normalizedError(error, token)) }
+    } catch (error) {
+      setBridgeError(normalizedError(error, token))
+      await refresh()
+    }
     finally { saveGate.current = false; if (mounted.current) setSavingBridge(false) }
   }
   async function saveAgent() {

@@ -77,6 +77,23 @@ def test_start_stop_is_idempotent_and_releases_port() -> None:
         probe.close()
 
 
+def test_stop_with_authenticated_client_allows_immediate_same_port_restart() -> None:
+    server = BridgeServer(TOKEN, port=0)
+    _, port = server.start()
+    client, hello, challenge = connect_and_challenge(port)
+    try:
+        finish_authentication(client, hello, challenge, TOKEN)
+        assert server.stop(timeout=2)
+
+        replacement = BridgeServer(TOKEN, port=port)
+        try:
+            assert replacement.start() == ("127.0.0.1", port)
+        finally:
+            assert replacement.stop(timeout=2)
+    finally:
+        client.close()
+
+
 def test_repeated_start_stop_leaves_no_bridge_worker() -> None:
     server = BridgeServer(TOKEN, port=0)
     for _ in range(10):

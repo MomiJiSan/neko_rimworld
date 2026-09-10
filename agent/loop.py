@@ -8,7 +8,8 @@ import json
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 
-from .audit import AgentAuditLedger, AgentAuditRegistry, AgentRunState
+from ..state import redact_text
+from .audit import AgentAuditCapacityError, AgentAuditLedger, AgentAuditRegistry, AgentRunState
 from .contracts import PreparedToolCall
 from .handoff import HandoffValidationError, SubmissionPatchError, attach_agent_handoff, count_handoff_tokens
 from .model_client import AgentModelSettings, ModelClient, ModelClientError, OpenAICompatibleModelClient
@@ -26,11 +27,46 @@ class LoggerLike(Protocol):
 
 
 ModelFactory = Callable[[AgentModelSettings], ModelClient]
+MAX_MODEL_ATTEMPTS = 3
+MODEL_RETRY_DELAYS_SECONDS = (0.5, 1.5)
+_RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+_RETRYABLE_PROVIDER_MARKERS = (
+    "overload",
+    "rate_limit",
+    "rate limit",
+    "server_error",
+    "temporar",
+    "timeout",
+    "try again",
+    "unavailable",
+    "upstream",
+)
 
 
 def _canonical_hash(value: object) -> str:
     encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _model_retry_reason(error: ModelClientError) -> str | None:
+    diagnostics = error.diagnostics
+    if diagnostics.get("first_useful_delta_ms") is not None:
+        return None
+    if error.code in {"model_transport", "model_transport_timeout", "model_first_response_timeout"}:
+        return error.code
+    if error.code == "model_incomplete_stream":
+        return error.code
+    if error.code == "model_http_error" and diagnostics.get("http_status") in _RETRYABLE_HTTP_STATUSES:
+        return f"http_{diagnostics['http_status']}"
+    if error.code != "model_stream_error":
+        return None
+    provider_error = diagnostics.get("provider_error")
+    provider = provider_error if isinstance(provider_error, Mapping) else {}
+    marker_text = " ".join(
+        str(provider.get(key) or "").lower()
+        for key in ("code", "type", "message")
+    )
+    return "provider_transient" if any(marker in marker_text for marker in _RETRYABLE_PROVIDER_MARKERS) else None
 
 
 class AgentRuntime:
@@ -66,6 +102,39 @@ class AgentRuntime:
             ledger=ledger, system_prompt=build_system_prompt(settings.preferred_cycles), question=question
         )
         try:
+            return await self._run_session(question, settings, ledger, session, reference_report)
+        except AgentAuditCapacityError:
+            # The terminal event already occupies the last ledger slot. Saving
+            # the result/report must not require another append or transition.
+            summary = ledger.summary()
+            cancelled = task is not None and task.cancelling() > 0
+            result = attach_agent_handoff({
+                "status": "cancelled" if cancelled else "degraded",
+                "answer": session.submission.full_text or session.last_assistant_content
+                or "The consultation reached its audit capacity before completing.",
+                "caveats": ["The audit event limit was reached; collected observations and any draft were retained."],
+                "observations": session.observations,
+                "freshness": self._freshness(session.observations),
+                "draft": session.submission.snapshot(),
+                "audit": {"run_id": ledger.run_id, "error_code": "audit_capacity_reached",
+                          "cycles": summary["cycle"], "model_calls": summary["model_calls"],
+                          "tool_calls": summary["tool_calls"], "duration_ms": summary["duration_ms"]},
+            })
+            await self._retain_report(result, question, ledger, session, reference_report)
+            ledger.set_result(result)
+            self._logger.warning("[agent] audit capacity reached run_id={}", ledger.run_id)
+            if cancelled:
+                raise asyncio.CancelledError
+            return result
+        finally:
+            self._active_tasks.pop(ledger.run_id, None)
+            self._audit_registry.finish(ledger)
+
+    async def _run_session(
+        self, question: str, settings: AgentModelSettings, ledger: AgentAuditLedger,
+        session: AgentRunSession, reference_report: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        try:
             try:
                 async with asyncio.timeout(settings.run_budget_seconds):
                     result = await self._run_loop(question, settings, ledger, session, reference_report)
@@ -79,8 +148,8 @@ class AgentRuntime:
                 )
             result["draft"] = session.submission.snapshot()
             result = attach_agent_handoff(result)
-            await self._retain_report(result, question, ledger, session, reference_report)
             ledger.record("handoff_built", result.get("delivery"))
+            await self._retain_report(result, question, ledger, session, reference_report)
             self._log_handoff(ledger.run_id, result)
             ledger.set_result(result)
             return result
@@ -100,6 +169,8 @@ class AgentRuntime:
             await self._retain_report(cancelled, question, ledger, session, reference_report)
             ledger.set_result(cancelled)
             self._logger.info("[agent] run cancelled run_id={}", ledger.run_id)
+            raise
+        except AgentAuditCapacityError:
             raise
         except Exception as exception:
             self._logger.error(
@@ -128,14 +199,11 @@ class AgentRuntime:
                 )
             result["draft"] = session.submission.snapshot()
             result = attach_agent_handoff(result)
-            await self._retain_report(result, question, ledger, session, reference_report)
             ledger.record("handoff_built", result.get("delivery"))
+            await self._retain_report(result, question, ledger, session, reference_report)
             self._log_handoff(ledger.run_id, result)
             ledger.set_result(result)
             return result
-        finally:
-            self._active_tasks.pop(ledger.run_id, None)
-            self._audit_registry.finish(ledger)
 
     async def cancel_all(self) -> None:
         current = asyncio.current_task()
@@ -235,7 +303,10 @@ class AgentRuntime:
                     "Finish this consultation. full_text is the complete answer for the plugin panel. "
                     "agent_text is a concise, directly usable natural-language answer for the outer "
                     "N.E.K.O agent; it must not rely on private field names or formats and must fit "
-                    "within 180 tokens. Valid fields are saved within this run even when another field fails. "
+                    "within 180 tokens (aim for 80-120). Both texts describe the same findings: preserve "
+                    "subjects, scope and uncertainty, and add no new causal explanation in agent_text. "
+                    "For long answers submit both fields directly, rather than first returning a long plain-text report. "
+                    "Valid fields are saved within this run even when another field fails. "
                     "When correcting a rejected submission, send only required/changed fields; omit saved fields to reuse them. "
                     "Changing an existing full_text requires resubmitting matching agent_text."
                 ),
@@ -333,47 +404,108 @@ class AgentRuntime:
                 finalization_reserve_seconds=settings.finalization_reserve_seconds,
             )
             request_messages = session.request_messages(advisory)
-            request_timeout = min(settings.request_timeout_seconds, remaining)
-            ledger.transition(
-                AgentRunState.MODEL_REQUESTING,
-                "model_request_started",
-                {
+            tool_schemas = tools.schemas()
+            request_sha256 = _canonical_hash({"messages": request_messages, "tools": tool_schemas})
+            attempt = 1
+            while True:
+                attempt_remaining = settings.run_budget_seconds - ledger.elapsed_seconds
+                retry_reserve = settings.finalization_reserve_seconds if attempt > 1 else 0.0
+                request_timeout = min(
+                    settings.request_timeout_seconds,
+                    max(0.001, attempt_remaining - retry_reserve),
+                )
+                request_event = {
                     "model": settings.model,
                     "base_url": settings.base_url,
                     "timeout_seconds": request_timeout,
                     "messages": request_messages,
-                    "tools": tools.schemas(),
-                    "request_sha256": _canonical_hash({"messages": request_messages, "tools": tools.schemas()}),
-                },
-            )
-            session.model_calls += 1
-            try:
-                turn = await model.complete(request_messages, tools.schemas(), timeout=request_timeout)
-            except asyncio.CancelledError:
-                ledger.record(
-                    "model_request_cancelled",
-                    {"diagnostics": getattr(model, "last_diagnostics", {}), "usage": getattr(model, "last_usage", {})},
-                )
-                raise
-            except ModelClientError as exception:
-                ledger.transition(
-                    AgentRunState.DEGRADED,
-                    "model_request_failed",
-                    {
+                    "tools": tool_schemas,
+                    "request_sha256": request_sha256,
+                    "attempt": attempt,
+                    "max_attempts": MAX_MODEL_ATTEMPTS,
+                }
+                if attempt == 1:
+                    ledger.transition(AgentRunState.MODEL_REQUESTING, "model_request_started", request_event)
+                else:
+                    ledger.record("model_request_started", request_event)
+                session.model_calls += 1
+                try:
+                    turn = await model.complete(request_messages, tool_schemas, timeout=request_timeout)
+                    break
+                except asyncio.CancelledError:
+                    ledger.record(
+                        "model_request_cancelled",
+                        {
+                            "attempt": attempt,
+                            "diagnostics": getattr(model, "last_diagnostics", {}),
+                            "usage": getattr(model, "last_usage", {}),
+                        },
+                    )
+                    raise
+                except ModelClientError as exception:
+                    retry_reason = _model_retry_reason(exception)
+                    retry_delay = MODEL_RETRY_DELAYS_SECONDS[min(attempt - 1, len(MODEL_RETRY_DELAYS_SECONDS) - 1)]
+                    remaining_after_failure = settings.run_budget_seconds - ledger.elapsed_seconds
+                    retry_budget_floor = max(3.0, settings.finalization_reserve_seconds)
+                    will_retry = (
+                        retry_reason is not None
+                        and attempt < MAX_MODEL_ATTEMPTS
+                        and remaining_after_failure > retry_delay + retry_budget_floor
+                    )
+                    failure = {
+                        "attempt": attempt,
+                        "max_attempts": MAX_MODEL_ATTEMPTS,
                         "error_code": exception.code,
                         "message": str(exception),
                         "diagnostics": exception.diagnostics,
                         "usage": exception.usage,
-                    },
-                )
-                return self._finish_degraded(
-                    ledger,
-                    reason=str(exception),
-                    error_code=exception.code,
-                    observations=session.observations,
-                    fallback_answer=session.submission.full_text or session.last_assistant_content,
-                    already_degraded=True,
-                )
+                        "retryable": retry_reason is not None,
+                        "retry_reason": retry_reason,
+                        "will_retry": will_retry,
+                    }
+                    provider_error = exception.diagnostics.get("provider_error")
+                    provider = provider_error if isinstance(provider_error, Mapping) else {}
+                    log_method = self._logger.warning if will_retry else self._logger.error
+                    log_method(
+                        "[agent] model request {} run_id={} cycle={} attempt={}/{} error_code={} request_id={} "
+                        "phase={} provider_code={} provider_type={} provider_param={} provider_message={}",
+                        "retry scheduled" if will_retry else "failed",
+                        ledger.run_id,
+                        cycle,
+                        attempt,
+                        MAX_MODEL_ATTEMPTS,
+                        exception.code,
+                        redact_text(exception.diagnostics.get("request_id"), 128),
+                        redact_text(exception.diagnostics.get("phase"), 64),
+                        redact_text(provider.get("code"), 128),
+                        redact_text(provider.get("type"), 128),
+                        redact_text(provider.get("param"), 128),
+                        redact_text(provider.get("message"), 512),
+                    )
+                    if will_retry:
+                        ledger.record("model_request_attempt_failed", failure)
+                        ledger.record(
+                            "model_retry_scheduled",
+                            {
+                                "failed_attempt": attempt,
+                                "next_attempt": attempt + 1,
+                                "delay_seconds": retry_delay,
+                                "retry_reason": retry_reason,
+                                "remaining_seconds": round(remaining_after_failure, 3),
+                            },
+                        )
+                        await asyncio.sleep(retry_delay)
+                        attempt += 1
+                        continue
+                    ledger.transition(AgentRunState.DEGRADED, "model_request_failed", failure)
+                    return self._finish_degraded(
+                        ledger,
+                        reason=str(exception),
+                        error_code=exception.code,
+                        observations=session.observations,
+                        fallback_answer=session.submission.full_text or session.last_assistant_content,
+                        already_degraded=True,
+                    )
 
             ledger.transition(
                 AgentRunState.MODEL_RESPONDED,
@@ -429,6 +561,8 @@ class AgentRuntime:
                         )
                         ledger.record("tool_started", {"call_id": call.call_id, "name": call.name})
                         result = await tools.execute(prepared)
+                        if result.observation is not None:
+                            session.observations.append(result.observation)
                         ledger.record(
                             "tool_completed" if result.ok else "tool_failed",
                             {
@@ -439,8 +573,6 @@ class AgentRuntime:
                             },
                         )
                     tool_messages.append(result.as_message())
-                    if result.observation is not None:
-                        session.observations.append(result.observation)
                     if result.terminal and result.ok:
                         data_value = result.value.get("data")
                         if isinstance(data_value, Mapping) and submitted_response is None:

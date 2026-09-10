@@ -1,5 +1,52 @@
 # N.E.K.O RimWorld Design Brief
 
+## Current architecture: resource evidence 1.0
+
+Version 1.0 supersedes the early restrictions below concerning domain aggregation
+and stockpiles. The Mod now owns a bounded resource evidence read model; the
+Agent selects the question's scope and explains the returned facts. It does not
+need to paginate individual rocks, scan a cached dictionary for one key, or add
+stock quantities itself. This is the resource domain upgrade, not autonomous
+game control or an unbounded general simulation engine.
+
+`get_game_info` has two mutually exclusive modes: `resources` for the Mod-owned
+resource report, and the existing `requests` templates for precise object work.
+`query_game` and `describe_game_schema` remain available. There are still three
+game tools, plus terminal `submit_response`; no additional Agent or service.
+
+The shared `ResourceReports` module owns selector validation, deadline/scan
+limits, per-scope completeness, ID deduplication, definition aggregation and
+overlap receipts. `VerseResourceData` reads native game objects on the calling
+game thread; frozen evaluation implements the same primitive data interface.
+Only detached primitive records and JSON leave that seam, never live handles.
+
+Scopes are explicit: visible spawned ground; native storage-cell contents
+(not necessarily visible); spawned free colonists' inventory, worn equipment,
+weapons and active carried item; native cached counters. Cached readings are
+not physical items and never contribute to physical unions. A selected-scope
+union is not a universal colony total. Conflicting IDs invalidate the report.
+
+The supplies selector uses native CountAsResource, weapon flags and Apparel
+category ancestry. It excludes rock/corpse noise by default without deleting
+access: all_haulable or exact definitions remain supported. Rows aggregate
+definitions; examples are bounded and never used as the counting source.
+Unavailable physical values are null with an observed lower bound; a missing
+cached key is distinct from an observed zero. Schema knowledge is not evidence
+of a cache refresh cause or a missing building.
+
+The existing run lifecycle, async model I/O, bridge authentication, progressive
+audit, saved reports and submission repair are preserved. Model-authored prose
+can still contain unsupported hypotheses; exact game-computed quantities do not
+certify all free-form explanations. Runtime retains its 180-token handoff gate.
+
+Backward compatibility: a connected pre-1.0 Mod advertises no resource contract,
+so the plugin retains the legacy template/GraphQL tool schema. Upgrade both
+parts to activate resource evidence. No framework/SDK/platform changes required.
+
+Validation stays at the existing query-execution and Agent-run seams. Benchmark
+data, model experiments and capture-only tooling stay outside this plugin.
+See `docs/resource-evidence.md` for the API and limitations.
+
 ## Identity Lock
 
 - plugin_id: `neko_rimworld`
@@ -218,3 +265,47 @@ schema-id checked results per setup, and returns metadata without polluting game
 evidence. Startup injects a type/root directory instead of the full SDL. Existing
 report delivery and outer-agent entries are unchanged. See DATA_PATH.md for the
 breaking member names, exact targets, component fragments and scope limitations.
+
+## Bridge settings restart safety (0.8.1)
+
+POSIX listeners opt into address reuse so an authenticated connection's closing
+TCP state cannot prevent an immediate same-port replacement. Unchanged effective
+settings are a no-op that retains the active listener. Real changes preserve the
+existing pre-commit activation and rollback contract, and Hosted UI refreshes
+state after either success or failure while retaining unsaved drafts.
+
+## Provider error observability (0.8.2)
+
+OpenAI-compatible SSE events with a top-level `error` retain only bounded,
+sanitized provider fields plus byte size and a fingerprint. Exact configured
+API-key values, common credential assignments and control characters are
+removed before audit or logging. The raw provider event is never retained.
+Operational logs correlate the safe metadata with run ID, request ID, phase and
+plugin error code.
+
+## Safe transient retries (0.8.3)
+
+Retries are Agent-runtime attempts inside one model cycle, not new reasoning
+cycles. They replay the exact same request only when the failed attempt produced
+no useful delta and its failure is classified as transient. At most three total
+attempts are allowed, with bounded backoff and a finalization-budget guard.
+Intermediate failures, diagnostics and usage remain separate audit events and
+contribute to retained totals. Completed model turns and tool dispatch are never
+replayed.
+
+## User-facing failure diagnosis (0.8.4)
+
+AgentAuditLedger derives a bounded failure summary from the unresolved request
+sequence after the latest successful model response. Hosted Home and result
+views render that summary as a diagnosis, retry outcome, observation-retention
+statement and next action. Raw events remain available for deeper debugging but
+are no longer required to understand a failed consultation.
+
+## Live progress projection (0.8.5)
+
+The audit summary is the lightweight progress interface: revision is monotonic,
+terminal is absorbing, and the latest-event header never contains its large
+payload. Hosted polling is single-flight and adaptive to page visibility. Active
+runs do not trigger automatic full-detail reads; terminal transition fetches
+details once, while manual reads are coalesced and stale responses remain guarded
+by selection sequence. A failed detail refresh never discards prior content.

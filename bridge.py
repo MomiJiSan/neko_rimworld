@@ -5,6 +5,7 @@ from __future__ import annotations
 import queue
 import select
 import socket
+import sys
 import threading
 import time
 import uuid
@@ -219,6 +220,13 @@ class BridgeServer:
             try:
                 validate_pairing_token(self._token)
                 listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                if sys.platform != "win32":
+                    # An authenticated Mod connection may leave the server-side
+                    # endpoint in FIN-WAIT/TIME-WAIT after a settings restart.
+                    # Reuse permits an immediate same-port listener replacement;
+                    # it does not permit a second live listener without
+                    # SO_REUSEPORT.
+                    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 listener.bind((self._host, self._port))
                 listener.listen(1)
                 listener.settimeout(0.25)

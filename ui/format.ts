@@ -62,9 +62,25 @@ export function timing(value: unknown): string {
   return typeof value === "number" ? `${(value / 1000).toFixed(1)} 秒` : "—"
 }
 
+export function progressText(run: Record<string, any> | null | undefined): string {
+  const event = text(run?.latest_event?.event, "")
+  const data = run?.latest_event || {}
+  if (event === "model_request_started") return `正在请求模型（第 ${text(data.cycle, text(run?.cycle))} 轮）`
+  if (event === "model_retry_scheduled") return "正在重试模型"
+  if (event === "model_response_received") return "模型响应已返回，正在处理"
+  if (event === "tool_batch_started" || event === "tool_started") return "正在读取游戏信息"
+  if (event === "tool_completed" || event === "tool_batch_completed") return "游戏信息读取完成，正在继续分析"
+  if (event === "model_request_attempt_failed") return "模型请求暂时失败，正在判断是否重试"
+  if (event === "model_request_failed") return "模型请求失败"
+  if (event === "final_received" || event === "degraded_final_created") return "正在整理最终结果"
+  if (run?.terminal || event === "run_completed") return "运行已结束"
+  return text(run?.latest_event_summary, text(run?.stage, "正在运行"), 300)
+}
+
 export function budgetError(values: Record<string, number | "">, fields: Array<{ key: string; label: string; min: number; max: number }>): string | null {
   for (const field of fields) {
     const value = values[field.key]
+    if (field.key === "max_output_tokens" && !Number.isInteger(value)) return "输出 token 上限必须为整数。"
     if (typeof value !== "number" || !Number.isFinite(value) || value < field.min || value > field.max) return `${field.label}需要在 ${field.min}–${field.max} 秒之间。`
   }
   return null
