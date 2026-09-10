@@ -397,3 +397,7 @@ progress at a one-second foreground cadence, and does not repeatedly download
 the full audit. Full details load once when the run becomes terminal or when the
 user explicitly requests them. Detail reads are single-flight, coalesce one
 pending refresh, and retain the last successful content after a timeout.
+
+## License
+
+[MIT](LICENSE). Third-party dependencies retain their respective licenses.
