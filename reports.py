@@ -122,8 +122,15 @@ class ReportStore:
         safe["evidence_status"] = "retained"
         encoded = json.dumps(safe, ensure_ascii=False, allow_nan=False).encode("utf-8")
         if len(encoded) > MAX_REPORT_BYTES:
-            safe["observations"] = []
-            safe["evidence_status"] = "omitted_size_limit"
+            referenced = {source["observation_id"] for source in safe.get("provenance", {}).get("sources", [])}
+            all_observations = safe.get("observations", [])
+            safe["observations"] = [obs for obs in all_observations if obs.get("observation_id") in referenced]
+            if referenced - {obs.get("observation_id") for obs in safe["observations"]}:
+                raise ReportError("report_evidence_missing", "Referenced observations are missing from the report.")
+            safe["omitted_observations"] = [
+                obs.get("observation_id") for obs in all_observations if obs.get("observation_id") not in referenced
+            ]
+            safe["evidence_status"] = "referenced_retained" if referenced else "omitted_size_limit"
             encoded = json.dumps(safe, ensure_ascii=False, allow_nan=False).encode("utf-8")
         if len(encoded) > MAX_REPORT_BYTES:
             raise ReportError("report_too_large", "Report metadata exceeds the storage limit.")

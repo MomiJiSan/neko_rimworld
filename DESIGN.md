@@ -1,6 +1,46 @@
 # N.E.K.O RimWorld Design Brief
 
-## Current architecture: resource evidence 1.0
+## Current development architecture: v1.3
+
+This development revision supersedes the v1.0 purpose presets and the older
+requirement that the Agent author two independent final texts. It is not a
+released 1.3 package or a claim of measured end-to-end quality improvement.
+
+The Mod owns game reads, schema-derived conditions, identity joins, quantities
+and completeness. A shared condition implementation applies to every public
+field of the corresponding type, before collection pagination. No medicine,
+food or other business-specific selector branch is permitted. Native fields
+such as ThingDef.IsMedicine remain ordinary data. Resource v3 has no focus
+preset; definition_where/instance_where and exact names intersect explicitly.
+
+The runtime may faithfully render the existing values explicitly selected by
+answer references, including their native field identity, parameters, subject,
+unit, sample and scope/completeness. It cannot classify objects, calculate game
+statistics, rank relevance or infer conclusions. The Agent retains open query
+selection, interpretation and the decision to stop.
+
+Private submit_response takes ordered answer parts: either text or an existing
+observation_id plus data paths, with optional detail and language. References
+emit factual answer content, not citation attachments. The same composition is
+used for full text and the 180-token handoff; detail is additional explanation.
+Changing answer requires reconfirming dependent detail. Invalid dependencies
+remain in draft inputs but cannot enter fallback output. Exact identity-based
+reference normalization is formatting, never cross-source arithmetic.
+
+The current candidate has read_resources, get_game_info(requests), query_game,
+describe_game_schema and submit_response. Only one resource entry is exposed
+per connected catalog. A three/four-read-tool ablation decides whether the
+separate name earns its interface cost; no permanent dual route is intended.
+Older Mods retain their actual query capabilities and use text answer parts
+when they do not advertise result descriptions. Wire authentication is unchanged.
+
+Raw observations, exact structural path keys and provenance remain available
+for saved reports. Referenced observations get storage priority; insufficient
+storage is reported as unconfirmed saving. All statements, including free text
+and analysis, remain subject to end-to-end quality review. A correct renderer
+alone is not version success. Experiments remain in rimworld-bench.
+
+## Historical architecture: resource evidence 1.0
 
 Version 1.0 supersedes the early restrictions below concerning domain aggregation
 and stockpiles. The Mod now owns a bounded resource evidence read model; the
@@ -99,13 +139,12 @@ perform the plugin's model loop, game inspection, or domain aggregation.
 - Agent-visible: `rimworld_consult` and `rimworld_report`.
 - Hosted-only: `save_bridge_settings`, `save_agent_settings`, and
   `probe_game_overview`, each marked `metadata.agent_auto=false`.
-- Agent-private: `get_game_info`, `query_game` and `submit_response`, registered only in
+- Agent-private: catalog-backed reads and `submit_response`, registered only in
   the package-local tool registry and never published through the SDK.
-- Outer-Agent handoff: short answers may pass through unchanged; long answers
-  use the private `submit_response(full_text, agent_text)` tool. Only the
-  agent-authored natural-language `agent_text` becomes `summary`; `reply` is the
-  metadata-loss fallback. Runtime code validates transport constraints but
-  performs no domain selection, ranking, summarization, or conclusion logic.
+- Outer-Agent handoff: submit_response(answer, detail?, language?) composes one
+  answer from text and fact-reference parts. Derived agent_text becomes summary;
+  reply is the metadata-loss fallback. The runtime validates mechanics and
+  faithful presentation, without choosing domain facts, relevance or conclusions.
 
 ## Agent state machine
 
@@ -235,7 +274,7 @@ and stale-response guards. UI detail actions remain agent_auto=false and are
 mirrored in manifest entries. No platform navigation or model tools changed.
 
 
-## Submission drafts and report artifacts (0.7.0)
+## Historical submission drafts and report artifacts (0.7.0)
 
 Each AgentRunSession owns a SubmissionDraft. Field validation commits valid fields
 independently and gives structured repair feedback; a rejected replacement never

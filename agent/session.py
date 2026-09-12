@@ -20,6 +20,14 @@ class AgentRunSession:
     last_assistant_content: str = ""
     submission: SubmissionDraft = field(default_factory=SubmissionDraft)
 
+    @property
+    def fallback_answer(self) -> str:
+        if self.submission.full_text:
+            return self.submission.full_text
+        if self.submission.revision or self.submission.errors:
+            return "The consultation has an unfinished submission. Its saved inputs require correction or confirmation."
+        return self.last_assistant_content
+
     @classmethod
     def create(cls, *, ledger: AgentAuditLedger, system_prompt: str, question: str) -> AgentRunSession:
         return cls(

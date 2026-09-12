@@ -19,7 +19,9 @@ class Observation:
     def from_response(cls, operation: str, arguments: dict[str, Any], response: Envelope) -> Observation:
         return cls(
             {
-                "observation_id": uuid.uuid4().hex,
+                # A compact run-local reference is easier for the model to copy.
+                # The envelope retains its full request/connection/session identities.
+                "observation_id": uuid.uuid4().hex[:12],
                 "received_at": utc_now(),
                 "request": {"operation": operation, "arguments": copy.deepcopy(arguments)},
                 "response": response.to_dict(),

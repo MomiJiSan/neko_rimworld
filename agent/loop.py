@@ -11,7 +11,12 @@ from typing import Any, Protocol
 from ..state import redact_text
 from .audit import AgentAuditCapacityError, AgentAuditLedger, AgentAuditRegistry, AgentRunState
 from .contracts import PreparedToolCall
-from .handoff import HandoffValidationError, SubmissionPatchError, attach_agent_handoff, count_handoff_tokens
+from .handoff import (
+    HandoffValidationError,
+    attach_agent_handoff,
+    count_handoff_tokens,
+    make_submission_tool,
+)
 from .model_client import AgentModelSettings, ModelClient, ModelClientError, OpenAICompatibleModelClient
 from .prompt import build_runtime_advisory, build_system_prompt
 from .session import AgentRunSession
@@ -62,10 +67,7 @@ def _model_retry_reason(error: ModelClientError) -> str | None:
         return None
     provider_error = diagnostics.get("provider_error")
     provider = provider_error if isinstance(provider_error, Mapping) else {}
-    marker_text = " ".join(
-        str(provider.get(key) or "").lower()
-        for key in ("code", "type", "message")
-    )
+    marker_text = " ".join(str(provider.get(key) or "").lower() for key in ("code", "type", "message"))
     return "provider_transient" if any(marker in marker_text for marker in _RETRYABLE_PROVIDER_MARKERS) else None
 
 
@@ -108,18 +110,27 @@ class AgentRuntime:
             # the result/report must not require another append or transition.
             summary = ledger.summary()
             cancelled = task is not None and task.cancelling() > 0
-            result = attach_agent_handoff({
-                "status": "cancelled" if cancelled else "degraded",
-                "answer": session.submission.full_text or session.last_assistant_content
-                or "The consultation reached its audit capacity before completing.",
-                "caveats": ["The audit event limit was reached; collected observations and any draft were retained."],
-                "observations": session.observations,
-                "freshness": self._freshness(session.observations),
-                "draft": session.submission.snapshot(),
-                "audit": {"run_id": ledger.run_id, "error_code": "audit_capacity_reached",
-                          "cycles": summary["cycle"], "model_calls": summary["model_calls"],
-                          "tool_calls": summary["tool_calls"], "duration_ms": summary["duration_ms"]},
-            })
+            result = attach_agent_handoff(
+                {
+                    "status": "cancelled" if cancelled else "degraded",
+                    "answer": session.fallback_answer
+                    or "The consultation reached its audit capacity before completing.",
+                    "caveats": [
+                        "The audit event limit was reached; collected observations and any draft were retained."
+                    ],
+                    "observations": session.observations,
+                    "freshness": self._freshness(session.observations),
+                    "draft": session.submission.snapshot(),
+                    "audit": {
+                        "run_id": ledger.run_id,
+                        "error_code": "audit_capacity_reached",
+                        "cycles": summary["cycle"],
+                        "model_calls": summary["model_calls"],
+                        "tool_calls": summary["tool_calls"],
+                        "duration_ms": summary["duration_ms"],
+                    },
+                }
+            )
             await self._retain_report(result, question, ledger, session, reference_report)
             ledger.set_result(result)
             self._logger.warning("[agent] audit capacity reached run_id={}", ledger.run_id)
@@ -131,8 +142,12 @@ class AgentRuntime:
             self._audit_registry.finish(ledger)
 
     async def _run_session(
-        self, question: str, settings: AgentModelSettings, ledger: AgentAuditLedger,
-        session: AgentRunSession, reference_report: Mapping[str, Any] | None,
+        self,
+        question: str,
+        settings: AgentModelSettings,
+        ledger: AgentAuditLedger,
+        session: AgentRunSession,
+        reference_report: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
         try:
             try:
@@ -144,7 +159,7 @@ class AgentRuntime:
                     reason="The internal agent reached its absolute run deadline.",
                     error_code="agent_run_budget",
                     observations=session.observations,
-                    fallback_answer=session.submission.full_text or session.last_assistant_content,
+                    fallback_answer=session.fallback_answer,
                 )
             result["draft"] = session.submission.snapshot()
             result = attach_agent_handoff(result)
@@ -194,7 +209,7 @@ class AgentRuntime:
                     reason="The internal RimWorld agent failed unexpectedly.",
                     error_code="agent_internal",
                     observations=session.observations,
-                    fallback_answer=session.submission.full_text or session.last_assistant_content,
+                    fallback_answer=session.fallback_answer,
                     already_degraded=ledger.state == AgentRunState.DEGRADED,
                 )
             result["draft"] = session.submission.snapshot()
@@ -240,6 +255,7 @@ class AgentRuntime:
         session: AgentRunSession,
         reference: Mapping[str, Any] | None,
     ) -> None:
+        result["provenance"] = session.submission.provenance
         if self._report_sink is None or not session.submission.full_text:
             return
         record = {
@@ -250,6 +266,8 @@ class AgentRuntime:
             "full_text": session.submission.full_text,
             "agent_text": session.submission.agent_text if result.get("status") == "ok" else None,
             "draft_errors": session.submission.snapshot()["errors"],
+            "provenance": session.submission.provenance,
+            "submission": session.submission.snapshot(),
             "observations": session.observations,
             "reference_report_id": reference.get("report_id") if reference else None,
         }
@@ -279,60 +297,16 @@ class AgentRuntime:
         for spec in setup.tools:
             tools.register(spec)
 
-        async def submit(arguments: dict[str, Any]) -> Mapping[str, Any]:
-            try:
-                validated = session.submission.apply(arguments)
-                ledger.set_draft(session.submission.snapshot())
-                ledger.record(
-                    "submission_patch_accepted",
-                    {
-                        "saved_fields": session.submission.snapshot()["saved_fields"],
-                        "revision": session.submission.revision,
-                    },
-                )
-                return validated
-            except SubmissionPatchError as error:
-                ledger.set_draft(session.submission.snapshot())
-                ledger.record("submission_patch_rejected", error.details)
-                raise ToolExecutionError(error.code, str(error), details=error.details) from None
+        def submission_updated(snapshot, event, details):
+            ledger.set_draft(snapshot)
+            ledger.record(event, details)
 
         tools.register(
-            ToolSpec(
-                name="submit_response",
-                description=(
-                    "Finish this consultation. full_text is the complete answer for the plugin panel. "
-                    "agent_text is a concise, directly usable natural-language answer for the outer "
-                    "N.E.K.O agent; it must not rely on private field names or formats and must fit "
-                    "within 180 tokens (aim for 80-120). Both texts describe the same findings: preserve "
-                    "subjects, scope and uncertainty, and add no new causal explanation in agent_text. "
-                    "For long answers submit both fields directly, rather than first returning a long plain-text report. "
-                    "Valid fields are saved within this run even when another field fails. "
-                    "When correcting a rejected submission, send only required/changed fields; omit saved fields to reuse them. "
-                    "Changing an existing full_text requires resubmitting matching agent_text."
-                ),
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "full_text": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 12_000,
-                            "description": "The complete answer in the caller's language.",
-                        },
-                        "agent_text": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 4_000,
-                            "description": (
-                                "A self-contained natural-language result for another general-purpose agent."
-                            ),
-                        },
-                    },
-                    "minProperties": 1,
-                    "additionalProperties": False,
-                },
-                handler=submit,
-                terminal=True,
+            make_submission_tool(
+                session.submission,
+                session.observations,
+                submission_updated,
+                references_supported=setup.references_supported,
             )
         )
         session.messages[0]["content"] = build_system_prompt(settings.preferred_cycles) + (
@@ -390,7 +364,7 @@ class AgentRuntime:
                     reason="The internal agent used its available run time and returned the evidence collected so far.",
                     error_code="agent_run_budget",
                     observations=session.observations,
-                    fallback_answer=session.submission.full_text or session.last_assistant_content,
+                    fallback_answer=session.fallback_answer,
                 )
 
             cycle = ledger.begin_cycle()
@@ -503,7 +477,7 @@ class AgentRuntime:
                         reason=str(exception),
                         error_code=exception.code,
                         observations=session.observations,
-                        fallback_answer=session.submission.full_text or session.last_assistant_content,
+                        fallback_answer=session.fallback_answer,
                         already_degraded=True,
                     )
 
@@ -595,15 +569,14 @@ class AgentRuntime:
                 continue
 
             if turn.content:
-                # A short plain-text repair can serve as the handoff without replacing the saved full report.
                 has_full = session.submission.full_text is not None
                 patch = (
-                    {"agent_text": turn.content}
-                    if has_full and count_handoff_tokens(turn.content)[0] <= 180
-                    else {"full_text": turn.content, "agent_text": turn.content}
+                    {"answer": [{"text": turn.content}]}
+                    if count_handoff_tokens(turn.content)[0] <= 180
+                    else {"detail": turn.content}
                 )
                 try:
-                    validated = session.submission.apply(patch)
+                    validated = session.submission.apply(patch, observations=session.observations)
                     ledger.set_draft(session.submission.snapshot())
                 except HandoffValidationError as exception:
                     ledger.set_draft(session.submission.snapshot())

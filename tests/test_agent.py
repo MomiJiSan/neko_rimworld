@@ -37,8 +37,13 @@ def sse_response(payload):
         delta = dict(choice["message"])
         if delta.get("tool_calls"):
             delta["tool_calls"] = [{**call, "index": i} for i, call in enumerate(delta["tool_calls"])]
-        chunks.append({"id": payload.get("id"), "model": payload.get("model"),
-                       "choices": [{"index": 0, "delta": delta, "finish_reason": choice["finish_reason"]}]})
+        chunks.append(
+            {
+                "id": payload.get("id"),
+                "model": payload.get("model"),
+                "choices": [{"index": 0, "delta": delta, "finish_reason": choice["finish_reason"]}],
+            }
+        )
     if payload.get("usage") is not None:
         chunks.append({"choices": [], "usage": payload["usage"]})
     body = "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks) + "data: [DONE]\n\n"
@@ -105,7 +110,7 @@ def submission_call(full_text: str, agent_text: str, call_id: str = "submit-1") 
     return ToolCall(
         call_id,
         "submit_response",
-        json.dumps({"full_text": full_text, "agent_text": agent_text}, ensure_ascii=False),
+        json.dumps({"detail": full_text, "answer": [{"text": agent_text}]}, ensure_ascii=False),
     )
 
 
@@ -199,7 +204,7 @@ async def test_agent_tool_call_round_trip_is_auditable() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_can_submit_distinct_full_and_outer_agent_text() -> None:
+async def test_agent_reuses_summary_and_appends_detail() -> None:
     full_text = "完整报告。" * 80
     agent_text = "殖民地目前稳定；完整报告已保存在插件结果中。"
     model = ScriptedModel([turn("", submission_call(full_text, agent_text))])
@@ -216,7 +221,7 @@ async def test_agent_can_submit_distinct_full_and_outer_agent_text() -> None:
     )
     result = await runtime.run("Write a detailed report.", settings())
 
-    assert result["answer"] == full_text
+    assert result["answer"] == agent_text + "\n\n" + full_text
     assert result["agent_text"] == agent_text
     assert result["summary"] == agent_text
     assert result["reply"] == agent_text
@@ -279,10 +284,10 @@ async def test_long_plain_text_gets_prompt_feedback_instead_of_code_summarizatio
     )
     result = await runtime.run("Write a detailed report.", settings())
 
-    assert result["answer"] == long_text
+    assert result["answer"] == agent_text + "\n\n" + long_text
     assert result["summary"] == agent_text
     assert any(
-        "omit unchanged saved fields" in str(message.get("content"))
+        "only required/changed fields" in str(message.get("content"))
         for message in model.requests[1]
         if message.get("role") == "user"
     )
@@ -472,10 +477,7 @@ async def test_transient_failure_after_useful_delta_is_not_retried() -> None:
 
     assert result["status"] == "degraded"
     assert len(model.requests) == 1
-    assert not any(
-        event["event"] == "model_retry_scheduled"
-        for event in registry.snapshot()["latest_run"]["events"]
-    )
+    assert not any(event["event"] == "model_retry_scheduled" for event in registry.snapshot()["latest_run"]["events"])
 
 
 @pytest.mark.asyncio
@@ -502,8 +504,7 @@ async def test_non_retryable_http_failure_is_not_retried() -> None:
     assert result["status"] == "degraded"
     assert len(model.requests) == 1
     failure = next(
-        event for event in registry.snapshot()["latest_run"]["events"]
-        if event["event"] == "model_request_failed"
+        event for event in registry.snapshot()["latest_run"]["events"] if event["event"] == "model_request_failed"
     )
     assert failure["data"]["retryable"] is False
 
@@ -565,6 +566,7 @@ async def test_transient_retries_are_bounded_and_usage_is_accumulated(monkeypatc
 async def test_wall_time_fuse_returns_collected_evidence_instead_of_a_hard_failure() -> None:
     class SlowToolModel:
         calls = 0
+
         async def complete(self, messages, tools, *, timeout: float) -> AssistantTurn:
             self.calls += 1
             if self.calls > 1:
@@ -709,7 +711,7 @@ async def test_runtime_audit_capacity_retains_observations_draft_and_result(monk
             if self.count == 1:
                 return turn("", ToolCall("read", "query_game", "{}"))
             if self.count == 2:
-                return turn("", ToolCall("draft", "submit_response", '{"full_text":"Retained evidence report"}'))
+                return turn("", ToolCall("draft", "submit_response", '{"detail":"Retained evidence report"}'))
             if ending == "provider_failure":
                 raise ModelClientError("model_http_error", "HTTP 400")
             return turn("Brief answer" if ending == "success" else "")
@@ -720,13 +722,18 @@ async def test_runtime_audit_capacity_retains_observations_draft_and_result(monk
     async def save(record):
         return store.save(record)
 
-    runtime = AgentRuntime(observation_tools=[query_tool(read)], audit_registry=registry,
-                           logger=FakeLogger(), model_factory=lambda _: Model(), report_sink=save)
+    runtime = AgentRuntime(
+        observation_tools=[query_tool(read)],
+        audit_registry=registry,
+        logger=FakeLogger(),
+        model_factory=lambda _: Model(),
+        report_sink=save,
+    )
     result = await runtime.run("Inspect", settings())
     latest = registry.snapshot()["latest_run"]
     assert latest["result"] is not None
     assert result["observations"] == [digest_view().to_dict()]
-    assert result["answer"] == "Retained evidence report"
+    assert result["answer"].endswith("Retained evidence report")
     assert registry.snapshot()["active_count"] == 0
     assert len(latest["events"]) <= capacity
     if latest["events"][-1]["event"] == "audit_capacity_reached":
@@ -902,12 +909,19 @@ async def test_http_model_tool_loop_end_to_end() -> None:
 @pytest.mark.asyncio
 async def test_audit_limit_on_tool_completion_keeps_just_read_observation(monkeypatch):
     from plugin.plugins.neko_rimworld.agent import audit
+
     monkeypatch.setattr(audit, "MAX_EVENTS_PER_RUN", 8)
     registry = AgentAuditRegistry()
+
     async def read(_):
         return digest_view()
-    runtime = AgentRuntime(observation_tools=[query_tool(read)], audit_registry=registry,
-        logger=FakeLogger(), model_factory=lambda _: ScriptedModel([turn("", ToolCall("q", "query_game", "{}"))]))
+
+    runtime = AgentRuntime(
+        observation_tools=[query_tool(read)],
+        audit_registry=registry,
+        logger=FakeLogger(),
+        model_factory=lambda _: ScriptedModel([turn("", ToolCall("q", "query_game", "{}"))]),
+    )
     result = await runtime.run("Inspect", settings())
     assert result["audit"]["error_code"] == "audit_capacity_reached"
     assert result["observations"] == [digest_view().to_dict()]
@@ -916,15 +930,19 @@ async def test_audit_limit_on_tool_completion_keeps_just_read_observation(monkey
 @pytest.mark.asyncio
 async def test_cancellation_at_audit_limit_still_propagates(monkeypatch):
     from plugin.plugins.neko_rimworld.agent import audit
+
     monkeypatch.setattr(audit, "MAX_EVENTS_PER_RUN", 3)
     started = asyncio.Event()
+
     class Model:
         async def complete(self, *args, **kwargs):
             started.set()
             await asyncio.Event().wait()
+
     registry = AgentAuditRegistry()
-    runtime = AgentRuntime(observation_tools=[], audit_registry=registry,
-        logger=FakeLogger(), model_factory=lambda _: Model())
+    runtime = AgentRuntime(
+        observation_tools=[], audit_registry=registry, logger=FakeLogger(), model_factory=lambda _: Model()
+    )
     task = asyncio.create_task(runtime.run("Cancel", settings()))
     await started.wait()
     task.cancel()

@@ -99,7 +99,10 @@ class AgentAuditCapacityError(AgentAuditError):
 
 
 def _safe_key(value: object) -> str:
-    return redact_text(value, 128)
+    # Structural keys can be bounded result paths, not just short labels. Truncating
+    # them corrupts references and can collapse distinct observations into one key.
+    text = str(value)
+    return redact_text(text, max(len(text) + 1, 1))
 
 
 def _chunked_text(value: object) -> str | dict[str, Any]:
@@ -338,8 +341,7 @@ class AgentAuditLedger:
                 "duration_ms": round(self.elapsed_seconds * 1000.0, 2),
                 "event_count": len(self._events),
                 "revision": len(self._events),
-                "terminal": self._state
-                in {AgentRunState.COMPLETED, AgentRunState.CANCELLED, AgentRunState.FAILED},
+                "terminal": self._state in {AgentRunState.COMPLETED, AgentRunState.CANCELLED, AgentRunState.FAILED},
                 "stage": self._state.value,
                 "latest_event": latest_event_header,
                 "latest_event_summary": _progress_summary(latest_event) if latest_event is not None else None,

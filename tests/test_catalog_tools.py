@@ -29,19 +29,21 @@ def response():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("version", ["resource_evidence.v1", "resource_evidence.v2"])
 async def test_resource_evidence_mode_preserves_three_tools_and_raw_observation(version):
-    source=catalog()
-    source["resource_parameters"]={"type":"object","properties":{"map_id":{"type":"string"}}}
-    source["resource_contract"]={"version":version,"scope_rules":{"stored":"overlaps ground"}}
-    calls=[]
+    source = catalog()
+    source["resource_parameters"] = {"type": "object", "properties": {"map_id": {"type": "string"}}}
+    source["resource_contract"] = {"version": version, "scope_rules": {"stored": "overlaps ground"}}
+    calls = []
+
     async def query(arguments):
         calls.append(arguments)
-        return Observation.from_response(arguments["operation"],arguments["arguments"],response())
-    setup=make_game_tools(source,query)
-    assert [t.name for t in setup.tools]==["get_game_info","query_game","describe_game_schema"]
+        return Observation.from_response(arguments["operation"], arguments["arguments"], response())
+
+    setup = make_game_tools(source, query)
+    assert [t.name for t in setup.tools] == ["get_game_info", "query_game", "describe_game_schema"]
     assert "resources" in setup.tools[0].parameters["properties"]
-    result=await setup.tools[0].handler({"resources":{"map_id":"Map_0"}})
-    assert calls==[{"operation":"resource_report","arguments":{"map_id":"Map_0"}}]
-    assert result.value["response"]==response().to_dict()
+    result = await setup.tools[0].handler({"resources": {"map_id": "Map_0"}})
+    assert calls == [{"operation": "resource_report", "arguments": {"map_id": "Map_0"}}]
+    assert result.value["response"] == response().to_dict()
     assert version in setup.context
 
 
@@ -356,3 +358,25 @@ async def test_schema_discovery_rejects_mismatched_directory_and_invalid_request
         with pytest.raises(ToolExecutionError, match="Select"):
             await describe.handler(arguments)
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_v3_has_one_resource_entry_and_shared_conditions():
+    source = catalog()
+    source["resource_parameters"] = {"type": "object", "properties": {"definition_where": {"type": "object"}}}
+    source["resource_contract"] = {"version": "resource_evidence.v3"}
+    source["selection_contract"] = {"version": "schema_conditions.v1"}
+    calls = []
+
+    async def query(arguments):
+        calls.append(arguments)
+        return Observation.from_response(arguments["operation"], arguments["arguments"], response())
+
+    setup = make_game_tools(source, query)
+    assert [t.name for t in setup.tools] == ["read_resources", "get_game_info", "query_game", "describe_game_schema"]
+    assert "resources" not in setup.tools[1].parameters["properties"]
+    condition = {"definition_where": {"fields": {"IsWeapon": {"eq": True}}}}
+    await setup.tools[0].handler(condition)
+    assert calls == [{"operation": "resource_report", "arguments": condition}]
+    assert "schema_conditions.v1" in setup.context
+    assert "Default supplies" not in setup.context

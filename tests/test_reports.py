@@ -24,32 +24,33 @@ def record(index=1, **extra):
     }
 
 
-def test_patch_keeps_valid_body_and_retries_only_handoff():
+def test_patch_keeps_detail_and_retries_summary_with_explicit_confirmation():
     draft = SubmissionDraft()
     with pytest.raises(SubmissionPatchError) as caught:
-        draft.apply({"full_text": "Detailed original", "agent_text": "超限内容。" * 300})
-    assert caught.value.details["saved_fields"] == ["full_text"]
-    assert caught.value.details["required_fields"] == ["agent_text"]
-    result = draft.apply({"agent_text": "Brief"})
-    assert result["full_text"] == "Detailed original"
+        draft.apply({"detail": "Detailed original", "answer": [{"text": "超限内容。" * 300}]})
+    assert caught.value.details["saved_fields"] == ["answer", "detail"]
+    assert caught.value.details["required_fields"] == ["answer"]
+    with pytest.raises(SubmissionPatchError) as confirmation:
+        draft.apply({"answer": [{"text": "Brief"}]})
+    assert confirmation.value.details["required_fields"] == ["detail"]
+    result = draft.apply({"detail": "Detailed original"})
+    assert result["full_text"] == "Brief\n\nDetailed original"
     assert draft.snapshot()["complete"]
 
 
-def test_partial_fields_and_invalid_replacements_do_not_silently_succeed():
+def test_invalid_replacements_preserve_valid_inputs_and_clearing_is_explicit():
     draft = SubmissionDraft()
+    assert draft.apply({"answer": [{"text": "Brief"}], "detail": "Original"})["agent_text"] == "Brief"
     with pytest.raises(SubmissionPatchError):
-        draft.apply({"agent_text": "Brief"})
-    assert draft.apply({"full_text": "Original"})["agent_text"] == "Brief"
+        draft.apply({"detail": 7})
+    assert draft.detail == "Original"
     with pytest.raises(SubmissionPatchError):
-        draft.apply({"full_text": None})
+        draft.apply({"answer": [{"text": "New brief"}]})
+    assert draft.answer == [{"text": "New brief"}] and draft.detail == "Original"
+    result = draft.apply({"detail": None})
+    assert result["full_text"] == result["agent_text"] == "New brief"
     with pytest.raises(SubmissionPatchError):
-        draft.apply({"agent_text": "New brief"})
-    assert draft.full_text == "Original"
-    draft.apply({"full_text": "Original"})
-    with pytest.raises(SubmissionPatchError) as caught:
-        draft.apply({"full_text": "Changed report"})
-    assert caught.value.details["required_fields"] == ["agent_text"]
-    assert draft.agent_text is None
+        draft.apply({"full_text": "old alias"})
     with pytest.raises(SubmissionPatchError):
         draft.apply({})
 
@@ -104,7 +105,7 @@ async def test_runtime_saves_long_plain_body_then_accepts_short_plain_repair():
     model = ScriptedModel([turn(body), turn("简短交接。")])
     store = ReportStore()
     result = await runtime_for(model, store).run("Detailed report", settings())
-    assert result["answer"] == body
+    assert result["answer"] == "简短交接。\n\n" + body
     assert result["summary"] == "简短交接。"
     assert result["delivery"]["submission_mode"] == "text_repair"
     assert store.read(result["report"]["report_id"])["state"] == "complete"
@@ -116,9 +117,7 @@ async def test_runtime_saves_long_plain_body_then_accepts_short_plain_repair():
 )
 async def test_failed_correction_retains_draft_as_draft(error):
     body = "已完成的调查。" * 100
-    model = ScriptedModel(
-        [turn("", ToolCall("1", "submit_response", json.dumps({"full_text": body, "agent_text": None}))), error]
-    )
+    model = ScriptedModel([turn("", ToolCall("1", "submit_response", json.dumps({"detail": body}))), error])
     store = ReportStore()
     runtime = runtime_for(model, store)
     result = await runtime.run("Research", settings())
@@ -140,7 +139,7 @@ async def test_cancel_after_draft_preserves_saved_body():
         async def complete(self, *args, **kwargs):
             self.count += 1
             if self.count == 1:
-                return turn("", ToolCall("1", "submit_response", json.dumps({"full_text": "Saved draft"})))
+                return turn("", ToolCall("1", "submit_response", json.dumps({"detail": "Saved draft"})))
             blocked.set()
             await asyncio.Event().wait()
 

@@ -50,6 +50,7 @@ class ToolSpec:
 class ToolSetup:
     tools: tuple[ToolSpec, ...]
     context: str = ""
+    references_supported: bool = False
 
 
 class ToolRegistry:

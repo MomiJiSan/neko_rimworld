@@ -1,115 +1,139 @@
-# Resource evidence v2 (1.2 development)
+# Resource evidence v3 and shared result references (v1.3 development)
 
-The game computes a scoped inventory report in one bounded read. The private
-Agent explains it; raw queries remain available for further investigation.
+This is the current development contract, not a released package or an Agent
+quality result. The Mod computes game facts; the Agent selects scope, evidence
+and interpretation. Runtime presentation does not become game reasoning.
 
-## Use the existing tools
+## Read resources
 
-Overview on the current map:
-
-```json
-{"resources":{}}
-```
-
-Exact steel comparison without paging a dictionary:
+The candidate exposes read_resources with the Mod catalog's direct parameters:
 
 ```json
-{"resources":{"def_names":["Steel"],"scopes":["ground","stored","cached"]}}
+{"def_names":["Steel"],"scopes":["ground","stored","cached"],"include_total":true}
 ```
 
-Include rocks/corpses and other haulable objects:
+The cached counter is separate; it never contributes to the physical total.
+include_total defaults false. When requested, totals covers the entire request
+selection, independently of row pagination. It uses the same ID ledger and
+completeness rules as per-definition readings. Cached-only totals are rejected.
+
+There is no focus preset and no purpose-based default. Exact names and shared
+conditions intersect. For example, this is an ordinary Boolean field condition:
 
 ```json
-{"resources":{"focus":"all_haulable"}}
+{"definition_where":{"fields":{"CountAsResource":{"eq":true}}},"scopes":["ground","inventory"]}
 ```
 
-These are arguments to `get_game_info`. Do not mix `resources` with `requests`
-in one call. Legacy object templates, `query_game` GraphQL and schema discovery
-remain unchanged. The Mod's catalog supplies all resource parameter constraints.
+Other Boolean, numeric, text, nullable, object, collection and possible-type
+fields use the same compiler. IsMedicine has no dedicated argument or branch.
+instance_where uses public Thing fields; cached has definition counts but no
+Thing instance, so combining it with instance_where is a request type error.
 
-## Reading the report
+Collection-producing GraphQL fields and corresponding template targets accept
+where against their element type. Filtering occurs before paging. Cursor
+identity includes the full condition. Use describe_game_schema for actual
+fields and arguments; selection_contract documents the operator grammar:
+
+- fields maps public member names to conditions; all/any/not compose them.
+- Boolean: eq/ne. Numeric: eq/ne/in/gt/gte/lt/lte. String/ID:
+  eq/ne/in/contains/starts_with/ends_with; ordinal, case-sensitive by default.
+- Enum: all declared values. Nullable: is_null, distinct from failed reads.
+- Collections: some/every/none over the underlying source. Empty every/none
+  are true; a null collection is not an empty collection.
+- Field arguments use the existing public schema and defaults. They cannot
+  turn predicate input into a single display page.
+- types selects public interface/union alternatives. reach traverses a declared
+  same-type reference/collection, such as a category parent, with cycle/budget
+  bounds. String keys are not guessed into private object relationships.
+
+Unknown reads use three-valued logic. Unknown membership cannot silently
+become false, an empty collection or an exact zero. Limits apply uniformly,
+not by topic. New scalar families must have an implementation before publishing
+a partly supported condition interface.
+
+## Reading quantities and scope
 
 | Field | Meaning |
-| --- | --- |
-| `selection` | Map, definitions, focus, requested scopes and ground visibility filter |
-| `sample` | Colony/load/tick/sequence; report scopes share this sample |
-| `coverage` | Complete/partial/unavailable separately for each requested scope; records excluded by the selector are explicit |
-| `rows` | One row per selected definition, using native labels and IDs |
-| `rows[].scopes.<scope>.units` | Exact physical units only when that scope completed; otherwise null. Cached units describe a directly observed entry |
-| `rows[].scopes.<scope>.status` | Physical scope complete/partial/unavailable, next to its quantity |
-| `rows[].scopes.<scope>.known_units` | Observed physical lower bound, not a global total |
-| `rows[].scopes.<scope>.item_count` | Exact distinct physical IDs in a complete scope, not the number of displayed examples |
-| `rows[].scopes.<scope>.fog_filter` | `unfogged_cells` for filtered ground; `none` for the other scopes |
-| `rows[].scopes.cached.entry_present` | True for an observed key, false when the completed cache scan contains no key, null when unread; cached scope is omitted when not requested |
-| `selected_physical_union` | Game-computed ID union of requested physical scopes, excluding cached values; not an all-colony total |
-| `overlaps` | Shared item IDs between scopes, including storage/ground overlap |
-| `item_examples` | Bounded examples for drilldown; not an exhaustive list unless `examples_complete` says so |
-| `row_page` | `total_rows`/`returned_rows` count selected definition rows across scopes, not ground categories; pagination is distinct from read completeness |
+|---|---|
+| selection | Requested definitions/conditions, scopes and ground visibility |
+| sample | Colony/load/tick/sequence for this one observation |
+| coverage | Each scope's completion and scan diagnostics |
+| rows | Per-definition readings across selected scopes |
+| scopes.*.units | Exact complete physical quantity; otherwise null. Cached reads refer to an observed entry |
+| known_units | Known lower bound, not the whole-colony quantity |
+| item_count | Distinct physical records; not stack units or displayed example count |
+| fog_filter | Scope-specific visibility rule |
+| cached.entry_present | Observed key, proven absence, or unknown; absent is not zero |
+| selected_physical_union | ID union of requested physical scopes, excluding cached |
+| overlaps | Observed shared IDs; an incomplete scan cannot establish the full intersection |
+| row_page | Displayed definition rows and continuation, separate from source completeness |
+| totals | Optional whole-request physical scope quantities and ID union |
 
-`ground` is spawned, non-destroyed HaulableEver map items, default excluding
-fog. `stored` retains native SlotGroup.HeldThings irrespective of fog: storage
-cells are not arbitrary containers, and storage need not be a subset of
-*visible* ground. Inventory, worn, equipment and carried are separate scopes
-for spawned free colonists on the selected map, not caravans or prisoners.
+Ground contains spawned non-destroyed HaulableEver items and includes storage
+cells, while visible_only filters ground by fog. Stored reads SlotGroup cells
+regardless of fog. Inventory, worn, equipment and carried cover spawned free
+colonists on the selected map. Cached reads do not refresh the game counter.
+These scopes neither count facilities nor explain why counters differ.
+Unrequested stored detail does not imply ground excluded storage-cell items.
 
-`cached` reads ResourceCounter without forcing a refresh. An observed cached
-entry can be exact even if later unrelated keys failed. It is not filtered by
-fog and does not establish why the native counter differs from physical counts.
-Do not invent Forbidden rules, refresh timing or building absence.
+Examples are bounded drilldown evidence. They are not an exhaustive inventory
+unless their separate completeness flag supports that interpretation. Maps,
+caravans/prisoners, arbitrary nested holders and inner corpse/minified contents
+outside the declared scope remain outside it. Precise supported queries remain
+available for unresolved facts; no tool order or business phase is imposed.
 
-The default supplies view selects CountAsResource definitions, weapons, and
-Apparel category descendants. It is a stated resource view, not every map
-object. Exact definitions bypass that focus filter, so querying ChunkGranite
-still works. Zero-only cached definitions are hidden in an overview; request
-an exact definition when its presence/zero matters.
-
-## Limits and partial results
-
-- Existing 12ms game-read budget remains; reads stay on the game thread.
-- Each scope is bounded to 8192 yielded item records; exact definitions allow
-  targeted reads instead of broad discovery.
-- At most32 exact definitions,64 returned definition rows and20 examples per
-  row. Default view is32 rows with3 examples per definition.
-- Oversized reports are rejected; no silently chopped JSON is returned.
-- If a physical scope fails, its exact quantity and union are not fabricated.
-- Conflicting identity/quantity invalidates the report instead of publishing
-  contradictory totals.
-- Unknown exact definitions fail the batch before quantity reads; each invalid
-  input index is reported in the existing issues array. Discover names through
-  the existing thing_defs target; a rejected or omitted definition is not zero.
-- Later row/detail requests are fresh samples. Do not pretend pages from
-  different ticks are one atomic inventory.
-
-Other maps, arbitrary nested containers, corpse/minified inner contents,
-unmined ore and embedded building materials are outside this report's scope.
-Use supported precise queries when more facts are needed; unsupported data
-must remain unavailable.
-
-## Upgrade and deployment
-
-This is a development candidate, not a released 1.2 package. The Mod publishes
-`resource_evidence.v2`; the current plugin accepts both v1 and v2 catalogs.
-V2 replaces the parallel `quantities`/`known_quantities`/`item_counts` maps and
-`cached_entry_present` with scoped readings, and replaces `view` with `row_page`.
-Do not interpret v2 as v1 or expose both shapes as duplicate fields. Wire-v2
-authentication, pairing token and model configuration are unchanged. A previous
-plugin that only accepts v1 falls back to the existing object/GraphQL queries
-when connected to this Mod; update the plugin to use the v2 resource mode.
-
-Native medicine discovery uses the existing template target:
+## Compose the answer itself
 
 ```json
-{"requests":[{"target":{"type":"thing_defs","is_medicine":true,"first":20},"sections":["basic"]}]}
+{
+  "answer":[
+    {"observation_id":"ab19de34b557","paths":["/rows/0/scopes/ground/units","/rows/0/scopes/ground/item_count"]},
+    {"text":"单位数和物品记录数含义不同。"}
+  ],
+  "language":"zh"
+}
 ```
 
-The GraphQL equivalent is `thing_defs(isMedicine:true)`. This filters native
-`ThingDef.IsMedicine`, independently of names. False selects non-medicine;
-omission applies no filter. Other selectors intersect it and cursors remain
-filter-bound. Complete all required pages before claiming category coverage,
-then use returned exact definitions for quantities. Classification does not
-establish stock quantity, quality, treatment effect or pawn usability.
+Use an actual ID from the current run. Paths address its data, optionally with
+a leading slash, not the response/payload envelope. Actual array indices are
+required; internal ~2 description patterns are not user paths. Reference parts
+emit fact text themselves. Do not append them to a second textual copy of the
+same facts. A text-only answer uses one text part; detail is optional extra
+explanation. One answer composition supplies both full text and the short
+handoff. All free statements remain subject to correctness review.
 
-Do not replace loaded game DLLs while RimWorld is running. The release build
-and validation artifacts are staged separately; restart the game and reload
-the plugin after updating. No new gameplay actions, background model requests
-or autonomous colony management are introduced.
+The published observed_values.v1 description works for all public query result
+types. Canonical field names come from actual executed resolvers, not aliases
+or the last array item. Effective arguments, subjects, windows and read status
+remain attached, including for empty collections. Identical descriptions may
+share storage; differing polymorphic meanings keep concrete path overrides.
+Scalar references retain the required measurement context. Stack units and
+item records are different measurements even when their paths are nested.
+Exact duplicate/bound references render once, without fuzzy identity matching
+or cross-observation calculations. Display labels are escaped as literal data.
+
+The answer accepts 1..16 parts and at most four distinct observations. Each
+reference group accepts up to32 paths. Combined answer must fit180 tokens;
+full text plus detail must fit12000 characters. Budget feedback identifies fact
+cost and remaining text space, without deleting required scope or unknowns.
+Valid inputs survive a rejection. Changing answer requires confirming existing
+detail or clearing it with null. Pending dependencies never enter fallback text.
+
+## Bounds, provenance and compatibility
+
+The12ms game-read budget,8192 records per resource scope,32 exact definitions,
+64 returned rows and20 examples per row remain. Oversized results and identity
+conflicts fail explicitly. Unknown exact names are reported before quantity
+reads. Later pages are fresh samples, not one atomic observation.
+
+Compact observation references retain full request, connection and sample
+identity in their envelopes. Saved reports preserve exact structural path keys
+and prioritize referenced observations; insufficient storage reports unconfirmed
+saving. Historical reports are not regenerated under new semantics.
+
+New catalogs advertise resource_evidence.v3, schema_conditions.v1 and
+observed_values.v1. Wire v2 authentication is unchanged. With older catalogs,
+the plugin retains their actual query capabilities and uses text-only answer
+parts when result descriptions are absent. Old v1/v2 resource formats and
+historical reports remain readable; old focus/isMedicine inputs are not aliases
+in the v3 catalog. Game DLL activation still requires a normal game restart.

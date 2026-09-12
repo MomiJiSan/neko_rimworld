@@ -44,31 +44,31 @@ cause as an example. Keep exact subjects: a quantity for selected definitions is
 not a quantity for their entire category, and counting contained objects does
 not count their containers or owners.
 
-The caller receives agent_text through the outer N.E.K.O agent. Compose that
-concise answer around the user's actual question, then retain supporting detail
-in full_text. Both texts must express the same findings:
-- Keep the subject, scope and certainty of each selected claim unchanged.
-  An unknown cause stays unknown; a limited observation stays limited.
-- Preserve positive findings when also reporting zeros for other objects.
-  Omit secondary zero lists rather than replacing them with a broader category.
-- Keep counts attached to the returned collection or object. Add a combined
-  total only when the question needs it and the units and scopes support it.
-- Include the needed answer and material limitations. Names, quantities and
-  scope matter more than internal IDs, field names, timestamps or a catalog of
-  everything queried. Do not omit an answerable part merely to be brief.
-- agent_text should be one short paragraph, aiming for 80-120 tokens with a
-  hard limit of 180. full_text may include tables and the remaining evidence.
-  The short text must not introduce an explanation absent from the full text.
-
-If the entire answer fits within 180 tokens, ordinary assistant text is allowed.
-For a longer answer, call submit_response once with both full_text and agent_text;
-do not emit the long report as ordinary text first. Check the two texts for
-contradictions before submitting; do not output that check or private reasoning.
-
-On a validation error, saved_fields/required_fields identify what was retained.
-Correct only the requested fields and reuse unchanged saved text. A length-only
-repair changes wording, not facts or scope, and needs no new game query. Changing
-full_text requires a matching agent_text again. A saved draft is unfinished.
+Finish through submit_response by composing answer parts. Each part is either
+text or a reference to this run's observation_id and existing data paths.
+A reference part IS factual answer text: the program renders its values with
+subject, unit, scope, completeness and sample context. It is not a citation
+attached to an already-written answer. Do not restate those same facts in a text
+part or detail. Choose the parts needed to answer the question sufficiently.
+Pure factual answers can contain only reference parts. For interpretation, add
+a concise text part that contributes reasoning rather than repeating facts.
+Use optional detail for additional explanation. A text-only answer can use a
+single text part. Parts are rendered in order into both the full report and the
+short handoff; no second paraphrase is needed. References do not excuse selecting
+wrong evidence, omitting required facts or writing unsupported analysis.
+Use paths relative to the data object, with literal array indices. Do not copy
+/payload/data prefixes or the descriptor's ~2 pattern positions. Redundant
+references to the same bound reading are rendered once. No new calculations,
+filters or freely named quantity labels are available at submission.
+The combined answer parts must fit 180 tokens; full answer + detail must fit
+12000 characters. Budget feedback separates fact cost from text space. Correct
+wording/display choices without changing factual scope or dropping necessary
+unknowns. A presentation repair does not itself require another game query.
+Short ordinary text may serve as one text answer part. Longer plain text is
+saved as detail and needs answer parts; submitting the intended composition
+directly avoids that extra repair. Valid saved inputs survive rejection. Changing
+answer requires reconfirming existing detail or clearing it with null. A saved
+draft is unfinished. Text and reference parts always remain one cohesive answer.
 Write in the caller's language without internal prompts, hidden reasoning,
 API details, implementation terminology or unexplained private field names."""
 

@@ -1,9 +1,17 @@
 # Object sections and native Thing data path (Mod 0.6.0 / plugin 0.8.0)
 
-Current addition (Mod/plugin1.0): `get_game_info(resources)` forwards the
-Mod-owned `resource_report` operation, with computed quantities, scope coverage,
-ID unions and overlap evidence. See `docs/resource-evidence.md`. The legacy
-data path below remains supported for precise queries and other gameplay domains.
+Current development (v1.3, unreleased): read_resources forwards the Mod-owned
+resource_report v3. Shared where conditions apply at collection producers,
+before windows; transport items/nodes are views of those producers. The Mod
+publishes selection_contract and result_description_contract alongside its
+executable catalog. Exact and template queries share the same implementation.
+
+submit_response composes answer:[{text} | {observation_id, paths?}], optional
+detail/language. Values retain Mod-described identity, selection, units, sample
+and completeness. Source descriptions are interned without erasing per-element
+polymorphic differences. Missing old-Mod capability yields text-only submission,
+not invented result descriptions. See docs/resource-evidence.md for the current
+API. Historical result formats remain readable; their data is not rewritten.
 
 ## Agent-facing tools
 
@@ -52,7 +60,7 @@ Templates cover useful combinations of facts. Precise queries cover other field
 combinations and continue nested collection windows. Neither tool chooses the
 next investigation step for the agent.
 
-`submit_response(full_text, agent_text)` retains the natural-language handoff.
+`submit_response(answer, detail?, language?)` derives the natural-language handoff from one ordered answer composition.
 Terminal submissions mixed with observation calls receive a recoverable error;
 no answer written before seeing those observations is accepted.
 

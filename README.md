@@ -1,5 +1,14 @@
 # N.E.K.O RimWorld
 
+**Evaluation status:** the current v1.3 candidate did not meet the Agent quality objective. This experimental implementation is retained for review; it is not promoted to the stable branch or released.
+
+Current work is the unreleased v1.3 development candidate: shared schema-driven
+selection, resource evidence v3 and composed text/reference answers. No
+business-specific focus or medicine selector is added. See
+[resource-evidence.md](docs/resource-evidence.md) for current internal contracts
+and [DESIGN.md](DESIGN.md) for the changed responsibility boundary. Passing
+software tests does not establish an end-to-end Agent quality improvement.
+
 ## Current development state (1.2 candidate, not a release)
 
 The current plugin accepts both resource_evidence.v1 and v2 from the companion
@@ -165,7 +174,8 @@ agent/model_client.py    plugin-owned OpenAI-compatible client
 agent/tools.py           private tool schemas, validation, dispatch
 agent/loop.py            open request-scoped tool-calling loop
 agent/audit.py           append-only state transitions and run registry
-agent/handoff.py         transport-only submission validation
+agent/handoff.py         composed answer and submission validation
+agent/presentation.py    faithful Mod-described fact presentation
 ui/panel.tsx             setup, result delivery, and audit inspection
 ```
 
