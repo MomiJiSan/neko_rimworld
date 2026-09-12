@@ -239,7 +239,7 @@ def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHa
     return ToolSetup(
         tools=(
             ToolSpec("query", "Read selected game objects, related facts and Mod-computed aggregates. Same fields and conditions for detail and counts. Batch related requests. No preliminary query required. Use coverage before interpreting missing values.", copy.deepcopy(public["parameters"]), read),
-            ToolSpec("describe_query", "Discover canonical fields and supported operations for types not in the directory. Metadata only; unnecessary when the needed fields are already known.", {
+            ToolSpec("describe_query", "Read canonical fields, native semantics, arguments and supported operations when needed information is missing from the directory. An indexed field name alone does not establish its meaning or allowed values. Metadata only; skip this call when the needed syntax and semantics are already known.", {
                 "type": "object", "properties": {"types": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8}},
                 "required": ["types"], "additionalProperties": False,
             }, describe),
