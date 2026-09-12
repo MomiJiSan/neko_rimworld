@@ -14,6 +14,9 @@ from .observation import Observation
 
 
 def make_game_tools(catalog: dict[str, Any], query: ToolHandler) -> ToolSetup:
+    public = catalog.get("public_query")
+    if isinstance(public, dict) and public.get("version") == "public_query.v1":
+        return _public_tools(catalog, public, query)
     description_contract = catalog.get("result_description_contract")
     references_supported = (
         isinstance(description_contract, dict) and description_contract.get("version") == "observed_values.v1"
@@ -209,6 +212,43 @@ def make_game_tools(catalog: dict[str, Any], query: ToolHandler) -> ToolSetup:
                 else ""
             )
         ),
+    )
+
+
+def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHandler) -> ToolSetup:
+    """Current Mod owns field names, query semantics and discovery. Legacy tools are not advertised."""
+    if not isinstance(public.get("parameters"), dict) or public["parameters"].get("type") != "object":
+        raise ToolExecutionError("invalid_catalog", "Invalid public query parameters.")
+
+    async def read(arguments):
+        return await query({"operation": "query", "arguments": copy.deepcopy(arguments)})
+
+    async def describe(arguments):
+        result = await query({"operation": "describe_query", "arguments": copy.deepcopy(arguments)})
+        if not isinstance(result, Observation):
+            raise ToolExecutionError("invalid_schema", "Expected schema metadata.")
+        payload = result.value["response"]["payload"]
+        if payload.get("status") != "ok":
+            raise ToolExecutionError(payload.get("error_code") or "schema_unavailable", payload.get("message") or "Metadata unavailable.")
+        data = payload.get("data", {})
+        if data.get("metadata_only") is not True or data.get("schema_id") != catalog["schema_id"]:
+            raise ToolExecutionError("schema_changed", "Query directory changed; start a fresh consultation.")
+        return copy.deepcopy(data)
+
+    directory = {key: public[key] for key in ("roots", "rules", "common_fields", "field_index", "examples") if key in public}
+    return ToolSetup(
+        tools=(
+            ToolSpec("query", "Read selected game objects, related facts and Mod-computed aggregates. Same fields and conditions for detail and counts. Batch related requests. No preliminary query required. Use coverage before interpreting missing values.", copy.deepcopy(public["parameters"]), read),
+            ToolSpec("describe_query", "Discover canonical fields and supported operations for types not in the directory. Metadata only; unnecessary when the needed fields are already known.", {
+                "type": "object", "properties": {"types": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8}},
+                "required": ["types"], "additionalProperties": False,
+            }, describe),
+        ),
+        context="Game query directory (" + catalog["schema_id"] + "):\n" + json.dumps(directory, ensure_ascii=False, separators=(",", ":"))
+        + "\nAnswer once the requested facts are known; read more only for an unresolved fact. Native capability flags and category trees are not interchangeable. Never use CountAsResource/readout membership as a default filter for all possessions. Report the actual requested scope and preserve unknown versus zero.",
+        # The compact query contract does not advertise v1.3 path-composition descriptors.
+        # Use the already supported text submission protocol; do not invent references.
+        references_supported=False,
     )
 
 

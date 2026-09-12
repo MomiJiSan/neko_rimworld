@@ -1,3 +1,5 @@
+> **v1.4 development:** The current unified query implementation and its scope/limits are documented in [DATA_PATH.md](DATA_PATH.md). Legacy v1.3 sections below describe compatibility/history. Evaluation results are tracked separately; no release or quality improvement is implied by this source checkout.
+
 # N.E.K.O RimWorld Design Brief
 
 ## Current development architecture: v1.3

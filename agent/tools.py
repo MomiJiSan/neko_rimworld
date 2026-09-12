@@ -120,6 +120,14 @@ class ToolRegistry:
             }
             if observation is not None:
                 payload = observation["response"]["payload"]
+                if observation.get("request", {}).get("operation") == "query":
+                    # Preserve full provenance in the audit observation; the model needs facts and issues.
+                    value["data"] = {
+                        "observation_id": observation["observation_id"],
+                        "status": payload["status"],
+                        "data": payload.get("data"),
+                        "issues": payload.get("issues", []),
+                    }
                 if payload["status"] not in {"ok", "partial"}:
                     value.update(
                         ok=False,

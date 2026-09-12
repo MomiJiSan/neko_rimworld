@@ -309,7 +309,7 @@ class AgentRuntime:
                 references_supported=setup.references_supported,
             )
         )
-        session.messages[0]["content"] = build_system_prompt(settings.preferred_cycles) + (
+        session.messages[0]["content"] = build_system_prompt(settings.preferred_cycles, references_supported=setup.references_supported) + (
             "\n\n" + setup.context if setup.context else ""
         )
 

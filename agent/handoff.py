@@ -349,7 +349,7 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
         ][:1]
         return ToolSpec(
             name=spec.name,
-            description="Finish with ordered text answer parts and optional detail. This Mod has no automatic fact-reference descriptions. The combined answer is reused on both surfaces and must fit 180 tokens. Full answer plus detail must fit 12000 characters. Changing an existing answer requires reconfirming or clearing prior detail.",
+            description="Finish with a concise conclusion in text answer parts (180 tokens for the short handoff). Put the complete requested factual report, tables and per-person details in optional detail (full answer plus detail <=12000 characters). This Mod has no automatic fact-reference descriptions. Changing an existing answer requires reconfirming or clearing prior detail.",
             parameters=spec.parameters,
             handler=submit,
             terminal=True,

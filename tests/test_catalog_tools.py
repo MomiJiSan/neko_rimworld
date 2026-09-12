@@ -18,12 +18,41 @@ from .test_agent import FakeLogger, settings, submission_call
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def test_nonreference_prompt_separates_short_conclusion_from_complete_facts():
+    from plugin.plugins.neko_rimworld.agent.prompt import build_system_prompt
+    prompt = build_system_prompt(4, references_supported=False)
+    assert "Observation reference parts are unavailable" in prompt
+    assert "detail for the complete factual report" in prompt
+    assert "180 tokens" in prompt and "12000 characters" in prompt
+    assert "Pure factual answers can contain only reference parts" not in prompt
+
+
 def catalog():
     return json.loads((FIXTURES / "query_catalog.json").read_text(encoding="utf-8-sig"))
 
 
 def response():
     return decode_envelope((FIXTURES / "template_result.json").read_bytes())
+
+
+@pytest.mark.asyncio
+async def test_public_query_replaces_legacy_tools_without_changing_observations():
+    source = catalog()
+    source["public_query"] = {"version": "public_query.v1", "parameters": {"type": "object", "properties": {"requests": {"type": "array"}}}, "rules": "canonical fields", "roots": []}
+    calls = []
+
+    async def query(arguments):
+        calls.append(copy.deepcopy(arguments))
+        return Observation.from_response(arguments["operation"], arguments["arguments"], response())
+
+    setup = make_game_tools(source, query)
+    assert [t.name for t in setup.tools] == ["query", "describe_query"]
+    assert setup.references_supported is False
+    arguments = {"requests": [{"from": "things", "aggregate": {"units": {"op": "sum", "field": "stack_count"}}}]}
+    observed = await setup.tools[0].handler(arguments)
+    assert calls == [{"operation": "query", "arguments": arguments}]
+    assert observed.value["response"] == response().to_dict()
+    assert "type Pawn {" not in setup.context
 
 
 @pytest.mark.asyncio

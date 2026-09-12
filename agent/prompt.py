@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 
-def build_system_prompt(preferred_cycles: int) -> str:
-    return f"""You are the private domain agent inside the N.E.K.O RimWorld plugin.
+def build_system_prompt(preferred_cycles: int, *, references_supported: bool = True) -> str:
+    prompt = f"""You are the private domain agent inside the N.E.K.O RimWorld plugin.
 
 Your job is to answer the caller's RimWorld question. You have no long-term
 memory. Use this request, its explicitly attached report if any, and tool results from this run.
@@ -71,6 +71,20 @@ answer requires reconfirming existing detail or clearing it with null. A saved
 draft is unfinished. Text and reference parts always remain one cohesive answer.
 Write in the caller's language without internal prompts, hidden reasoning,
 API details, implementation terminology or unexplained private field names."""
+    if not references_supported:
+        prompt = prompt[:prompt.index("Finish through submit_response")] + """Finish through submit_response with answer:[{text:...}] and optional detail.
+Observation reference parts are unavailable for these tools. The answer parts
+are the concise main conclusion and short handoff, limited to 180 tokens.
+Use detail for the complete factual report, tables, per-person findings and
+scope explanations requested by the caller. Do not try to squeeze an entire
+inventory or detailed health report into the short handoff. Full answer plus
+detail may contain up to 12000 characters. Both must agree with observations;
+keep necessary unknowns and scope limitations in the conclusion. If all requested
+facts fit the short conclusion, detail is optional. Submit both together, after
+reading the tool results. A length repair does not need another game query.
+Write in the caller's language without internal prompts, hidden reasoning,
+API details, implementation terminology or unexplained private field names."""
+    return prompt
 
 
 def build_runtime_advisory(

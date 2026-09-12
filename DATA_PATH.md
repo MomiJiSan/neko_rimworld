@@ -1,3 +1,45 @@
+# v1.4 query data path (development candidate)
+
+The current Mod advertises `public_query.v1`. The plugin exposes `query` and `describe_query`; it does not simultaneously advertise legacy templates, GraphQL or the separate resource tool. Older connected Mods retain their existing adapter. Legacy transports below are retained for compatibility/development, not a second recommended Agent workflow.
+
+## Single executable field vocabulary
+
+`PublicFields` derives canonical snake_case names, native mappings, types, arguments and operations from the executable Mod schema. `def` becomes `definition`; `def_name`, instance `id`, and display `label` remain distinct. Python forwards requests without renaming game fields or maintaining classification tables. Public conditions translate to the same typed condition evaluator used by existing native reads. Internal `fields/types/arguments/match` aliases are rejected.
+
+`query({requests:[...]})` selects a root, its `args`, optional `where`, and fields in `select`. Related objects are selected directly; collection transport `items/nodes` windows are not part of selection paths (a native collection actually named `items` remains a field). Queries can include counts, declared additive sums, min/max and grouping. Filtered detail and aggregates use the same candidate collection; aggregates precede display `limit/offset`. Selected objects return scalar fields and parameter-free collections by default; wrapper-only objects expand their related fields, so selecting inventory does not return a misleading empty object. Long descriptions and argument-dependent scans remain explicit. Objects accept projection options; collection-only options on single objects or concrete projection branches are rejected before any game read.
+
+```json
+{"requests":[{"from":"things","args":{"map_id":"Map_0","visible_only":false},"where":{"definition.category":{"eq":"Item"}},"group_by":["definition.def_name","definition.label"],"aggregate":{"quantity":{"op":"sum","field":"stack_count"},"records":{"op":"count"}}}]}
+```
+
+This is an example of an explicit native category filter, not a hidden supplies preset. `IsWeapon` includes improvised weapons; `CountAsResource` is readout membership, not ownership or usefulness.
+
+## Populations and relationships
+
+- `things`: selected loaded maps, spawned indexed Things and optionally their declared holder trees; default `include_held:true`, `include_unreal:false`, `visible_only:true`. It is not all world/caravan possessions or proof of player ownership.
+- `pawns`: all reachable pawns on selected loaded maps, using the native Pawn index and holder trees. `spawned_free_colonists` retains its narrower explicitly named population.
+- `pawn(id)`: finds the returned pawn identity across loaded-map pawns.
+- Map selectors accept `map_id:"current"` (map root `id:"current"`) and return the resolved ID in scope. This is available across roots with map selectors, without an extra game/maps read.
+- `map(id)`: storage groups and the separate original ResourceCounter.
+- Native unreal contents follow `ThingOwnerUtility.AreImmediateContentsReal`; excluding a corpse/minified inner object does not exclude all its descendants. Explicit `include_unreal:true` is available for inspection and must not be blindly added to wrapper counts.
+- `storage_group` is storage-cell membership, overlapping spawned-map membership; it is not acceptance by current storage settings. `map`/`map_held`, `position`/`position_held`, and holding relations remain distinct.
+
+The game computes physical ID deduplication. Ordinary nonphysical collections retain their entries; grouping keys and independent requests are not assumed to form disjoint populations.
+
+## Results and limits
+
+Each result reports effective scope and predicate, `scan_complete`, `matched_count` (null when incomplete), `known_matches`, selected `rows`, `fields_complete`, page information and explicitly typed aggregates. A partial aggregate has no exact value. A display limit does not reduce an already complete aggregate. Empty complete count/sum is zero; empty min/max is null.
+
+Every call/continuation is a fresh observation; IDs can disappear after stack split/merge. Production reads remain on the game thread with a 12ms read budget. Batches are bounded to 8 requests, depth12/512 selections, 8192 candidates per collection, 20000 projected objects and 80000 result characters. Wider requests can be partial; a frozen 5s reader is not evidence of production timing.
+
+Complete raw observations and execution requests remain in audit storage. The model receives compact data, scope and issues. The new contract uses the existing text-only answer-part composition, not descriptor/path references: answer is the short conclusion, detail carries the full factual report. No new submission parameters were added. Metadata discovery is not a live fact observation. No mutation, automatic pause or background world mirror is added.
+
+## Evaluation
+
+The existing paired version runner seals each plugin and query DLL separately. `bench.py experiment queries` checks fixed queries against native-graph reference values; `experiment versions --plan` runs the actual Agent. Owner-dependent native projections (body parts, capacities, backstories, computed stats) are captured separately for each pawn. Limited numeric evidence adapters validate matching scopes; complex/open answers remain explicit review cases. Delivery and software tests are not semantic quality scores.
+
+## Legacy implementation reference (v1.3 and earlier)
+
 # Object sections and native Thing data path (Mod 0.6.0 / plugin 0.8.0)
 
 Current development (v1.3, unreleased): read_resources forwards the Mod-owned
@@ -357,3 +399,5 @@ Schema discovery results are metadata mappings, never live Observation evidence.
 The directory is tied to schema_id and connection epoch; exact describe replies
 are cached per tool setup. Missing directory on an older Mod prompts an upgrade.
 The cache limit is 256k characters, distinct from the model's compact directory.
+
+Map list and map-reference fields now match and share their summary reader. Upward ownership/storage references default to identity/summary rather than implicit contents; explicit selection still permits contents. IThingHolder.parent is a native relation, not an invented ownership classifier. The compact field index covers every type reachable through current public roots; discovered metadata remains available for detailed semantics.

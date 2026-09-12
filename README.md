@@ -1,3 +1,5 @@
+> **v1.4 development:** The current unified query implementation and its scope/limits are documented in [DATA_PATH.md](DATA_PATH.md). Legacy v1.3 sections below describe compatibility/history. Evaluation results are tracked separately; no release or quality improvement is implied by this source checkout.
+
 # N.E.K.O RimWorld
 
 **Evaluation status:** the current v1.3 candidate did not meet the Agent quality objective. This experimental implementation is retained for review; it is not promoted to the stable branch or released.
