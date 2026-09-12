@@ -79,7 +79,7 @@ class SubmissionPatchError(HandoffValidationError):
 def _answer_parts(value):
     if not isinstance(value, list) or not 1 <= len(value) <= 16:
         raise HandoffValidationError(
-            "invalid_submission", "answer requires 1..16 ordered text or fact-reference parts."
+            "invalid_submission", "answer requires 1..16 ordered parts matching the submission schema."
         )
     normalized = []
     for part in value:
@@ -227,7 +227,7 @@ class SubmissionDraft:
             if not short:
                 raise HandoffValidationError(
                     "invalid_submission",
-                    "Provide answer parts; detail is optional supporting explanation, not the short answer.",
+                    "Provide answer parts for the short handoff; detail cannot replace them.",
                 )
             self.agent_text = validate_agent_text(short)
         except (HandoffValidationError, EvidenceError) as error:
@@ -245,10 +245,24 @@ class SubmissionDraft:
                 "text_tokens_available": max(0, HANDOFF_TOKEN_BUDGET - fact_tokens),
             }
             first = next(iter(self.errors.values()))
+            repair = " Valid inputs are saved. Correct the required fields."
+            if any("observation_id" in part for part in self.answer):
+                repair += " Reference parts already emit the facts; do not restate them in text parts."
+            elif self.errors.get("delivery", {}).get("code") == "handoff_over_budget":
+                repair += (
+                    " Shorten answer to the concise conclusion with room below the token limit;"
+                    " keep requested facts in detail and preserve the conclusion's scope and unknowns."
+                    " No new game query is needed for this length repair."
+                )
+            if "answer" in required and self.detail is not None:
+                repair += (
+                    " If answer changes, resubmit matching saved detail or clear it with null;"
+                    " do not clear detail that is needed to answer the question."
+                )
             raise SubmissionPatchError(
                 first["code"],
                 " ".join(item["message"] for item in self.errors.values())
-                + " Valid inputs are saved. Correct required fields; reference parts already emit the facts, so do not restate them in text parts.",
+                + repair,
                 details,
             )
         result = validate_submission(self.full_text, self.agent_text)
@@ -344,12 +358,22 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
         terminal=True,
     )
     if not references_supported:
+        spec.parameters["properties"]["answer"]["description"] = (
+            "Concise conclusion passed to the caller, at most 180 tokens across all parts. "
+            "Leave room below the limit; preserve scope and unknowns that affect its meaning. "
+            "It need not repeat every fact or row from detail."
+        )
+        spec.parameters["properties"]["detail"]["description"] = (
+            "Complete factual report: put requested lists, tables, per-person findings and scope explanations here "
+            "when they do not fit the concise conclusion. Answer and detail together must cover the question. "
+            "May expand facts summarized in answer. Omit only if answer suffices; null clears saved detail."
+        )
         spec.parameters["properties"]["answer"]["items"]["oneOf"] = spec.parameters["properties"]["answer"]["items"][
             "oneOf"
         ][:1]
         return ToolSpec(
             name=spec.name,
-            description="Finish with a concise conclusion in text answer parts (180 tokens for the short handoff). Put the complete requested factual report, tables and per-person details in optional detail (full answer plus detail <=12000 characters). This Mod has no automatic fact-reference descriptions. Changing an existing answer requires reconfirming or clearing prior detail.",
+            description="Finish with text answer parts for the concise conclusion (180 tokens total) and detail for the complete requested factual report (answer plus detail <=12000 characters). Include detail whenever answer alone cannot cover the question. Both must agree; the conclusion may summarize facts expanded in detail. Submit after reading the evidence. Changing answer requires resubmitting matching saved detail or explicitly clearing it; preserve detail needed for task coverage.",
             parameters=spec.parameters,
             handler=submit,
             terminal=True,

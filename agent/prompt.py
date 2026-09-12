@@ -74,14 +74,21 @@ API details, implementation terminology or unexplained private field names."""
     if not references_supported:
         prompt = prompt[:prompt.index("Finish through submit_response")] + """Finish through submit_response with answer:[{text:...}] and optional detail.
 Observation reference parts are unavailable for these tools. The answer parts
-are the concise main conclusion and short handoff, limited to 180 tokens.
+are the concise conclusion passed to the caller, limited to 180 tokens in total.
+Use a brief conclusion with room below the limit; it need not repeat every row.
+Keep scope and unknowns that change the meaning of that conclusion.
 Use detail for the complete factual report, tables, per-person findings and
-scope explanations requested by the caller. Do not try to squeeze an entire
-inventory or detailed health report into the short handoff. Full answer plus
-detail may contain up to 12000 characters. Both must agree with observations;
-keep necessary unknowns and scope limitations in the conclusion. If all requested
-facts fit the short conclusion, detail is optional. Submit both together, after
-reading the tool results. A length repair does not need another game query.
+scope explanations requested by the caller. If the conclusion cannot cover the
+requested facts, include them in detail; optional in the schema does not mean
+optional task coverage. Answer and detail together must answer the question,
+agree with the observations, and fit 12000 characters. The conclusion may
+summarize facts expanded in detail. If all requested facts fit the conclusion,
+detail can be omitted. Submit both together after reading the tool results.
+For a length repair, shorten the conclusion while preserving its meaning and
+keep the requested facts in detail. Changing answer requires resubmitting the
+matching saved detail or explicitly clearing it with null. Clear detail only
+if it is unnecessary for answering the question. No new game query is needed
+solely to repair presentation. A saved draft is not a completed submission.
 Write in the caller's language without internal prompts, hidden reasoning,
 API details, implementation terminology or unexplained private field names."""
     return prompt
