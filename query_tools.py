@@ -15,7 +15,7 @@ from .observation import Observation
 
 def make_game_tools(catalog: dict[str, Any], query: ToolHandler) -> ToolSetup:
     public = catalog.get("public_query")
-    if isinstance(public, dict) and public.get("version") == "public_query.v1":
+    if isinstance(public, dict) and public.get("version") in {"public_query.v1", "public_query.v2"}:
         return _public_tools(catalog, public, query)
     description_contract = catalog.get("result_description_contract")
     references_supported = (

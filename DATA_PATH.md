@@ -1,3 +1,21 @@
+# Direct collection query revision (public_query.v2)
+
+A single query can be sent directly as {from,args,where,select,...}; requests:[...] batches the identical shape under one sample. Mixing the two forms is rejected.
+
+The current Agent interface exposes Pawn.inventory, equipment, apparel and carried directly as Thing collections. Their populations remain distinct; selection, conditions, paging and aggregates are identical. Tracker and inner-container fields remain in the developer GraphQL schema, not the Agent field directory. Thing.contents explicitly reads a container through the same rule. Null intermediate containers remain null; a null final carried Thing is an observed empty collection.
+
+Grouped queries may select values outside group_by. The executor verifies that requested values are shared within the group and returns them in rows.values. Shared object identities avoid repeated projection. Different values return null with group_field_varies, never an arbitrary representative. When enumeration is incomplete, shared values are unknown. Only displayed groups project their fields; all matching objects still contribute to complete aggregates.
+
+Example (ordinary collection operations, not an inventory preset):
+
+```json
+{"requests":[{"from":"things","args":{"map_id":"current","include_held":false},"where":{"definition.category":{"eq":"Item"}},"group_by":["definition.def_name"],"select":{"definition":["def_name","label","is_weapon","is_ingestible"]},"aggregate":{"quantity":{"op":"sum","field":"stack_count"}}},{"from":"spawned_free_colonists","args":{"map_id":"current"},"select":["id","name","inventory","equipment","apparel","carried"]}]}
+```
+
+This revision changes the canonical shape, so it declares v2. Saved v1 observations are not rewritten. The plugin can connect to either advertised version. Native identity and scope rules below remain valid; v1 tracker traversal examples below are historical.
+
+---
+
 # v1.4 query data path (development candidate)
 
 The current Mod advertises `public_query.v1`. The plugin exposes `query` and `describe_query`; it does not simultaneously advertise legacy templates, GraphQL or the separate resource tool. Older connected Mods retain their existing adapter. Legacy transports below are retained for compatibility/development, not a second recommended Agent workflow.
