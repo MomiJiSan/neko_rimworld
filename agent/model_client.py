@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import json
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 from urllib.parse import urlsplit, urlunsplit
@@ -261,11 +261,13 @@ class OpenAICompatibleModelClient:
         settings: AgentModelSettings,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        response_observer: Callable[[bytes], None] | None = None,
     ) -> None:
         if not settings.configured:
             raise AgentConfigurationError("Agent model is not configured.")
         self._settings = settings
         self._transport = transport
+        self._response_observer = response_observer
 
     async def complete(
         self,
@@ -401,6 +403,8 @@ class OpenAICompatibleModelClient:
                                     assembler.feed(record)
                                 break
                             bytes_read += len(chunk)
+                            if self._response_observer is not None:
+                                self._response_observer(chunk)
                             diagnostics.setdefault("first_chunk_ms", elapsed())
                             if bytes_read > MAX_MODEL_RESPONSE_BYTES:
                                 raise ModelClientError(
