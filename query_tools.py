@@ -249,6 +249,7 @@ def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHa
         # The compact query contract does not advertise v1.3 path-composition descriptors.
         # Use the already supported text submission protocol; do not invent references.
         references_supported=False,
+        directory=copy.deepcopy(directory),
     )
 
 

@@ -52,6 +52,7 @@ class ToolSetup:
     tools: tuple[ToolSpec, ...]
     context: str = ""
     references_supported: bool = False
+    directory: dict[str, Any] | None = None
 
 
 class ToolRegistry:

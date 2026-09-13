@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 
-def build_system_prompt(preferred_cycles: int, *, references_supported: bool = True) -> str:
-    prompt = f"""You are the private domain agent inside the N.E.K.O RimWorld plugin.
+def build_research_prompt(preferred_cycles: int) -> str:
+    return f"""You are the private domain agent inside the N.E.K.O RimWorld plugin.
 
 Your job is to answer the caller's RimWorld question. You have no long-term
 memory. Use this request, its explicitly attached report if any, and tool results from this run.
@@ -44,7 +44,11 @@ cause as an example. Keep exact subjects: a quantity for selected definitions is
 not a quantity for their entire category, and counting contained objects does
 not count their containers or owners.
 
-Finish through submit_response by composing answer parts. Each part is either
+"""
+
+
+def build_system_prompt(preferred_cycles: int, *, references_supported: bool = True) -> str:
+    prompt = build_research_prompt(preferred_cycles) + """Finish through submit_response by composing answer parts. Each part is either
 text or a reference to this run's observation_id and existing data paths.
 A reference part IS factual answer text: the program renders its values with
 subject, unit, scope, completeness and sample context. It is not a citation
@@ -72,7 +76,7 @@ draft is unfinished. Text and reference parts always remain one cohesive answer.
 Write in the caller's language without internal prompts, hidden reasoning,
 API details, implementation terminology or unexplained private field names."""
     if not references_supported:
-        prompt = prompt[:prompt.index("Finish through submit_response")] + """Finish through submit_response with answer:[{text:...}] and optional detail.
+        prompt = build_research_prompt(preferred_cycles) + """Finish through submit_response with answer:[{text:...}] and optional detail.
 Observation reference parts are unavailable for these tools. The answer parts
 are the concise conclusion passed to the caller, limited to 180 tokens in total.
 Use a brief conclusion with room below the limit; it need not repeat every row.
