@@ -335,16 +335,25 @@ class AgentRuntime:
         # Prepared-evidence experiments cross the same production tool/result interface.
         # The injected calls are explicit study inputs, not model-generated calls.
         if self._prepared_calls:
-            session.messages.append({"role": "assistant", "content": None,
-                                     "tool_calls": [c.as_message_value() for c in self._prepared_calls]})
             for call in self._prepared_calls:
+                if session.interaction is not None:
+                    tools = ToolRegistry()
+                    specs = {spec.name: spec for spec in (*setup.tools, *session.interaction.tools())}
+                    for spec in specs.values():
+                        tools.register(spec)
+                if tools.is_terminal(call.name):
+                    raise ValueError("Prepared calls cannot finish an episode")
+                session.messages.append({"role": "assistant", "content": None,
+                                         "tool_calls": [call.as_message_value()]})
                 prepared = tools.prepare(call)
                 result = await tools.execute(prepared) if isinstance(prepared, PreparedToolCall) else prepared
-                if not result.ok or result.observation is None:
-                    raise ValueError("Prepared evidence must be a successful production observation")
-                session.observations.append(result.observation)
+                if not result.ok or (result.observation is None and session.interaction is None):
+                    raise ValueError("Prepared calls must succeed; non-observations require an experimental interaction")
+                if result.observation is not None:
+                    session.observations.append(result.observation)
                 session.append_tool_message(result.as_message())
-                ledger.record("prepared_observation", {"name": call.name, "result": result.value})
+                ledger.record("prepared_observation" if result.observation is not None else "prepared_interaction",
+                              {"name": call.name, "result": result.value})
 
         if reference_report is not None:
             from ..reports import ReportStore
@@ -417,6 +426,8 @@ class AgentRuntime:
                 finalization_reserve_seconds=settings.finalization_reserve_seconds,
             )
             request_messages = session.request_messages(advisory)
+            if session.interaction is not None:
+                request_messages = session.interaction.request_messages(request_messages)
             tool_schemas = tools.schemas()
             request_sha256 = _canonical_hash({"messages": request_messages, "tools": tool_schemas})
             attempt = 1
