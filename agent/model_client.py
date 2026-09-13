@@ -21,7 +21,8 @@ DEFAULT_RUN_BUDGET_SECONDS = 90.0
 DEFAULT_PREFERRED_CYCLES = 4
 DEFAULT_MAX_OUTPUT_TOKENS = 32768
 DEFAULT_TEMPERATURE = 0.2
-MAX_MODEL_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_MODEL_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_EFFECTIVE_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_TOOL_CALLS_PER_TURN = 32
 MAX_TOOL_ARGUMENT_CHARS = 32_768
 
@@ -415,11 +416,15 @@ class OpenAICompatibleModelClient:
                                     useful = True
                                     diagnostics.setdefault("first_useful_delta_ms", elapsed())
                                     diagnostics["last_useful_delta_ms"] = elapsed()
+                                if assembler.meaningful_bytes > MAX_EFFECTIVE_RESPONSE_BYTES:
+                                    raise ModelClientError("model_response_too_large", "The model's text/tool content exceeded its byte limit.")
+                        if assembler.meaningful_bytes > MAX_EFFECTIVE_RESPONSE_BYTES:
+                            raise ModelClientError("model_response_too_large", "The model's text/tool content exceeded its byte limit.")
                         payload = assembler.payload()
                     finally:
                         await response.aclose()
             turn = self._parse_response(payload)
-            diagnostics.update(phase="completed", total_ms=elapsed(), response_bytes=bytes_read)
+            diagnostics.update(phase="completed", total_ms=elapsed(), response_bytes=bytes_read, effective_response_bytes=assembler.meaningful_bytes)
             return replace(turn, diagnostics=diagnostics, reasoning_metadata=assembler.reasoning_metadata())
         except asyncio.CancelledError:
             diagnostics.update(exception_type="CancelledError", total_ms=elapsed(), response_bytes=bytes_read)

@@ -236,6 +236,12 @@ def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHa
         return copy.deepcopy(data)
 
     directory = {key: public[key] for key in ("roots", "rules", "common_fields", "field_index", "field_notes", "examples") if key in public}
+    context_blocks = (
+        ("catalog", "Game query directory (" + catalog["schema_id"] + "):\n" + json.dumps(directory, ensure_ascii=False, separators=(",", ":"))),
+        ("reminder_completion", "\nAnswer once the requested facts are known; read more only for an unresolved fact."),
+        ("reminder_domain", " Native capability flags and category trees are not interchangeable. Never use CountAsResource/readout membership as a default filter for all possessions."),
+        ("reminder_scope", " Report the actual requested scope and preserve unknown versus zero."),
+    )
     return ToolSetup(
         tools=(
             ToolSpec("query", "Read selected game objects, related facts and Mod-computed aggregates. Same fields and conditions for detail and counts. Batch related requests. No preliminary query required. Use coverage before interpreting missing values.", copy.deepcopy(public["parameters"]), read),
@@ -244,12 +250,12 @@ def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHa
                 "required": ["types"], "additionalProperties": False,
             }, describe),
         ),
-        context="Game query directory (" + catalog["schema_id"] + "):\n" + json.dumps(directory, ensure_ascii=False, separators=(",", ":"))
-        + "\nAnswer once the requested facts are known; read more only for an unresolved fact. Native capability flags and category trees are not interchangeable. Never use CountAsResource/readout membership as a default filter for all possessions. Report the actual requested scope and preserve unknown versus zero.",
+        context="".join(text for _,text in context_blocks),
         # The compact query contract does not advertise v1.3 path-composition descriptors.
         # Use the already supported text submission protocol; do not invent references.
         references_supported=False,
         directory=copy.deepcopy(directory),
+        context_blocks=context_blocks,
     )
 
 

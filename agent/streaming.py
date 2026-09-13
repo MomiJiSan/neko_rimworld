@@ -90,6 +90,7 @@ class StreamAssembler:
         self.response_id = ""
         self.model = ""
         self.text: list[str] = []
+        self.meaningful_bytes = 0
         self.calls: dict[int, dict[str, str]] = {}
         self.usage: dict[str, Any] = {}
         self.reasoning_chars = 0
@@ -144,6 +145,7 @@ class StreamAssembler:
                     if self.finish_reason:
                         raise StreamProtocolError("model_invalid_stream", "Content arrived after finish_reason.")
                     self.text.append(content)
+                    self.meaningful_bytes += len(content.encode("utf-8"))
                     useful = True
             calls = delta.get("tool_calls") or []
             if not isinstance(calls, list):
@@ -170,6 +172,7 @@ class StreamAssembler:
                     if not isinstance(fragment, str):
                         raise StreamProtocolError("model_invalid_stream", "Tool fragments must be strings.")
                     target[key] += fragment
+                    self.meaningful_bytes += len(fragment.encode("utf-8"))
                     limit = self.max_arguments if key == "arguments" else 256
                     if len(target[key]) > limit:
                         raise StreamProtocolError(

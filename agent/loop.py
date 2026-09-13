@@ -18,7 +18,7 @@ from .handoff import (
     make_submission_tool,
 )
 from .model_client import AgentModelSettings, ModelClient, ModelClientError, OpenAICompatibleModelClient
-from .prompt import build_runtime_advisory, build_system_prompt
+from .prompt import build_finalization_prompt, build_runtime_advisory, build_system_prompt
 from .session import AgentRunSession
 from .tools import ToolExecutionError, ToolRegistry, ToolSetup, ToolSpec
 
@@ -397,6 +397,10 @@ class AgentRuntime:
                 )
             )
 
+        reserve_enabled = session.interaction is None or getattr(session.interaction, "supports_finalization", False)
+        reserve = min(settings.finalization_reserve_seconds, settings.run_budget_seconds / 2) if reserve_enabled else 0.0
+        research_deadline = settings.run_budget_seconds - reserve
+        finalizing = False
         while True:
             elapsed = ledger.elapsed_seconds
             remaining = settings.run_budget_seconds - elapsed
@@ -410,12 +414,24 @@ class AgentRuntime:
                 )
 
             cycle = ledger.begin_cycle()
+            if reserve > 0 and elapsed >= research_deadline and not finalizing:
+                finalizing = True
+            if finalizing and not getattr(session, "finalization_started", False):
+                session.finalization_started = True
+                ledger.record("research_closed", {"remaining_seconds": remaining, "research_deadline": research_deadline})
+                if session.interaction is not None:
+                    session.interaction.finalizing = True
             if session.interaction is not None:
                 tools = ToolRegistry()
                 for spec in session.interaction.tools():
                     tools.register(spec)
                 session.messages[0]["content"] = session.interaction.prompt(settings.preferred_cycles)
                 ledger.record("interaction_state", session.interaction.snapshot())
+            elif finalizing:
+                tools = ToolRegistry()
+                tools.register(make_submission_tool(session.submission, session.observations, submission_updated,
+                                                    references_supported=setup.references_supported))
+                session.messages[0]["content"] = build_finalization_prompt(settings.preferred_cycles, references_supported=setup.references_supported) + ("\n\n" + setup.context if setup.context else "")
             advisory = build_runtime_advisory(
                 cycle=cycle,
                 preferred_cycles=settings.preferred_cycles,
@@ -431,12 +447,16 @@ class AgentRuntime:
             tool_schemas = tools.schemas()
             request_sha256 = _canonical_hash({"messages": request_messages, "tools": tool_schemas})
             attempt = 1
+            turn = None
             while True:
                 attempt_remaining = settings.run_budget_seconds - ledger.elapsed_seconds
-                retry_reserve = settings.finalization_reserve_seconds if attempt > 1 else 0.0
+                available = attempt_remaining if finalizing or reserve == 0 else research_deadline - ledger.elapsed_seconds
+                if available <= 0 and not finalizing and reserve > 0:
+                    finalizing = True
+                    break
                 request_timeout = min(
                     settings.request_timeout_seconds,
-                    max(0.001, attempt_remaining - retry_reserve),
+                    max(0.001, available),
                 )
                 request_event = {
                     "model": settings.model,
@@ -448,13 +468,14 @@ class AgentRuntime:
                     "attempt": attempt,
                     "max_attempts": MAX_MODEL_ATTEMPTS,
                 }
-                if attempt == 1:
+                if attempt == 1 and ledger.state != AgentRunState.MODEL_REQUESTING:
                     ledger.transition(AgentRunState.MODEL_REQUESTING, "model_request_started", request_event)
                 else:
                     ledger.record("model_request_started", request_event)
                 session.model_calls += 1
                 try:
-                    turn = await model.complete(request_messages, tool_schemas, timeout=request_timeout)
+                    async with asyncio.timeout(request_timeout):
+                        turn = await model.complete(request_messages, tool_schemas, timeout=request_timeout)
                     break
                 except asyncio.CancelledError:
                     ledger.record(
@@ -466,15 +487,23 @@ class AgentRuntime:
                         },
                     )
                     raise
-                except ModelClientError as exception:
+                except (ModelClientError, TimeoutError) as exception:
+                    if isinstance(exception, TimeoutError):
+                        exception = ModelClientError("model_request_deadline", "The model request reached its phase deadline.",
+                            diagnostics=getattr(model,"last_diagnostics",{}),usage=getattr(model,"last_usage",{}))
+                    if reserve > 0 and not finalizing and ledger.elapsed_seconds >= research_deadline:
+                        ledger.record("research_request_expired", {"error_code":exception.code,"diagnostics":exception.diagnostics,"usage":exception.usage})
+                        finalizing = True
+                        break
                     retry_reason = _model_retry_reason(exception)
                     retry_delay = MODEL_RETRY_DELAYS_SECONDS[min(attempt - 1, len(MODEL_RETRY_DELAYS_SECONDS) - 1)]
                     remaining_after_failure = settings.run_budget_seconds - ledger.elapsed_seconds
-                    retry_budget_floor = max(3.0, settings.finalization_reserve_seconds)
+                    retry_available = remaining_after_failure if finalizing or reserve == 0 else research_deadline-ledger.elapsed_seconds
+                    retry_budget_floor = 3.0
                     will_retry = (
                         retry_reason is not None
                         and attempt < MAX_MODEL_ATTEMPTS
-                        and remaining_after_failure > retry_delay + retry_budget_floor
+                        and retry_available > retry_delay + retry_budget_floor
                     )
                     failure = {
                         "attempt": attempt,
@@ -531,6 +560,8 @@ class AgentRuntime:
                         already_degraded=True,
                     )
 
+            if turn is None:
+                continue
             ledger.transition(
                 AgentRunState.MODEL_RESPONDED,
                 "model_response_received",
@@ -585,7 +616,15 @@ class AgentRuntime:
                             },
                         )
                         ledger.record("tool_started", {"call_id": call.call_id, "name": call.name})
-                        result = await tools.execute(prepared)
+                        tool_available = (research_deadline if reserve > 0 and not tools.is_terminal(call.name) else settings.run_budget_seconds) - ledger.elapsed_seconds
+                        try:
+                            if tool_available <= 0:
+                                raise TimeoutError()
+                            async with asyncio.timeout(tool_available):
+                                result = await tools.execute(prepared)
+                        except TimeoutError:
+                            result = tools.error_result(call,"research_deadline","Research time ended; this read did not complete. Finish with obtained evidence and identify unknowns.",recoverable=False)
+                            finalizing = reserve > 0
                         if result.observation is not None:
                             session.observations.append(result.observation)
                         ledger.record(
