@@ -12,13 +12,29 @@ Example (ordinary collection operations, not an inventory preset):
 {"requests":[{"from":"things","args":{"map_id":"current","include_held":false},"where":{"definition.category":{"eq":"Item"}},"group_by":["definition.def_name"],"select":{"definition":["def_name","label","is_weapon","is_ingestible"]},"aggregate":{"quantity":{"op":"sum","field":"stack_count"}}},{"from":"spawned_free_colonists","args":{"map_id":"current"},"select":["id","name","inventory","equipment","apparel","carried"]}]}
 ```
 
+The v1.4.2 integration keeps v2. Selection arrays can mix string paths and
+field maps, for example `['id', {'definition': ['def_name', 'label']}]` (shown as
+JavaScript notation). A bare relation map is a child selection only if every
+key is an actual child field and none is `select/args/where/aggregate/group_by/
+order_by/limit/offset/on`. Otherwise it must obey the explicit options grammar.
+Duplicate/overlapping fields, unknown names and misplaced parameters are
+rejected; arguments and filters are never silently relocated. Compiler errors
+include their input path and owning type where available; some condition and
+root-envelope errors still identify only a containing object or message.
+
+The common-field descriptions and additional `field_notes` are generated from
+the same registry used by `describe_query`. Notes carry existing nonempty
+field descriptions; this is not a claim of complete units or enum metadata
+for every field. Text submission uses only `{text}` parts, top-level language,
+and the existing answer/detail contract in both ordinary calls and fallback.
+
 This revision changes the canonical shape, so it declares v2. Saved v1 observations are not rewritten. The plugin can connect to either advertised version. Native identity and scope rules below remain valid; v1 tracker traversal examples below are historical.
 
 ---
 
-# v1.4 query data path (development candidate)
+# Shared v1.4 query data path
 
-The current Mod advertises `public_query.v1`. The plugin exposes `query` and `describe_query`; it does not simultaneously advertise legacy templates, GraphQL or the separate resource tool. Older connected Mods retain their existing adapter. Legacy transports below are retained for compatibility/development, not a second recommended Agent workflow.
+The current Mod advertises `public_query.v2` (the initial v1.4 revision used v1). The plugin exposes `query` and `describe_query`; it does not simultaneously advertise legacy templates, GraphQL or the separate resource tool. Older connected Mods retain their existing adapter. Legacy transports below are retained for compatibility/development, not a second recommended Agent workflow.
 
 ## Single executable field vocabulary
 

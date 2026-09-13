@@ -39,6 +39,7 @@ def response():
 async def test_public_query_replaces_legacy_tools_without_changing_observations():
     source = catalog()
     source["public_query"] = {"version": "public_query.v1", "parameters": {"type": "object", "properties": {"requests": {"type": "array"}}}, "rules": "canonical fields", "roots": []}
+    source["public_query"]["field_notes"] = {"HealthSummary": {"health_percent": "A native aggregate, not a causal explanation."}}
     calls = []
 
     async def query(arguments):
@@ -53,6 +54,7 @@ async def test_public_query_replaces_legacy_tools_without_changing_observations(
     assert calls == [{"operation": "query", "arguments": arguments}]
     assert observed.value["response"] == response().to_dict()
     assert "type Pawn {" not in setup.context
+    assert '"field_notes"' in setup.context and "not a causal explanation" in setup.context
 
 
 @pytest.mark.asyncio

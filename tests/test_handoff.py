@@ -131,3 +131,39 @@ async def test_text_tool_declares_only_text_parts_and_rejects_references():
 
     compatible = make_submission_tool(SubmissionDraft(), [], references_supported=True)
     assert "observation_id" in json.dumps(compatible.schema())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra", ["language", "detail", "unexpected"])
+async def test_text_mode_bad_parts_use_current_contract_in_real_registry(extra):
+    import json
+    from plugin.plugins.neko_rimworld.agent.contracts import ToolCall
+    from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft, make_submission_tool
+    from plugin.plugins.neko_rimworld.agent.tools import ToolRegistry
+
+    registry = ToolRegistry()
+    registry.register(make_submission_tool(SubmissionDraft(), [], references_supported=False))
+    prepared = registry.prepare(ToolCall(call_id="bad-part", name="submit_response", raw_arguments=json.dumps({"answer": [{"text": "结论", extra: "zh"}]})))
+    result = await registry.execute(prepared)
+    error = result.value["error"]
+    assert result.ok is False and error["code"] == "invalid_submission"
+    assert "answer[0]" in error["message"] and extra in error["message"]
+    assert "observation_id" not in error["message"]
+    assert "fact_tokens" not in error["details"]
+    assert "text_tokens_available" not in error["details"]
+    if extra in {"language", "detail"}:
+        assert "top level" in error["message"]
+
+
+def test_text_fallback_applies_same_capability_and_token_feedback():
+    from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft, SubmissionPatchError
+    draft = SubmissionDraft()
+    with pytest.raises(SubmissionPatchError) as rejected:
+        draft.apply({"answer": [{"text": "长结论。" * 200}], "detail": "保留完整报告"}, references_supported=False)
+    details = rejected.value.details
+    assert details["handoff_tokens"] > details["token_budget"] == HANDOFF_TOKEN_BUDGET
+    assert "fact_tokens" not in details
+    with pytest.raises(SubmissionPatchError) as rejected:
+        draft.apply({"answer": [{"text": "结论", "language": "zh"}]}, references_supported=False)
+    assert "observation_id" not in str(rejected.value)
+    assert draft.detail == "保留完整报告"

@@ -235,7 +235,7 @@ def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHa
             raise ToolExecutionError("schema_changed", "Query directory changed; start a fresh consultation.")
         return copy.deepcopy(data)
 
-    directory = {key: public[key] for key in ("roots", "rules", "common_fields", "field_index", "examples") if key in public}
+    directory = {key: public[key] for key in ("roots", "rules", "common_fields", "field_index", "field_notes", "examples") if key in public}
     return ToolSetup(
         tools=(
             ToolSpec("query", "Read selected game objects, related facts and Mod-computed aggregates. Same fields and conditions for detail and counts. Batch related requests. No preliminary query required. Use coverage before interpreting missing values.", copy.deepcopy(public["parameters"]), read),

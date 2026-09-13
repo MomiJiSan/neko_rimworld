@@ -576,7 +576,7 @@ class AgentRuntime:
                     else {"detail": turn.content}
                 )
                 try:
-                    validated = session.submission.apply(patch, observations=session.observations)
+                    validated = session.submission.apply(patch, observations=session.observations, references_supported=setup.references_supported)
                     ledger.set_draft(session.submission.snapshot())
                 except HandoffValidationError as exception:
                     ledger.set_draft(session.submission.snapshot())

@@ -83,7 +83,11 @@ requested facts, include them in detail; optional in the schema does not mean
 optional task coverage. Answer and detail together must answer the question,
 agree with the observations, and fit 12000 characters. The conclusion may
 summarize facts expanded in detail. If all requested facts fit the conclusion,
-detail can be omitted. Submit both together after reading the tool results.
+detail can be omitted. For a factual state question, keep the report to the
+requested observations and necessary scope/unknowns. Do not add background
+rules or new derived figures merely to expand detail. Submit both together
+after reading the tool results. language belongs only at the submission's
+top level; each text answer part contains only text.
 For a length repair, shorten the conclusion while preserving its meaning and
 keep the requested facts in detail. Changing answer requires resubmitting the
 matching saved detail or explicitly clearing it with null. Clear detail only

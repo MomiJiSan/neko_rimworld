@@ -76,15 +76,24 @@ class SubmissionPatchError(HandoffValidationError):
         self.details = details
 
 
-def _answer_parts(value):
+def _answer_parts(value, *, references_supported=True):
     if not isinstance(value, list) or not 1 <= len(value) <= 16:
         raise HandoffValidationError(
             "invalid_submission", "answer requires 1..16 ordered parts matching the submission schema."
         )
     normalized = []
-    for part in value:
+    for index, part in enumerate(value):
         if not isinstance(part, dict):
-            raise HandoffValidationError("invalid_submission", "Each answer part is an object.")
+            raise HandoffValidationError("invalid_submission", f"answer[{index}] must be an object.")
+        if not references_supported and set(part) != {"text"}:
+            extra = sorted(set(part) - {"text"})
+            top_level = sorted(set(extra) & {"answer", "detail", "language"})
+            message = f"answer[{index}] accepts only {{text}}."
+            if extra:
+                message += " Unsupported fields: " + ", ".join(extra) + "."
+            if top_level:
+                message += " Put " + ", ".join(top_level) + " at the top level of submit_response, not inside an answer part."
+            raise HandoffValidationError("unsupported_reference" if "observation_id" in part else "invalid_submission", message)
         if set(part) == {"text"}:
             normalized.append(
                 {"text": _validated_text(part["text"], field="answer.text", max_chars=MAX_FULL_TEXT_CHARS)}
@@ -175,7 +184,7 @@ class SubmissionDraft:
             "complete": bool(self.full_text and self.agent_text and not self.errors),
         }
 
-    def apply(self, patch: Mapping[str, Any], *, observations=()) -> dict[str, Any]:
+    def apply(self, patch: Mapping[str, Any], *, observations=(), references_supported=True) -> dict[str, Any]:
         from .presentation import EvidenceError
 
         if not patch or set(patch) - {"answer", "detail", "language"}:
@@ -195,7 +204,7 @@ class SubmissionDraft:
                     if value not in {"zh", "en"}:
                         raise HandoffValidationError("invalid_submission", "language must be zh or en.")
                 elif key == "answer":
-                    value = _answer_parts(value)
+                    value = _answer_parts(value, references_supported=references_supported)
                     _render_answer(value, observations, self.language)
                 elif value is not None:
                     value = _validated_text(value, field=key, max_chars=MAX_FULL_TEXT_CHARS)
@@ -215,6 +224,7 @@ class SubmissionDraft:
         self.errors.pop("delivery", None)
         self.full_text = self.agent_text = None
         fact_tokens = 0
+        short = ""
         try:
             valid_answer = self.answer if "answer" not in self.errors else []
             full, short, provenance, fact_tokens = _render_answer(valid_answer, observations, self.language)
@@ -241,12 +251,14 @@ class SubmissionDraft:
                 "required_fields": list(dict.fromkeys(required)),
                 "field_errors": copy.deepcopy(self.errors),
                 "draft_revision": self.revision,
-                "fact_tokens": fact_tokens,
-                "text_tokens_available": max(0, HANDOFF_TOKEN_BUDGET - fact_tokens),
             }
+            if references_supported:
+                details.update(fact_tokens=fact_tokens, text_tokens_available=max(0, HANDOFF_TOKEN_BUDGET - fact_tokens))
+            else:
+                details.update(handoff_tokens=count_handoff_tokens(short)[0] if short else None, token_budget=HANDOFF_TOKEN_BUDGET)
             first = next(iter(self.errors.values()))
             repair = " Valid inputs are saved. Correct the required fields."
-            if any("observation_id" in part for part in self.answer):
+            if references_supported and any("observation_id" in part for part in self.answer):
                 repair += " Reference parts already emit the facts; do not restate them in text parts."
             elif self.errors.get("delivery", {}).get("code") == "handoff_over_budget":
                 repair += (
@@ -285,7 +297,7 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
                 "unsupported_reference", "This Mod lacks result descriptions; submit text answer parts."
             )
         try:
-            result = draft.apply(arguments, observations=observations)
+            result = draft.apply(arguments, observations=observations, references_supported=references_supported)
         except SubmissionPatchError as error:
             if on_update is not None:
                 on_update(draft.snapshot(), "submission_patch_rejected", error.details)
@@ -349,7 +361,7 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
                     "maxLength": MAX_FULL_TEXT_CHARS,
                     "description": "Optional further explanation, excluded from the short handoff. null clears saved detail.",
                 },
-                "language": {"type": "string", "enum": ["zh", "en"], "default": "zh"},
+                "language": {"type": "string", "enum": ["zh", "en"], "default": "zh", "description": "Language of the whole submission. Set only here at the top level, never inside answer parts."},
             },
             "minProperties": 1,
             "additionalProperties": False,

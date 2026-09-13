@@ -1,43 +1,30 @@
-> **v1.4 development:** The current unified query implementation and its scope/limits are documented in [DATA_PATH.md](DATA_PATH.md). Legacy v1.3 sections below describe compatibility/history. Evaluation results are tracked separately; no release or quality improvement is implied by this source checkout.
-
 # N.E.K.O RimWorld
 
-**Evaluation status:** the current v1.3 candidate did not meet the Agent quality objective. This experimental implementation is retained for review; it is not promoted to the stable branch or released.
+The current checkout contains the unreleased v1.4.2 integration candidate.
+Version metadata remains 1.0.0. This source change is not a stable release or
+proof that all natural-language answers are correct.
 
-Current work is the unreleased v1.3 development candidate: shared schema-driven
-selection, resource evidence v3 and composed text/reference answers. No
-business-specific focus or medicine selector is added. See
-[resource-evidence.md](docs/resource-evidence.md) for current internal contracts
-and [DESIGN.md](DESIGN.md) for the changed responsibility boundary. Passing
-software tests does not establish an end-to-end Agent quality improvement.
+With the current Mod, the specialist Agent uses `query`, `describe_query` and
+`submit_response`. The Mod owns the field vocabulary, selection grammar and
+read semantics; the plugin forwards that generated directory, including field
+notes. See [DATA_PATH.md](DATA_PATH.md) for the current contract. No additional
+business-specific tool or focus preset is added.
 
-## Current development state (1.2 candidate, not a release)
+Submission errors now follow the connected Mod's capability. In text mode,
+answer parts contain only `text`; `language` belongs at the submission's top
+level. Repair feedback reports the text budget and actual input problem,
+without recommending unavailable observation-reference parts. The short
+handoff remains capped at 180 tokens; `detail` retains requested factual
+coverage and the existing reconfirmation protection.
 
-The current plugin accepts both resource_evidence.v1 and v2 from the companion
-Mod. V2 groups quantities with their scope, completeness and lower bounds. The
-Mod also exposes native medicine filtering through the existing thing_defs
-target; the three game-query tools remain unchanged. See
-[Resource evidence](docs/resource-evidence.md) for compatibility and usage.
+The system instruction asks state reports to preserve observations, scope and
+unknowns without adding unsupported background rules. This is an instruction,
+not a semantic guarantee. Model results and remaining failures are recorded in
+the separate rimworld-bench repository. The historical sections below describe
+older compatible versions; current public-query behavior takes precedence.
 
-Development experiments show better medicine classification evidence, but
-answers can still confuse aggregate scopes or lose qualifications in the short
-handoff. This candidate does not establish overall answer correctness.
-
-The working source clarifies the existing tool scopes and asks full reports and
-short handoffs to preserve the same subjects, scope and uncertainty. It adds no
-model-visible tool. Model experiments remain in the separate bench; these
-changes do not certify every natural-language explanation as correct.
-
-Audit-capacity failures now retain a structured terminal result, collected
-observations and any report draft. The companion Mod repairs coverage metadata
-inside inline GraphQL fragments, preserves the discovered `hasNextPage` value
-when only detail fields fail, and reports every invalid requested resource
-definition through the existing `issues` array. Unknown definitions remain a
-failed batch and are never silently dropped or treated as zero.
-
-Version metadata remains at 1.0.0 during development. Sources
-require their normal reload/rebuild to activate; editing this directory does
-not update already loaded game assemblies.
+Sources require their normal reload/rebuild to activate; editing this checkout
+does not update an already loaded game assembly.
 
 Output budget defaults to 32768 tokens and is editable under Settings → running
 budgets (64–131072, subject to provider limits). Reasoning may consume this budget.
@@ -48,7 +35,7 @@ overrides remain in effect until saved through Settings. Time limits are separat
 Independent, memoryless RimWorld specialist agent backed by a read-only local
 game bridge.
 
-## Version 0.5.0 scope
+## Historical version 0.5.0 scope
 
 - Authenticated IPv4 loopback bridge, default `127.0.0.1:48919`.
 - One N.E.K.O Agent-visible entry: `rimworld_consult`.
