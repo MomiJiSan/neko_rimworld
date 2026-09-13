@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+_REQUEST_OUTCOMES = frozenset({
+    "model_response_received", "model_request_attempt_failed", "model_request_failed",
+    "model_request_cancelled", "research_request_expired", "research_request_failed",
+})
+
+
 import copy
 import hashlib
 import json
@@ -348,20 +354,17 @@ class AgentAuditLedger:
                 "model_calls": event_counts.get("model_request_started", 0),
                 "model_responses": event_counts.get("model_response_received", 0),
                 "model_failures": event_counts.get("model_request_failed", 0)
-                + event_counts.get("model_request_attempt_failed", 0),
+                + event_counts.get("model_request_attempt_failed", 0)
+                + event_counts.get("research_request_failed", 0),
                 "model_cancellations": event_counts.get("model_request_cancelled", 0),
+                "research_expirations": event_counts.get("research_request_expired", 0),
                 "usage": summarize_usage(
                     event_counts.get("model_request_started", 0),
                     (
                         event["data"].get("usage")
                         for event in self._events
                         if event["event"]
-                        in {
-                            "model_response_received",
-                            "model_request_attempt_failed",
-                            "model_request_failed",
-                            "model_request_cancelled",
-                        }
+                        in _REQUEST_OUTCOMES
                     ),
                 ),
                 "latest_request": next(
@@ -369,12 +372,7 @@ class AgentAuditLedger:
                         event["data"].get("diagnostics")
                         for event in reversed(self._events)
                         if event["event"]
-                        in {
-                            "model_response_received",
-                            "model_request_attempt_failed",
-                            "model_request_failed",
-                            "model_request_cancelled",
-                        }
+                        in _REQUEST_OUTCOMES
                         and event["data"].get("diagnostics")
                     ),
                     None,
