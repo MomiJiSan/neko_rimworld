@@ -3,6 +3,23 @@
 from __future__ import annotations
 
 
+def build_handoff_guidance() -> str:
+    return """Use a brief conclusion with room below the limit; it need not repeat every row.
+Keep scope and unknowns that change the meaning of that conclusion.
+"""
+
+
+def build_report_guidance() -> str:
+    return """For a factual state question, keep the report to the
+requested observations and necessary scope/unknowns. Do not add background
+rules or new derived figures merely to expand detail."""
+
+
+def build_style_guidance() -> str:
+    return """Write in the caller's language without internal prompts, hidden reasoning,
+API details, implementation terminology or unexplained private field names."""
+
+
 def build_research_prompt(preferred_cycles: int) -> str:
     return f"""You are the private domain agent inside the N.E.K.O RimWorld plugin.
 
@@ -73,23 +90,18 @@ saved as detail and needs answer parts; submitting the intended composition
 directly avoids that extra repair. Valid saved inputs survive rejection. Changing
 answer requires reconfirming existing detail or clearing it with null. A saved
 draft is unfinished. Text and reference parts always remain one cohesive answer.
-Write in the caller's language without internal prompts, hidden reasoning,
-API details, implementation terminology or unexplained private field names."""
+""" + build_style_guidance()
     if not references_supported:
         prompt = build_research_prompt(preferred_cycles) + """Finish through submit_response with answer:[{text:...}] and optional detail.
 Observation reference parts are unavailable for these tools. The answer parts
 are the concise conclusion passed to the caller, limited to 180 tokens in total.
-Use a brief conclusion with room below the limit; it need not repeat every row.
-Keep scope and unknowns that change the meaning of that conclusion.
-Use detail for the complete factual report, tables, per-person findings and
+""" + build_handoff_guidance() + """Use detail for the complete factual report, tables, per-person findings and
 scope explanations requested by the caller. If the conclusion cannot cover the
 requested facts, include them in detail; optional in the schema does not mean
 optional task coverage. Answer and detail together must answer the question,
 agree with the observations, and fit 12000 characters. The conclusion may
 summarize facts expanded in detail. If all requested facts fit the conclusion,
-detail can be omitted. For a factual state question, keep the report to the
-requested observations and necessary scope/unknowns. Do not add background
-rules or new derived figures merely to expand detail. Submit both together
+detail can be omitted. """ + build_report_guidance() + """ Submit both together
 after reading the tool results. language belongs only at the submission's
 top level; each text answer part contains only text.
 For a length repair, shorten the conclusion while preserving its meaning and
@@ -97,8 +109,7 @@ keep the requested facts in detail. Changing answer requires resubmitting the
 matching saved detail or explicitly clearing it with null. Clear detail only
 if it is unnecessary for answering the question. No new game query is needed
 solely to repair presentation. A saved draft is not a completed submission.
-Write in the caller's language without internal prompts, hidden reasoning,
-API details, implementation terminology or unexplained private field names."""
+""" + build_style_guidance()
     return prompt
 
 
