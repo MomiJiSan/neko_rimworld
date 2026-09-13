@@ -70,7 +70,7 @@ class ToolRegistry:
 
     def is_exclusive(self, name: str) -> bool:
         spec = self._tools.get(name)
-        return bool(spec and (spec.terminal or spec.exclusive))
+        return bool(spec and spec.exclusive)
 
     def schemas(self) -> list[dict[str, Any]]:
         return [self._tools[name].schema() for name in sorted(self._tools)]

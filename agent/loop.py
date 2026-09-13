@@ -535,6 +535,7 @@ class AgentRuntime:
                 )
                 tool_messages: list[dict[str, Any]] = []
                 submitted_response: Mapping[str, Any] | None = None
+                isolated_batch = len(turn.tool_calls) > 1 and any(tools.is_exclusive(c.name) for c in turn.tool_calls)
                 for call in turn.tool_calls:
                     session.tool_calls += 1
                     ledger.record(
@@ -546,7 +547,7 @@ class AgentRuntime:
                         },
                     )
                     prepared = tools.prepare(call)
-                    if len(turn.tool_calls) > 1 and tools.is_exclusive(call.name):
+                    if isolated_batch or len(turn.tool_calls) > 1 and tools.is_terminal(call.name):
                         prepared = tools.error_result(
                             call,
                             "terminal_tool_must_be_alone",
