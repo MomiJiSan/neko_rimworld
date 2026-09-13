@@ -30,6 +30,18 @@ and the existing answer/detail contract in both ordinary calls and fallback.
 
 This revision changes the canonical shape, so it declares v2. Saved v1 observations are not rewritten. The plugin can connect to either advertised version. Native identity and scope rules below remain valid; v1 tracker traversal examples below are historical.
 
+The v1.6 query/execution revision keeps v2. Root argument branches are generated
+from the same registered arguments. Definition predicates may be safely projected
+through all/any/not before Thing enumeration; mixed or unknown branches retain
+three-valued behavior. Instance-only filters and display pagination do not promise
+to lower source candidate scans. Root and nested collection scopes retain actual
+arguments and their own where; shared relation descriptions are returned once.
+
+The runtime enforces a research deadline and a submission-only finalization phase.
+The experimental working-data view and task-goal wording were tested in production
+code, then withdrawn from defaults after inconclusive correctness confirmation.
+Append-only observations and audit remain the authoritative record.
+
 ---
 
 # Shared v1.4 query data path

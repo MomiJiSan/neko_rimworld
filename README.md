@@ -1,8 +1,18 @@
 # N.E.K.O RimWorld
 
-The current checkout contains the unreleased v1.4.2 integration candidate.
+The current checkout contains the v1.6 execution/query revision.
 Version metadata remains 1.0.0. This source change is not a stable release or
 proof that all natural-language answers are correct.
+
+The v1.6 input candidates were implemented and tested through the actual runtime,
+then withdrawn from defaults because normal-budget confirmation did not establish
+a correctness gain. Existing research wording and native read-message history remain
+the default. Named prompt sections support reproducible bench experiments.
+
+Research requests and tool waits now stop at the research deadline, leaving the
+configured finalization reserve with only submit_response available. This reserves
+time but cannot guarantee the provider finishes a valid answer. Stream packaging
+and effective answer/tool bytes are bounded separately (8 MiB and 2 MiB).
 
 With the current Mod, the specialist Agent uses `query`, `describe_query` and
 `submit_response`. The Mod owns the field vocabulary, selection grammar and
@@ -248,8 +258,9 @@ execute partial tools. Usage-only tail frames are counted, including known usage
 on a subsequently failed stream. Hidden reasoning is hashed/count-only.
 
 Defaults: connect 10s, first useful model response 45s, stream inactivity 20s,
-absolute model request 60s, absolute agent run 90s, finalization advisory reserve
-15s. Inner waits are bounded by remaining run time. Entry timeout is 100s and
+absolute model request 60s, absolute agent run 90s, finalization reserve
+15s (at most half a short run budget). Production research calls and tool waits
+are bounded by the research deadline; after it only submission remains available. Entry timeout is 100s and
 Hosted UI waits 115s. Static and decorated entry metadata are kept aligned.
 
 Per-request audit diagnostics include phase, exception class, response headers,
