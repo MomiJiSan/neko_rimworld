@@ -285,7 +285,6 @@ class SubmissionDraft:
 def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *, references_supported=True):
     """One production terminal implementation for the runtime and fixed-observation studies."""
     from .tools import ToolExecutionError, ToolSpec
-    from .prompt import build_task_submission_guidance
 
     async def submit(arguments):
         parts = arguments.get("answer")
@@ -377,14 +376,16 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
             "It need not repeat every fact or row from detail."
         )
         spec.parameters["properties"]["detail"]["description"] = (
-            "Requested facts that do not fit the concise answer. Omit when unnecessary; null clears saved detail."
+            "Complete factual report: put requested lists, tables, per-person findings and scope explanations here "
+            "when they do not fit the concise conclusion. Answer and detail together must cover the question. "
+            "May expand facts summarized in answer. Omit only if answer suffices; null clears saved detail."
         )
         spec.parameters["properties"]["answer"]["items"]["oneOf"] = spec.parameters["properties"]["answer"]["items"][
             "oneOf"
         ][:1]
         return ToolSpec(
             name=spec.name,
-            description=build_task_submission_guidance(),
+            description="Finish with text answer parts for the concise conclusion (180 tokens total) and detail for the complete requested factual report (answer plus detail <=12000 characters). Include detail whenever answer alone cannot cover the question. Both must agree; the conclusion may summarize facts expanded in detail. Submit after reading the evidence. Changing answer requires resubmitting matching saved detail or explicitly clearing it; preserve detail needed for task coverage.",
             parameters=spec.parameters,
             handler=submit,
             terminal=True,
