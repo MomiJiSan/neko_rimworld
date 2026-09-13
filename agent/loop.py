@@ -10,7 +10,7 @@ from typing import Any, Protocol
 
 from ..state import redact_text
 from .audit import AgentAuditCapacityError, AgentAuditLedger, AgentAuditRegistry, AgentRunState
-from .contracts import PreparedToolCall
+from .contracts import PreparedToolCall, ToolCall
 from .handoff import (
     HandoffValidationError,
     attach_agent_handoff,
@@ -83,10 +83,14 @@ class AgentRuntime:
         model_factory: ModelFactory | None = None,
         tools_provider: Callable[[], Awaitable[ToolSetup]] | None = None,
         report_sink: Callable[[Mapping[str, Any]], Awaitable[Mapping[str, Any]]] | None = None,
+        interaction_factory: Callable[..., Any] | None = None,
+        prepared_calls: tuple[ToolCall, ...] = (),
     ) -> None:
         self._observation_tools = tuple(observation_tools)
         self._tools_provider = tools_provider
         self._report_sink = report_sink
+        self._interaction_factory = interaction_factory
+        self._prepared_calls = prepared_calls
         self._audit_registry = audit_registry
         self._logger = logger
         self._model_factory = model_factory or OpenAICompatibleModelClient
@@ -95,6 +99,8 @@ class AgentRuntime:
     async def run(
         self, question: str, settings: AgentModelSettings, *, reference_report: Mapping[str, Any] | None = None
     ) -> dict[str, Any]:
+        if self._interaction_factory is not None and reference_report is not None:
+            raise ValueError("Experimental interaction adapters do not support historical-report attachment yet")
         ledger = AgentAuditLedger(question)
         self._audit_registry.start(ledger)
         task = asyncio.current_task()
@@ -110,7 +116,7 @@ class AgentRuntime:
             # the result/report must not require another append or transition.
             summary = ledger.summary()
             cancelled = task is not None and task.cancelling() > 0
-            result = attach_agent_handoff(
+            result = self._attach_handoff(
                 {
                     "status": "cancelled" if cancelled else "degraded",
                     "answer": session.fallback_answer
@@ -129,7 +135,7 @@ class AgentRuntime:
                         "tool_calls": summary["tool_calls"],
                         "duration_ms": summary["duration_ms"],
                     },
-                }
+                }, session
             )
             await self._retain_report(result, question, ledger, session, reference_report)
             ledger.set_result(result)
@@ -162,7 +168,7 @@ class AgentRuntime:
                     fallback_answer=session.fallback_answer,
                 )
             result["draft"] = session.submission.snapshot()
-            result = attach_agent_handoff(result)
+            result = self._attach_handoff(result, session)
             ledger.record("handoff_built", result.get("delivery"))
             await self._retain_report(result, question, ledger, session, reference_report)
             self._log_handoff(ledger.run_id, result)
@@ -171,7 +177,7 @@ class AgentRuntime:
         except asyncio.CancelledError:
             if ledger.state not in {AgentRunState.CANCELLED, AgentRunState.COMPLETED, AgentRunState.FAILED}:
                 ledger.transition(AgentRunState.CANCELLED, "run_cancelled")
-            cancelled = attach_agent_handoff(
+            cancelled = self._attach_handoff(
                 {
                     "status": "cancelled",
                     "answer": session.submission.full_text
@@ -179,7 +185,7 @@ class AgentRuntime:
                     "observations": session.observations,
                     "draft": session.submission.snapshot(),
                     "audit": {"run_id": ledger.run_id, "error_code": "agent_cancelled"},
-                }
+                }, session
             )
             await self._retain_report(cancelled, question, ledger, session, reference_report)
             ledger.set_result(cancelled)
@@ -213,12 +219,18 @@ class AgentRuntime:
                     already_degraded=ledger.state == AgentRunState.DEGRADED,
                 )
             result["draft"] = session.submission.snapshot()
-            result = attach_agent_handoff(result)
+            result = self._attach_handoff(result, session)
             ledger.record("handoff_built", result.get("delivery"))
             await self._retain_report(result, question, ledger, session, reference_report)
             self._log_handoff(ledger.run_id, result)
             ledger.set_result(result)
             return result
+
+    @staticmethod
+    def _attach_handoff(result, session):
+        if session.interaction is not None:
+            return session.interaction.attach_result(result)
+        return attach_agent_handoff(result)
 
     async def cancel_all(self) -> None:
         current = asyncio.current_task()
@@ -231,6 +243,9 @@ class AgentRuntime:
     def _log_handoff(self, run_id: str, result: Mapping[str, Any]) -> None:
         delivery = result.get("delivery")
         projection = delivery if isinstance(delivery, Mapping) else {}
+        if projection.get("host_compatible") is False:
+            self._logger.info("[agent] experimental report retained; host delivery not exercised run_id={}", run_id)
+            return
         if projection.get("error_code"):
             self._logger.error(
                 "[agent] handoff degraded run_id={} error_code={} error_type={}",
@@ -313,6 +328,24 @@ class AgentRuntime:
             "\n\n" + setup.context if setup.context else ""
         )
 
+        if self._interaction_factory is not None:
+            session.interaction = self._interaction_factory(setup, session, submission_updated)
+            session.messages[0]["content"] = session.interaction.prompt(settings.preferred_cycles)
+
+        # Prepared-evidence experiments cross the same production tool/result interface.
+        # The injected calls are explicit study inputs, not model-generated calls.
+        if self._prepared_calls:
+            session.messages.append({"role": "assistant", "content": None,
+                                     "tool_calls": [c.as_message_value() for c in self._prepared_calls]})
+            for call in self._prepared_calls:
+                prepared = tools.prepare(call)
+                result = await tools.execute(prepared) if isinstance(prepared, PreparedToolCall) else prepared
+                if not result.ok or result.observation is None:
+                    raise ValueError("Prepared evidence must be a successful production observation")
+                session.observations.append(result.observation)
+                session.append_tool_message(result.as_message())
+                ledger.record("prepared_observation", {"name": call.name, "result": result.value})
+
         if reference_report is not None:
             from ..reports import ReportStore
 
@@ -368,6 +401,12 @@ class AgentRuntime:
                 )
 
             cycle = ledger.begin_cycle()
+            if session.interaction is not None:
+                tools = ToolRegistry()
+                for spec in session.interaction.tools():
+                    tools.register(spec)
+                session.messages[0]["content"] = session.interaction.prompt(settings.preferred_cycles)
+                ledger.record("interaction_state", session.interaction.snapshot())
             advisory = build_runtime_advisory(
                 cycle=cycle,
                 preferred_cycles=settings.preferred_cycles,
@@ -507,11 +546,11 @@ class AgentRuntime:
                         },
                     )
                     prepared = tools.prepare(call)
-                    if len(turn.tool_calls) > 1 and tools.is_terminal(call.name):
+                    if len(turn.tool_calls) > 1 and tools.is_exclusive(call.name):
                         prepared = tools.error_result(
                             call,
                             "terminal_tool_must_be_alone",
-                            "Submit only after reading observation results, in a separate tool batch.",
+                            "This state-changing or final tool must be called alone, in a separate tool batch.",
                             recoverable=True,
                         )
                     if not isinstance(prepared, PreparedToolCall):
@@ -563,12 +602,23 @@ class AgentRuntime:
                         ledger,
                         answer=str(submitted_response["full_text"]),
                         agent_text=str(submitted_response["agent_text"]),
-                        submission_mode="submit_response",
+                        submission_mode=str(submitted_response.get("submission_mode", "submit_response")),
                         observations=session.observations,
                     )
                 continue
 
             if turn.content:
+                if session.interaction is not None:
+                    try:
+                        final = session.interaction.accept_text(turn.content, turn.finish_reason)
+                    except HandoffValidationError as exception:
+                        session.append_recovery(str(exception))
+                        ledger.record("final_text_rejected", {"error_code": exception.code, "message": str(exception)})
+                        continue
+                    if final is not None:
+                        return self._finish_success(ledger, answer=final["full_text"],
+                            agent_text=final.get("agent_text", ""), submission_mode="natural",
+                            observations=session.observations)
                 has_full = session.submission.full_text is not None
                 patch = (
                     {"answer": [{"text": turn.content}]}

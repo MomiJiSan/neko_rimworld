@@ -19,6 +19,7 @@ class AgentRunSession:
     observations: list[dict[str, Any]] = field(default_factory=list)
     last_assistant_content: str = ""
     submission: SubmissionDraft = field(default_factory=SubmissionDraft)
+    interaction: Any = None  # Optional per-run adapter; never shared by the catalog cache.
 
     @property
     def fallback_answer(self) -> str:
