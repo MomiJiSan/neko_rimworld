@@ -121,10 +121,10 @@ async def test_text_tool_declares_only_text_parts_and_rejects_references():
 
     tool = make_submission_tool(SubmissionDraft(), [], references_supported=False)
     schema = tool.schema()
-    assert "reference" not in json.dumps(schema).lower()
+    assert "observation_id" not in json.dumps(schema)
     fields = schema["function"]["parameters"]["properties"]
     assert "180 tokens" in fields["answer"]["description"]
-    assert "Complete factual report" in fields["detail"]["description"]
+    assert "Requested facts that do not fit" in fields["detail"]["description"]
     with pytest.raises(ToolExecutionError) as rejected:
         await tool.handler({"answer": [{"observation_id": "missing"}]})
     assert rejected.value.code == "unsupported_reference"

@@ -21,8 +21,9 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def test_nonreference_prompt_separates_short_conclusion_from_complete_facts():
     from plugin.plugins.neko_rimworld.agent.prompt import build_system_prompt
     prompt = build_system_prompt(4, references_supported=False)
-    assert "Observation reference parts are unavailable" in prompt
-    assert "detail for the complete factual report" in prompt
+    assert "reference parts are unavailable" in prompt
+    assert "Answer the user's current question" in prompt
+    assert "Answer and detail together must cover the question" in prompt
     assert "180 tokens" in prompt and "12000 characters" in prompt
     assert "Pure factual answers can contain only reference parts" not in prompt
 

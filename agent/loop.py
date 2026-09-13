@@ -308,6 +308,8 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         model = self._model_factory(settings)
         setup = await self._tools_provider() if self._tools_provider is not None else ToolSetup(self._observation_tools)
+        # The unified public-query catalog exposes read-only tools; legacy evidence contracts keep their native view.
+        session.read_tools = frozenset(spec.name for spec in setup.tools) if setup.directory is not None else frozenset()
         tools = ToolRegistry()
         for spec in setup.tools:
             tools.register(spec)
