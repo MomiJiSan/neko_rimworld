@@ -52,6 +52,18 @@ The current Mod advertises `public_query.v2` (the initial v1.4 revision used v1)
 
 `PublicFields` derives canonical snake_case names, native mappings, types, arguments and operations from the executable Mod schema. `def` becomes `definition`; `def_name`, instance `id`, and display `label` remain distinct. Python forwards requests without renaming game fields or maintaining classification tables. Public conditions translate to the same typed condition evaluator used by existing native reads. Internal `fields/types/arguments/match` aliases are rejected.
 
+The Mod directory now also supplies `value_domains` for all ten exposed native
+enum types. Each field points to its own domain; `describe_query` accepts either
+an object type or the full native domain name (for example `Verse.ThingCategory`).
+The plugin forwards this metadata without a separate enum table. Wire values
+remain strings. Enum conditions accept `eq/ne/in/is_null`; native flags additionally
+accept comma-separated declared names and `has_all/has_any`. Default matching is
+case-sensitive; `case_sensitive:false` permits ordinal case folding. Invalid
+literals fail before reads, while unknown observed native values retain unknown
+membership. Names, labels and Def identifiers remain open strings. A valid empty
+query is still zero; no matching record cannot establish an arbitrary string as a
+valid category.
+
 `query({requests:[...]})` selects a root, its `args`, optional `where`, and fields in `select`. Related objects are selected directly; collection transport `items/nodes` windows are not part of selection paths (a native collection actually named `items` remains a field). Queries can include counts, declared additive sums, min/max and grouping. Filtered detail and aggregates use the same candidate collection; aggregates precede display `limit/offset`. Selected objects return scalar fields and parameter-free collections by default; wrapper-only objects expand their related fields, so selecting inventory does not return a misleading empty object. Long descriptions and argument-dependent scans remain explicit. Objects accept projection options; collection-only options on single objects or concrete projection branches are rejected before any game read.
 
 ```json

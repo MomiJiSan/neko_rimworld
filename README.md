@@ -17,7 +17,8 @@ and effective answer/tool bytes are bounded separately (8 MiB and 2 MiB).
 With the current Mod, the specialist Agent uses `query`, `describe_query` and
 `submit_response`. The Mod owns the field vocabulary, selection grammar and
 read semantics; the plugin forwards that generated directory, including field
-notes. See [DATA_PATH.md](DATA_PATH.md) for the current contract. No additional
+notes and native enum value domains. Invalid enum names are rejected by the Mod
+before reads; the plugin does not maintain a second value table. See [DATA_PATH.md](DATA_PATH.md) for the current contract. No additional
 business-specific tool or focus preset is added.
 
 Submission errors now follow the connected Mod's capability. In text mode,
