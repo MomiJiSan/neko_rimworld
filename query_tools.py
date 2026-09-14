@@ -235,7 +235,7 @@ def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHa
             raise ToolExecutionError("schema_changed", "Query directory changed; start a fresh consultation.")
         return copy.deepcopy(data)
 
-    directory = {key: public[key] for key in ("roots", "rules", "common_fields", "field_index", "field_notes", "examples") if key in public}
+    directory = {key: public[key] for key in ("roots", "rules", "common_fields", "field_index", "field_notes", "value_domains", "examples") if key in public}
     context_blocks = (
         ("catalog", "Game query directory (" + catalog["schema_id"] + "):\n" + json.dumps(directory, ensure_ascii=False, separators=(",", ":"))),
         ("reminder_completion", "\nAnswer once the requested facts are known; read more only for an unresolved fact."),
