@@ -1,6 +1,7 @@
 # N.E.K.O RimWorld
 
-The current checkout contains the v1.6 execution/query revision.
+The current checkout retains the v1.6 Agent runtime and supports the v1.6.1
+query revision supplied by the Mod.
 Version metadata remains 1.0.0. This source change is not a stable release or
 proof that all natural-language answers are correct.
 

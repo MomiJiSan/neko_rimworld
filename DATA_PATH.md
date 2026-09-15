@@ -52,6 +52,15 @@ The current Mod advertises `public_query.v2` (the initial v1.4 revision used v1)
 
 `PublicFields` derives canonical snake_case names, native mappings, types, arguments and operations from the executable Mod schema. `def` becomes `definition`; `def_name`, instance `id`, and display `label` remain distinct. Python forwards requests without renaming game fields or maintaining classification tables. Public conditions translate to the same typed condition evaluator used by existing native reads. Internal `fields/types/arguments/match` aliases are rejected.
 
+With the v1.6.1 Mod, single-object conditions accept a pure child-field map or
+an explicit `where` wrapper. Collections still require `some/every/none`.
+Concrete `on` selections accept the same field arrays/maps and explicit selection
+options as related objects. Structural discriminator errors are reported before
+dependent field errors. Batch compilation reports one primary error per invalid
+root request and lists indices that passed validation; the entire batch remains
+unexecuted if any request is invalid. These diagnostics reach the model in the
+existing error message and issues. They do not represent successful game reads.
+
 The Mod directory now also supplies `value_domains` for all ten exposed native
 enum types. Each field points to its own domain; `describe_query` accepts either
 an object type or the full native domain name (for example `Verse.ThingCategory`).
@@ -86,7 +95,7 @@ The game computes physical ID deduplication. Ordinary nonphysical collections re
 
 ## Results and limits
 
-Each result reports effective scope and predicate, `scan_complete`, `matched_count` (null when incomplete), `known_matches`, selected `rows`, `fields_complete`, page information and explicitly typed aggregates. A partial aggregate has no exact value. A display limit does not reduce an already complete aggregate. Empty complete count/sum is zero; empty min/max is null.
+Each result reports effective scope and predicate, `scan_complete`, `matched_count` (null when incomplete), `known_matches`, `fields_complete` and explicitly typed aggregates. Requested detail includes `rows` and `page`; an aggregate query with `limit:0` omits both, including in nested collections. This means detail was not requested, not that scanning was complete. Consumers must treat these two fields as optional for aggregate-only responses. A partial aggregate has no exact value. A display limit does not reduce an already complete aggregate. Empty complete count/sum is zero; empty min/max is null.
 
 Every call/continuation is a fresh observation; IDs can disappear after stack split/merge. Production reads remain on the game thread with a 12ms read budget. Batches are bounded to 8 requests, depth12/512 selections, 8192 candidates per collection, 20000 projected objects and 80000 result characters. Wider requests can be partial; a frozen 5s reader is not evidence of production timing.
 
