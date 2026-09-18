@@ -3,10 +3,13 @@ from __future__ import annotations
 import pytest
 
 from plugin.plugins.neko_rimworld.agent.handoff import (
+    HANDOFF_FACTS_TOKEN_BUDGET,
     HANDOFF_TOKEN_BUDGET,
+    MAX_AGENT_TEXT_CHARS,
     HandoffValidationError,
     attach_agent_handoff,
     count_handoff_tokens,
+    validate_agent_text,
     validate_submission,
 )
 
@@ -24,13 +27,40 @@ def test_submission_preserves_both_agent_authored_texts() -> None:
 
 
 def test_over_budget_agent_text_is_rejected_without_truncation() -> None:
+    """模型写的字超过 180 就被拒，且**不截断**。
+
+    这条走 `validate_agent_text(fact_tokens=...)` 而不是 `validate_submission`：
+    后者是最后一跳的传输校验，它看到的 agent_text 已经含渲染好的事实（事实另有
+    上限），所以它的天花板必须放宽到两者之和，不能用来判“模型写多了”。
+    权威判定在提交阶段，那里知道事实占多少。
+    """
     agent_text = "这是由内部Agent自己撰写的自然语言结果。" * 100
 
     with pytest.raises(HandoffValidationError) as caught:
-        validate_submission("完整回答", agent_text)
+        validate_agent_text(agent_text, fact_tokens=0)
 
     assert caught.value.code == "handoff_over_budget"
     assert agent_text.endswith("结果。")
+    # fact_tokens 是**显式**传入的，不从缺失推断：不传就等于“整份都是模型写的”。
+    # 早期版本让最后一跳在缺少事实份额时放宽天花板，结果分不清“模型写多了”和
+    # “事实很大”，静默放过了超长的模型文本（bench 的 staged 交互用例就是因此变红的）。
+    with pytest.raises(HandoffValidationError) as strict:
+        validate_submission("完整回答", agent_text)
+    assert strict.value.code == "handoff_over_budget"
+    # 同一份文本，声明其中大部分是渲染事实后，模型份额就回到额度内。
+    facts = count_handoff_tokens(agent_text)[0] - HANDOFF_TOKEN_BUDGET + 10
+    assert validate_submission("完整回答", agent_text, fact_tokens=facts)["agent_text"] == agent_text
+
+
+def test_model_text_is_not_charged_for_rendered_facts() -> None:
+    """v1.3 的 7/7：事实与模型文本记在同一条 180 额度上。"""
+    model_text = "结论：" + "判断。" * 60
+    assert count_handoff_tokens(model_text)[0] <= HANDOFF_TOKEN_BUDGET
+    facts = HANDOFF_FACTS_TOKEN_BUDGET - 10
+    assert validate_agent_text(model_text, fact_tokens=facts) == model_text
+    with pytest.raises(HandoffValidationError) as caught:
+        validate_agent_text(model_text, fact_tokens=HANDOFF_FACTS_TOKEN_BUDGET + 1)
+    assert caught.value.code == "facts_over_budget"
 
 
 def test_outer_agent_projection_contains_only_agent_text() -> None:

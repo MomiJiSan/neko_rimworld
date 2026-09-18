@@ -18,7 +18,18 @@ from ..state import redact_text
 # run; every submission that used a reference failed, every one that avoided it
 # was delivered.
 HANDOFF_TOKEN_BUDGET = 180
-HANDOFF_FACTS_TOKEN_BUDGET = 600
+# Facts are bounded by *path count*, because that is the unit the model chooses.
+# A token ceiling is only the transport guard behind it: the pilot measured real
+# citations rendering 643, 915, 1213, 2800 and 3500 tokens, while the model cannot
+# count tokens and so cannot act on a token-shaped refusal.
+#   * parts citing the SAME observation are merged, so the per-reference cap is
+#     effectively a per-observation cap; the largest real single-observation
+#     citation was 10 paths, so 16 leaves headroom instead of refusing real work
+#   * 4 observations are allowed, so the total cap must be BELOW 4 x the per-reference
+#     cap or it can never bind; 32 is half of 4 x 16 and ~1200 tokens worst case
+MAX_PATHS_PER_REFERENCE = 16
+MAX_TOTAL_REFERENCE_PATHS = 32
+HANDOFF_FACTS_TOKEN_BUDGET = 1_200
 MAX_FULL_TEXT_CHARS = 12_000
 MAX_AGENT_TEXT_CHARS = 4_000
 _NUMERAL = re.compile(r"\d+(?:\.\d+)?")
@@ -70,31 +81,22 @@ def validate_full_text(value: object) -> str:
     return _validated_text(value, field="full_text", max_chars=MAX_FULL_TEXT_CHARS)
 
 
-def validate_agent_text(value: object, *, fact_tokens: int | None = None) -> str:
+def validate_agent_text(value: object, *, fact_tokens: int = 0) -> str:
     """Bound the handoff. Model-written text and rendered facts have separate budgets.
 
-    `fact_tokens=None` means the caller is looking at an already-rendered handoff where
-    the rendered facts are already baked in (the last-mile transport check in
-    `validate_submission`). It can only enforce the combined transport ceiling, because
-    re-charging the facts against the model's 180 would reject a submission that the
-    submission step already accepted — that double charge is what made v1.3 reject
-    7 of 7 reference submissions.
+    `fact_tokens` is the share of the text that the program rendered from cited data.
+    It is passed explicitly, never inferred: a caller that does not pass it means the
+    text is entirely model-written. Inferring it from absence was ambiguous — the last
+    mile could not tell "the model wrote too much" from "the facts are large", and
+    loosening the ceiling to accommodate facts silently accepted over-long model prose.
     """
     text = _validated_text(value, field="agent_text", max_chars=MAX_AGENT_TEXT_CHARS)
     tokens, _ = count_handoff_tokens(text)
-    if fact_tokens is None:
-        ceiling = HANDOFF_TOKEN_BUDGET + HANDOFF_FACTS_TOKEN_BUDGET
-        if tokens > ceiling:
-            raise HandoffValidationError(
-                "handoff_over_budget",
-                f"agent_text uses {tokens} tokens including rendered facts; the transport ceiling is {ceiling}.",
-            )
-        return text
     if fact_tokens > HANDOFF_FACTS_TOKEN_BUDGET:
         raise HandoffValidationError(
             "facts_over_budget",
-            f"The rendered fact reference uses {fact_tokens} tokens; the maximum is "
-            f"{HANDOFF_FACTS_TOKEN_BUDGET}. Reference fewer paths.",
+            f"The rendered fact references use {fact_tokens} tokens; the transport maximum is "
+            f"{HANDOFF_FACTS_TOKEN_BUDGET}. Cite fewer paths.",
         )
     text_tokens = max(0, tokens - fact_tokens)
     if text_tokens > HANDOFF_TOKEN_BUDGET:
@@ -246,6 +248,23 @@ def _render_answer(parts, observations, language):
             grouped.append({"observation_id": identity, "brief_paths": paths[:]})
     if len(references) > 4:
         raise EvidenceError("An answer can reference at most 4 distinct observations.")
+    # Bound the work in the unit the model chose. See MAX_PATHS_PER_REFERENCE for why
+    # this is a path count and not a token count.
+    total_paths = sum(len(part.get("brief_paths") or [""]) for part in grouped if "text" not in part)
+    for part in grouped:
+        if "text" in part:
+            continue
+        count = len(part.get("brief_paths") or [""])
+        if count > MAX_PATHS_PER_REFERENCE:
+            raise EvidenceError(
+                f"A fact reference cites {count} paths; the maximum is {MAX_PATHS_PER_REFERENCE}. "
+                "Cite the readings this conclusion depends on and put the rest in detail."
+            )
+    if total_paths > MAX_TOTAL_REFERENCE_PATHS:
+        raise EvidenceError(
+            f"This answer cites {total_paths} paths in total; the maximum is {MAX_TOTAL_REFERENCE_PATHS}. "
+            "Cite the readings this conclusion depends on and put the rest in detail."
+        )
     full, short, sources = [], [], []
     fact_tokens = 0
     seen_readings = set()
@@ -436,7 +455,7 @@ class SubmissionDraft:
                 + repair,
                 details,
             )
-        result = validate_submission(self.full_text, self.agent_text)
+        result = validate_submission(self.full_text, self.agent_text, fact_tokens=fact_tokens)
         # The claim check already ran, before this text was committed. Reaching here
         # means the committed text is accepted, so any earlier block is lifted.
         self.claims_blocked = False
@@ -558,11 +577,16 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
     return spec
 
 
-def validate_submission(full_text: object, agent_text: object) -> dict[str, Any]:
-    """Validate mechanics only; never interpret or rewrite domain content."""
+def validate_submission(full_text: object, agent_text: object, *, fact_tokens: int = 0) -> dict[str, Any]:
+    """Validate mechanics only; never interpret or rewrite domain content.
+
+    `fact_tokens` is the program-rendered share of `agent_text`. Callers that render
+    references pass it so the model text is charged separately; everyone else leaves
+    the default and the whole handoff counts as model-written.
+    """
 
     full = validate_full_text(full_text)
-    handoff = validate_agent_text(agent_text)
+    handoff = validate_agent_text(agent_text, fact_tokens=fact_tokens)
     handoff_tokens, tokenizer = count_handoff_tokens(handoff)
     full_tokens, _ = count_handoff_tokens(full)
     return {
@@ -572,6 +596,7 @@ def validate_submission(full_text: object, agent_text: object) -> dict[str, Any]
             "format": "natural_text",
             "token_budget": HANDOFF_TOKEN_BUDGET,
             "fact_token_budget": HANDOFF_FACTS_TOKEN_BUDGET,
+            "fact_tokens": fact_tokens,
             "handoff_tokens": handoff_tokens,
             "full_answer_tokens": full_tokens,
             "tokenizer": tokenizer,
@@ -594,7 +619,16 @@ def attach_agent_handoff(result: object) -> dict[str, Any]:
         if agent_text is None and status == "ok":
             agent_text = answer
             submission_mode = "text_fallback"
-        validated = validate_submission(answer, agent_text)
+        # The rendered-fact share travels with the result, so the last mile can keep
+        # charging model text and program text separately instead of guessing.
+        delivery = source.get("delivery")
+        fact_tokens = 0
+        if isinstance(delivery, Mapping):
+            try:
+                fact_tokens = max(0, int(delivery.get("fact_tokens") or 0))
+            except (TypeError, ValueError):
+                fact_tokens = 0
+        validated = validate_submission(answer, agent_text, fact_tokens=fact_tokens)
         text = validated["agent_text"]
         delivery = dict(validated["delivery"])
         delivery["submission_mode"] = submission_mode
@@ -619,6 +653,9 @@ def attach_agent_handoff(result: object) -> dict[str, Any]:
 
 
 __all__ = [
+    "HANDOFF_FACTS_TOKEN_BUDGET",
+    "MAX_PATHS_PER_REFERENCE",
+    "MAX_TOTAL_REFERENCE_PATHS",
     "HANDOFF_TOKEN_BUDGET",
     "HandoffValidationError",
     "SubmissionDraft",

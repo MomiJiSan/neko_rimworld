@@ -167,6 +167,37 @@ def test_restating_a_referenced_value_in_text_is_rejected():
     assert "30" in result["agent_text"]
 
 
+def test_reference_path_count_is_bounded_in_the_models_own_unit():
+    """上限用**路径条数**，不用 token。
+
+    试点实测：模型真实引用渲染出 643/915/1213/2800/3500 token，而模型数不了 token，
+    所以 token 形状的拒绝它无法据此修正。路径数是它自己选的，可以数。
+    """
+    from plugin.plugins.neko_rimworld.agent.handoff import (
+        MAX_PATHS_PER_REFERENCE,
+        MAX_TOTAL_REFERENCE_PATHS,
+    )
+
+    draft = SubmissionDraft()
+    too_many = [{"observation_id": "one",
+                 "paths": [f"/reading/p{i}" for i in range(MAX_PATHS_PER_REFERENCE + 1)]}]
+    # apply() 把渲染层的 EvidenceError 折成 SubmissionPatchError 交给模型修正。
+    with pytest.raises(SubmissionPatchError) as caught:
+        draft.apply({"answer": too_many}, observations=[observed()])
+    assert str(MAX_PATHS_PER_REFERENCE) in str(caught.value)
+
+    # 合计上限只在**多个不同观察**时才会生效：同一观察的多份 part 会被合并成一份，
+    # 于是先撞单份上限。合计上限必须小于 4×单份上限，否则它永远不会生效。
+    assert MAX_TOTAL_REFERENCE_PATHS < 4 * MAX_PATHS_PER_REFERENCE
+    identities = [f"obs{i}" for i in range(4)]
+    parts = [{"observation_id": identity,
+              "paths": [f"/reading/p{part}_{i}" for i in range(MAX_PATHS_PER_REFERENCE)]}
+             for part, identity in enumerate(identities)]
+    with pytest.raises(SubmissionPatchError) as total:
+        draft.apply({"answer": parts}, observations=[observed(name) for name in identities])
+    assert str(MAX_TOTAL_REFERENCE_PATHS) in str(total.value)
+
+
 def test_single_digit_prose_numbers_are_allowed():
     """单位数出现在普通措辞里不该被当成重写读数。"""
     draft = SubmissionDraft()
