@@ -57,6 +57,43 @@ async def test_public_query_replaces_legacy_tools_without_changing_observations(
     assert '"field_notes"' in setup.context and "not a causal explanation" in setup.context
 
 
+def _public_source(**public):
+    source = catalog()
+    source["public_query"] = {"version": "public_query.v2",
+                             "parameters": {"type": "object", "properties": {"requests": {"type": "array"}}},
+                             "rules": "canonical fields", "roots": []}
+    source["public_query"].update(public)
+    return source
+
+
+async def _noop_query(arguments):
+    raise AssertionError("no query expected")
+
+
+@pytest.mark.asyncio
+async def test_fact_references_are_opt_in_not_the_shipped_default():
+    """默认必须是纯文本，直到在线配对实验给出结论。
+
+    v1.3 把引用提交发到真实运行里，用了引用的 7 份提交全部未交付。把默认打开等于
+    未经验证的晋升，不符合本项目自己的止损纪律。所以：Mod 声明能力是必要条件，
+    显式选择候选臂才是充分条件。
+    """
+    advertised = _public_source(references={"version": "observed_values.v1", "coverage": "x"})
+    assert make_game_tools(advertised, _noop_query).references_supported is False
+    assert make_game_tools(_public_source(), _noop_query).references_supported is False
+
+
+@pytest.mark.asyncio
+async def test_reference_mode_can_be_selected_per_run(monkeypatch):
+    advertised = _public_source(references={"version": "observed_values.v1"})
+    monkeypatch.setenv("NEKO_PUBLIC_REFERENCES", "1")
+    assert make_game_tools(advertised, _noop_query).references_supported is True
+    # 旧 Mod 没声明能力时，即使显式选择也不能发明引用。
+    assert make_game_tools(_public_source(), _noop_query).references_supported is False
+    monkeypatch.setenv("NEKO_PUBLIC_REFERENCES", "0")
+    assert make_game_tools(advertised, _noop_query).references_supported is False
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("version", ["resource_evidence.v1", "resource_evidence.v2"])
 async def test_resource_evidence_mode_preserves_three_tools_and_raw_observation(version):
@@ -249,7 +286,9 @@ async def test_object_sections_batch_is_one_tool_call_with_schema_in_model_conte
             pawn = payload["data"][payload["execution"]["bindings"][1]["root"]]
             assert pawn["id"] == "pawn1"
             assert {"status", "mood", "health", "equipment", "profile"}.issubset(pawn)
-            return AssistantTurn("r", "m", "stop", "I inspected the selected colonist's condition and equipment.")
+            # 不要在这里写 “colonist”：这个 fixture 的观察里没有身份字段，
+            # 那句话会被提交时的断言检查（正确地）拒掉，而本用例测的是工具批量调用。
+            return AssistantTurn("r", "m", "stop", "I inspected the requested pawn's condition and equipment.")
 
     async def provider():
         return setup

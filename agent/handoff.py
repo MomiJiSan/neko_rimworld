@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import copy
+import json
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from ..state import redact_text
 
+# The 180-token budget bounds the *model-authored* conclusion. Program-rendered
+# fact references travel in the same handoff but are not the model's wording, so
+# they are bounded separately. Charging both to the same 180 is what rejected
+# 7 of 7 reference submissions as handoff_over_budget in the v1.3 fixed-observation
+# run; every submission that used a reference failed, every one that avoided it
+# was delivered.
 HANDOFF_TOKEN_BUDGET = 180
+HANDOFF_FACTS_TOKEN_BUDGET = 600
 MAX_FULL_TEXT_CHARS = 12_000
 MAX_AGENT_TEXT_CHARS = 4_000
+_NUMERAL = re.compile(r"\d+(?:\.\d+)?")
 
 _MISSING_HANDOFF = (
     "The internal RimWorld agent completed without a callback-safe response. "
@@ -60,12 +70,39 @@ def validate_full_text(value: object) -> str:
     return _validated_text(value, field="full_text", max_chars=MAX_FULL_TEXT_CHARS)
 
 
-def validate_agent_text(value: object) -> str:
+def validate_agent_text(value: object, *, fact_tokens: int | None = None) -> str:
+    """Bound the handoff. Model-written text and rendered facts have separate budgets.
+
+    `fact_tokens=None` means the caller is looking at an already-rendered handoff where
+    the rendered facts are already baked in (the last-mile transport check in
+    `validate_submission`). It can only enforce the combined transport ceiling, because
+    re-charging the facts against the model's 180 would reject a submission that the
+    submission step already accepted — that double charge is what made v1.3 reject
+    7 of 7 reference submissions.
+    """
     text = _validated_text(value, field="agent_text", max_chars=MAX_AGENT_TEXT_CHARS)
     tokens, _ = count_handoff_tokens(text)
-    if tokens > HANDOFF_TOKEN_BUDGET:
+    if fact_tokens is None:
+        ceiling = HANDOFF_TOKEN_BUDGET + HANDOFF_FACTS_TOKEN_BUDGET
+        if tokens > ceiling:
+            raise HandoffValidationError(
+                "handoff_over_budget",
+                f"agent_text uses {tokens} tokens including rendered facts; the transport ceiling is {ceiling}.",
+            )
+        return text
+    if fact_tokens > HANDOFF_FACTS_TOKEN_BUDGET:
         raise HandoffValidationError(
-            "handoff_over_budget", f"agent_text uses {tokens} tokens; the maximum is {HANDOFF_TOKEN_BUDGET}."
+            "facts_over_budget",
+            f"The rendered fact reference uses {fact_tokens} tokens; the maximum is "
+            f"{HANDOFF_FACTS_TOKEN_BUDGET}. Reference fewer paths.",
+        )
+    text_tokens = max(0, tokens - fact_tokens)
+    if text_tokens > HANDOFF_TOKEN_BUDGET:
+        raise HandoffValidationError(
+            "handoff_over_budget",
+            f"agent_text uses {text_tokens} tokens of model-written text "
+            f"({tokens} total, of which {fact_tokens} are rendered facts); "
+            f"the model text maximum is {HANDOFF_TOKEN_BUDGET}.",
         )
     return text
 
@@ -112,6 +149,83 @@ def _answer_parts(value, *, references_supported=True):
     return normalized
 
 
+def _distinctive_numerals(text: str) -> set[str]:
+    """Numbers a reader would take as a reported measurement.
+
+    Single digits are excluded on purpose: they occur in ordinary prose
+    ("3 名殖民者") and refusing those would reject correct answers. Decimals and
+    multi-digit numbers are exactly the class the model mistypes when it retypes
+    a reading, so those are what the check compares.
+    """
+    found: set[str] = set()
+    for token in _NUMERAL.findall(text or ""):
+        if "." in token:
+            normalized = token.rstrip("0").rstrip(".")
+            if normalized and normalized != "0":
+                found.add(normalized)
+        elif len(token.lstrip("0")) >= 2:
+            found.add(token)
+    return found
+
+
+def restated_facts(text: str, rendered_facts: str) -> list[str]:
+    """Model-written numbers that a referenced reading already reports.
+
+    Mechanical on purpose. The reference submission protocol tells the model not
+    to restate referenced values; in the v1.3 live run it restated them anyway,
+    and the duplicate copy is what pushed the handoff over budget.
+    """
+    facts = _distinctive_numerals(rendered_facts)
+    if not facts:
+        return []
+    return sorted(_distinctive_numerals(text) & facts)
+
+
+def _first_index(path: str) -> str:
+    return re.sub(r"/~2(?=/|$)", "/0", path or "")
+
+
+def referenced_numbers(parts, observations) -> set[str]:
+    """The numbers the model actually cited, resolved from the referenced paths.
+
+    Deliberately **not** the whole rendered handoff: that string also carries the
+    display window and sample tick, and those numbers appear legitimately in prose
+    ("共 64 个部位，已列出 20 个" is a correct completeness disclosure). Comparing
+    against the cited values only keeps the check on the readings themselves.
+    """
+    from .presentation import _get
+
+    by_id: dict[str, Any] = {}
+    for item in observations or ():
+        if isinstance(item, Mapping) and isinstance(item.get("observation_id"), str):
+            by_id[item["observation_id"]] = item
+    found: set[str] = set()
+    for part in parts:
+        observation = by_id.get(part.get("observation_id")) if isinstance(part, Mapping) else None
+        if observation is None:
+            continue
+        payload = (observation.get("response") or {}).get("payload") or {}
+        data = payload.get("data")
+        for path in part.get("brief_paths") or part.get("paths") or [""]:
+            try:
+                value = _get(data, _first_index(path))
+            except Exception:  # noqa: BLE001 - an unresolvable path is reported by the renderer
+                continue
+            try:
+                encoded = json.dumps(value, ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                continue
+            found |= _distinctive_numerals(encoded)
+    return found
+
+
+def restated_values(text: str, values: Iterable[str]) -> list[str]:
+    wanted = set(values)
+    if not wanted:
+        return []
+    return sorted(_distinctive_numerals(text) & wanted)
+
+
 def _render_answer(parts, observations, language):
     from .presentation import EvidenceError, render_evidence
 
@@ -135,18 +249,32 @@ def _render_answer(parts, observations, language):
     full, short, sources = [], [], []
     fact_tokens = 0
     seen_readings = set()
+    written: list[str] = []
+    rendered: list[str] = []
+    cited_parts: list[dict] = []
     for part in grouped:
         if "text" in part:
             full.append(part["text"])
             short.append(part["text"])
+            written.append(part["text"])
         else:
+            cited_parts.append(part)
             body, brief, provenance = render_evidence([part], observations, language, _seen=seen_readings)
             if body:
                 full.append(body)
             if brief:
                 short.append(brief)
+                rendered.append(brief)
             sources.extend(provenance["sources"])
             fact_tokens += count_handoff_tokens(brief)[0]
+    if rendered:
+        overlap = restated_values("\n".join(written), referenced_numbers(cited_parts, observations))
+        if overlap:
+            raise EvidenceError(
+                "The referenced reading already reports "
+                + ", ".join(overlap)
+                + ". Do not restate referenced values in a text part; state what they mean instead."
+            )
     return (
         "\n\n".join(full),
         "\n".join(short),
@@ -169,6 +297,10 @@ class SubmissionDraft:
     provenance: dict[str, Any] = field(default_factory=dict)
     revision: int = 0
     errors: dict[str, dict[str, str]] = field(default_factory=dict)
+    # Set when an otherwise well-formed submission was refused for an unsupported
+    # claim. The refused text is never committed, so this only tells the degraded
+    # paths that the last thing the model wrote is not deliverable.
+    claims_blocked: bool = False
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -184,7 +316,8 @@ class SubmissionDraft:
             "complete": bool(self.full_text and self.agent_text and not self.errors),
         }
 
-    def apply(self, patch: Mapping[str, Any], *, observations=(), references_supported=True) -> dict[str, Any]:
+    def apply(self, patch: Mapping[str, Any], *, observations=(), references_supported=True,
+              claims_supported=True) -> dict[str, Any]:
         from .presentation import EvidenceError
 
         if not patch or set(patch) - {"answer", "detail", "language"}:
@@ -222,6 +355,24 @@ class SubmissionDraft:
         if changed:
             self.revision += 1
         self.errors.pop("delivery", None)
+        # The deterministic claim check runs BEFORE any text is committed. It used
+        # to run last, which left a refused sentence in full_text/agent_text and let
+        # the timeout/cancel/degraded paths deliver it through fallback_answer.
+        # Field-level errors keep precedence so the model repairs structure first.
+        if claims_supported and not self.errors:
+            from .claims import check_claims, describe
+
+            rejected = check_claims(self.answer, self.detail, observations=observations)
+            if rejected:
+                self.claims_blocked = True
+                first = rejected[0]
+                raise SubmissionPatchError(
+                    first["code"],
+                    "Unsupported claim needs evidence from this run: " + describe(rejected),
+                    {"saved_fields": self.snapshot()["saved_fields"],
+                     "rejected_claims": rejected,
+                     "required_fields": ["answer"]},
+                )
         self.full_text = self.agent_text = None
         fact_tokens = 0
         short = ""
@@ -239,7 +390,7 @@ class SubmissionDraft:
                     "invalid_submission",
                     "Provide answer parts for the short handoff; detail cannot replace them.",
                 )
-            self.agent_text = validate_agent_text(short)
+            self.agent_text = validate_agent_text(short, fact_tokens=fact_tokens)
         except (HandoffValidationError, EvidenceError) as error:
             self.errors["delivery"] = {"code": getattr(error, "code", "invalid_evidence"), "message": str(error)}
         if self.errors:
@@ -253,13 +404,21 @@ class SubmissionDraft:
                 "draft_revision": self.revision,
             }
             if references_supported:
-                details.update(fact_tokens=fact_tokens, text_tokens_available=max(0, HANDOFF_TOKEN_BUDGET - fact_tokens))
+                handoff_total = count_handoff_tokens(short)[0] if short else 0
+                details.update(
+                    fact_tokens=fact_tokens,
+                    fact_token_budget=HANDOFF_FACTS_TOKEN_BUDGET,
+                    text_tokens_used=max(0, handoff_total - fact_tokens),
+                    text_token_budget=HANDOFF_TOKEN_BUDGET,
+                )
             else:
                 details.update(handoff_tokens=count_handoff_tokens(short)[0] if short else None, token_budget=HANDOFF_TOKEN_BUDGET)
             first = next(iter(self.errors.values()))
             repair = " Valid inputs are saved. Correct the required fields."
             if references_supported and any("observation_id" in part for part in self.answer):
                 repair += " Reference parts already emit the facts; do not restate them in text parts."
+            elif self.errors.get("delivery", {}).get("code") == "facts_over_budget":
+                repair += " Reference fewer paths in each fact-reference part."
             elif self.errors.get("delivery", {}).get("code") == "handoff_over_budget":
                 repair += (
                     " Shorten answer to the concise conclusion with room below the token limit;"
@@ -278,11 +437,15 @@ class SubmissionDraft:
                 details,
             )
         result = validate_submission(self.full_text, self.agent_text)
+        # The claim check already ran, before this text was committed. Reaching here
+        # means the committed text is accepted, so any earlier block is lifted.
+        self.claims_blocked = False
         result["provenance"] = copy.deepcopy(self.provenance)
         return result
 
 
-def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *, references_supported=True):
+def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *, references_supported=True,
+                         claims_supported=True):
     """One production terminal implementation for the runtime and fixed-observation studies."""
     from .tools import ToolExecutionError, ToolSpec
 
@@ -297,7 +460,9 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
                 "unsupported_reference", "This Mod lacks result descriptions; submit text answer parts."
             )
         try:
-            result = draft.apply(arguments, observations=observations, references_supported=references_supported)
+            result = draft.apply(arguments, observations=observations,
+                                 references_supported=references_supported,
+                                 claims_supported=claims_supported)
         except SubmissionPatchError as error:
             if on_update is not None:
                 on_update(draft.snapshot(), "submission_patch_rejected", error.details)
@@ -406,10 +571,13 @@ def validate_submission(full_text: object, agent_text: object) -> dict[str, Any]
         "delivery": {
             "format": "natural_text",
             "token_budget": HANDOFF_TOKEN_BUDGET,
+            "fact_token_budget": HANDOFF_FACTS_TOKEN_BUDGET,
             "handoff_tokens": handoff_tokens,
             "full_answer_tokens": full_tokens,
             "tokenizer": tokenizer,
-            "host_truncation_expected": False,
+            # The host's nominal budget is HANDOFF_TOKEN_BUDGET; rendered facts may
+            # take the handoff past it. Report that rather than hide it.
+            "host_truncation_expected": handoff_tokens > HANDOFF_TOKEN_BUDGET,
         },
     }
 

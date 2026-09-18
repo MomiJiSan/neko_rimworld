@@ -24,6 +24,11 @@ class AgentRunSession:
 
     @property
     def fallback_answer(self) -> str:
+        # A claim rejection never commits text, so a blocked draft must not fall
+        # through to the model's last raw message either: that message is the text
+        # the check refused.
+        if self.submission.claims_blocked and not self.submission.full_text:
+            return "The consultation's draft answer was refused for unsupported claims; review the full result in the plugin panel."
         if self.submission.full_text:
             return self.submission.full_text
         if self.submission.revision or self.submission.errors:

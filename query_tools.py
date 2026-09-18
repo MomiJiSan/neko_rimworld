@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import os
 from collections.abc import Callable
 from typing import Any
 
@@ -251,12 +252,35 @@ def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHa
             }, describe),
         ),
         context="".join(text for _,text in context_blocks),
-        # The compact query contract does not advertise v1.3 path-composition descriptors.
-        # Use the already supported text submission protocol; do not invent references.
-        references_supported=False,
+        # Capability-driven, but opt-in: the Mod must advertise a per-surface result
+        # description AND the run must explicitly select the candidate arm. See
+        # `public_references_supported` for why the default is not flipped here.
+        references_supported=public_references_supported(public),
         directory=copy.deepcopy(directory),
         context_blocks=context_blocks,
     )
+
+
+def public_references_supported(public: dict[str, Any]) -> bool:
+    """Whether this connection may cite returned values as fact-reference parts.
+
+    Opt-in on purpose. The Mod advertising the contract is necessary but **not
+    sufficient**: v1.3 shipped reference parts to a live run and delivered 0 of 7
+    submissions that used one. The mechanism is now repaired and covered by
+    deterministic tests, but that is a statement about the code, not about model
+    behaviour. Flipping the default is a promotion and belongs behind the online
+    paired result, not in this change.
+
+    Set `NEKO_PUBLIC_REFERENCES=1` for the candidate arm; `0` forces the
+    text-only arm; unset keeps the shipped text-only default.
+    """
+    override = os.environ.get("NEKO_PUBLIC_REFERENCES")
+    if override is None or override.strip().lower() in {"0", "false", "no", "off", ""}:
+        return False
+    # Opting in is not enough: the connected Mod must also describe its results, or the
+    # citations would have nothing to resolve against.
+    references = public.get("references")
+    return isinstance(references, dict) and references.get("version") == "observed_values.v1"
 
 
 class CatalogTools:

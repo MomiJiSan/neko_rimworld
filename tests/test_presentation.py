@@ -118,16 +118,76 @@ def test_replacing_answer_keeps_analysis_and_facts_cohesive():
     assert result["provenance"]["sources"][0]["observation_id"] == "two"
 
 
-def test_over_budget_preserves_answer_and_reports_available_text_space():
+def test_over_budget_reports_the_split_between_model_text_and_rendered_facts():
     draft = SubmissionDraft()
     with pytest.raises(SubmissionPatchError) as caught:
         draft.apply({"answer": [{"text": "长结论。" * 150}, part()]}, observations=[observed()])
     assert caught.value.code == "handoff_over_budget"
     assert draft.answer[-1] == part()
-    assert caught.value.details["fact_tokens"] > 0
-    assert caught.value.details["text_tokens_available"] < 180
+    details = caught.value.details
+    # 180 只打模型写的部分：渲染出的事实有自己的上限，不再吃掉模型的额度。
+    assert details["fact_tokens"] > 0
+    assert details["fact_token_budget"] > details["fact_tokens"]
+    assert details["text_token_budget"] == 180
+    assert details["text_tokens_used"] > 180
     result = draft.apply({"answer": [part()]}, observations=[observed()])
     assert "至少12" in result["agent_text"]
+
+
+def test_reference_and_conclusion_coexist_past_180_total_tokens():
+    """v1.3 的 7/7 交付失败就是这个形状。
+
+    此前把渲染出的事实和模型的结论加在一起跟 180 比，于是一个 reference part
+    就足以撑爆交接；7 个用了引用的单元全部未交付，所有不用引用的都交付了。
+    现在 180 只约束模型写的字，两者可以共存。
+    """
+    draft = SubmissionDraft()
+    conclusion = "结论："
+    while count_handoff_tokens(conclusion + "判断。")[0] <= 170:
+        conclusion += "判断。"
+    assert count_handoff_tokens(conclusion)[0] <= 180      # 模型额度内
+
+    result = draft.apply({"answer": [{"text": conclusion}, part()]}, observations=[observed()])
+    assert conclusion in result["agent_text"]               # 判断在
+    assert "至少12" in result["agent_text"]                # 程序渲染的事实在
+    assert count_handoff_tokens(result["agent_text"])[0] > 180   # 合计超过 180，但被接受
+
+
+def test_restating_a_referenced_value_in_text_is_rejected():
+    """引用已经报告了这个读数，文本再写一遍就是重复——v1.3 的“重复书写”。"""
+    draft = SubmissionDraft()
+    complete = observed(exact=30, lower=30, complete=True)
+    with pytest.raises(SubmissionPatchError) as caught:
+        draft.apply({"answer": [{"text": "精确值是 30 秒。"}, part()]}, observations=[complete])
+    assert caught.value.code == "invalid_evidence"
+    assert "30" in str(caught.value)
+    # 说“意思”而不是“数字”就通过。
+    result = draft.apply({"answer": [{"text": "该读数见上，单位与取值已由程序给出。"}, part()]},
+                         observations=[complete])
+    assert "30" in result["agent_text"]
+
+
+def test_single_digit_prose_numbers_are_allowed():
+    """单位数出现在普通措辞里不该被当成重写读数。"""
+    draft = SubmissionDraft()
+    result = draft.apply({"answer": [{"text": "本次共读取 3 条记录，细节见上。"}, part()]},
+                         observations=[observed(exact=30, lower=30, complete=True)])
+    assert "3 条记录" in result["agent_text"]
+
+
+def test_completeness_disclosure_is_not_mistaken_for_restating_a_value():
+    """披露完整性的数字不是重写读数。
+
+    交接里同时携带窗口与采样刻（例如 tick=10），而“已返回 1/共 3”这类说明是**正确**
+    的完整性披露——正是要鼓励的表述。所以对比只针对**被引用路径实际解析出的值**，
+    而不是整条渲染文本。
+    """
+    draft = SubmissionDraft()
+    result = draft.apply(
+        {"answer": [{"text": "完整性与总数见上：本次只列出了一页，其余未展示。"}, part()]},
+        observations=[observed(exact=30, lower=30, complete=True)],
+    )
+    assert "完整性与总数见上" in result["agent_text"]
 
 
 def test_report_size_prefers_referenced_observations_and_refuses_lost_proof(monkeypatch):
