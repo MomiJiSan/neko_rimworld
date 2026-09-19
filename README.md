@@ -29,6 +29,38 @@ without recommending unavailable observation-reference parts. The short
 handoff remains capped at 180 tokens; `detail` retains requested factual
 coverage and the existing reconfirmation protection.
 
+### Reference delivery (opt-in, not promoted)
+
+`NEKO_PUBLIC_REFERENCES=1` enables reference parts only when the connected Mod
+advertises `observed_values.v1`. The public-query default remains text-only.
+
+Reference submissions preserve the program-rendered `fact_tokens` through the
+runtime's final result, including plain-text detail repair. Budgets are separate
+but **not additive host allowances**:
+
+- Model-written conclusion: at most **180 tokens**.
+- Entire rendered handoff (facts + conclusion): at most **200 tokens**, matching
+  the unchanged host result parser. Oversize submissions return the recoverable
+  `handoff_transport_over_budget` error, never a silently truncated success.
+- At most **16 paths per part and per observation**, including nonadjacent parts;
+  at most **32 distinct observation/path pairs** per answer, across at most
+  four observations. Relative and leading-slash paths count identically.
+- The 1200-token fact ceiling is a renderer safety guard, **not extra callback
+  space**. `answer + detail` still fits 12000 characters. Preserve required
+  coverage in the full report when narrowing the short conclusion.
+
+A final transport validation failure is `degraded`, not `ok`. The original
+report remains available; the callback receives an operational failure notice.
+No host code or global callback limits are changed. This fixes transport
+correctness, not the information capacity of the host: a long reference report
+still cannot be injected in full through a 200-token summary.
+
+Offline regressions in `tests/test_reference_delivery.py` exercise the actual
+AgentRuntime, host result parser, event emitter and text/voice callback renderers,
+with scripted model/game responses and a captured network-send boundary. They
+cover unknown/lower-bound preservation and oversize repair, not a live host
+process, Unity timing, callback queue saturation, or final persona-model quality.
+
 The system instruction asks state reports to preserve observations, scope and
 unknowns without adding unsupported background rules. This is an instruction,
 not a semantic guarantee. Model results and remaining failures are recorded in

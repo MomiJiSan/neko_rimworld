@@ -663,6 +663,7 @@ class AgentRuntime:
                         agent_text=str(submitted_response["agent_text"]),
                         submission_mode=str(submitted_response.get("submission_mode", "submit_response")),
                         observations=session.observations,
+                        delivery=submitted_response.get("delivery"),
                     )
                 continue
 
@@ -702,6 +703,7 @@ class AgentRuntime:
                     agent_text=str(validated["agent_text"]),
                     submission_mode="text_repair" if has_full else "text_fallback",
                     observations=session.observations,
+                    delivery=validated.get("delivery"),
                 )
 
             recovery = (
@@ -719,6 +721,7 @@ class AgentRuntime:
         agent_text: str,
         submission_mode: str,
         observations: list[dict[str, Any]],
+        delivery: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         ledger.transition(
             AgentRunState.FINALIZING,
@@ -738,6 +741,9 @@ class AgentRuntime:
             "answer": answer,
             "agent_text": agent_text,
             "submission_mode": submission_mode,
+            # Carry the submitter's validated fact share to the final transport
+            # check. Losing it reclassifies rendered facts as model-authored text.
+            "delivery": dict(delivery) if delivery is not None else {},
             "caveats": [],
             "observations": observations,
             "freshness": self._freshness(observations),

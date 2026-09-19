@@ -18,13 +18,18 @@ from ..state import redact_text
 # run; every submission that used a reference failed, every one that avoided it
 # was delivered.
 HANDOFF_TOKEN_BUDGET = 180
+# The unchanged host result parser truncates the entire summary at 200 tokens.
+# Fact/model accounting never grants additional space on that transport. Keep
+# this conservative contract covered by tests against the real host parser.
+HANDOFF_TRANSPORT_TOKEN_BUDGET = 200
 # Facts are bounded by *path count*, because that is the unit the model chooses.
-# A token ceiling is only the transport guard behind it: the pilot measured real
-# citations rendering 643, 915, 1213, 2800 and 3500 tokens, while the model cannot
-# count tokens and so cannot act on a token-shaped refusal.
-#   * parts citing the SAME observation are merged, so the per-reference cap is
-#     effectively a per-observation cap; the largest real single-observation
-#     citation was 10 paths, so 16 leaves headroom instead of refusing real work
+# The older 1200-token fact ceiling remains a renderer safety guard, NOT an
+# allowance to exceed the host's 200-token total. The pilot measured citations
+# rendering 643, 915, 1213, 2800 and 3500 tokens; those cannot travel intact
+# through the unchanged host and must be repaired before delivery.
+#   * paths are counted per observation across ALL parts (including interleaved
+#     ones); the largest historical single-observation citation was 10 paths,
+#     so 16 leaves structural headroom but does not guarantee transport fit
 #   * 4 observations are allowed, so the total cap must be BELOW 4 x the per-reference
 #     cap or it can never bind; 32 is half of 4 x 16 and ~1200 tokens worst case
 MAX_PATHS_PER_REFERENCE = 16
@@ -89,13 +94,14 @@ def validate_agent_text(value: object, *, fact_tokens: int = 0) -> str:
     text is entirely model-written. Inferring it from absence was ambiguous — the last
     mile could not tell "the model wrote too much" from "the facts are large", and
     loosening the ceiling to accommodate facts silently accepted over-long model prose.
+    Independent of that accounting, the combined text must fit the unchanged host.
     """
     text = _validated_text(value, field="agent_text", max_chars=MAX_AGENT_TEXT_CHARS)
     tokens, _ = count_handoff_tokens(text)
     if fact_tokens > HANDOFF_FACTS_TOKEN_BUDGET:
         raise HandoffValidationError(
             "facts_over_budget",
-            f"The rendered fact references use {fact_tokens} tokens; the transport maximum is "
+            f"The rendered fact references use {fact_tokens} tokens; the renderer safety maximum is "
             f"{HANDOFF_FACTS_TOKEN_BUDGET}. Cite fewer paths.",
         )
     text_tokens = max(0, tokens - fact_tokens)
@@ -105,6 +111,15 @@ def validate_agent_text(value: object, *, fact_tokens: int = 0) -> str:
             f"agent_text uses {text_tokens} tokens of model-written text "
             f"({tokens} total, of which {fact_tokens} are rendered facts); "
             f"the model text maximum is {HANDOFF_TOKEN_BUDGET}.",
+        )
+    if tokens > HANDOFF_TRANSPORT_TOKEN_BUDGET:
+        raise HandoffValidationError(
+            "handoff_transport_over_budget",
+            f"The rendered answer uses {tokens} tokens in total "
+            f"({fact_tokens} rendered facts and {text_tokens} model-written); "
+            f"the host transport maximum is {HANDOFF_TRANSPORT_TOKEN_BUDGET}. "
+            "Cite fewer paths or shorten the conclusion; keep the complete report in detail "
+            "and preserve scope and unknowns. No new game query is needed for this repair.",
         )
     return text
 
@@ -232,32 +247,35 @@ def _render_answer(parts, observations, language):
     from .presentation import EvidenceError, render_evidence
 
     grouped = []
-    references = set()
+    reference_paths: dict[str, set[str]] = {}
     for part in parts:
         if "text" in part:
             grouped.append(part)
             continue
         identity = part["observation_id"]
-        references.add(identity)
         paths = part.get("paths", [""])
-        if not isinstance(paths, list) or any(not isinstance(path, str) for path in paths):
-            raise EvidenceError("paths must be an array of data-relative JSON Pointers.")
+        if (not isinstance(paths, list) or not 1 <= len(paths) <= MAX_PATHS_PER_REFERENCE
+                or any(not isinstance(path, str) for path in paths)):
+            raise EvidenceError(
+                f"paths requires 1..{MAX_PATHS_PER_REFERENCE} data-relative JSON Pointers."
+            )
+        # Count the same observation across ALL parts, even when text or another
+        # observation separates them. Normalize like the renderer so /a and a
+        # are the same path. Keep rendering order independent of this limit.
+        paths = list(dict.fromkeys(path if not path or path.startswith("/") else "/" + path for path in paths))
+        reference_paths.setdefault(identity, set()).update(paths)
         if grouped and grouped[-1].get("observation_id") == identity:
             grouped[-1]["brief_paths"] = list(dict.fromkeys(grouped[-1]["brief_paths"] + paths))
         else:
             grouped.append({"observation_id": identity, "brief_paths": paths[:]})
-    if len(references) > 4:
+    if len(reference_paths) > 4:
         raise EvidenceError("An answer can reference at most 4 distinct observations.")
-    # Bound the work in the unit the model chose. See MAX_PATHS_PER_REFERENCE for why
-    # this is a path count and not a token count.
-    total_paths = sum(len(part.get("brief_paths") or [""]) for part in grouped if "text" not in part)
-    for part in grouped:
-        if "text" in part:
-            continue
-        count = len(part.get("brief_paths") or [""])
-        if count > MAX_PATHS_PER_REFERENCE:
+    total_paths = sum(len(paths) for paths in reference_paths.values())
+    for paths in reference_paths.values():
+        if len(paths) > MAX_PATHS_PER_REFERENCE:
             raise EvidenceError(
-                f"A fact reference cites {count} paths; the maximum is {MAX_PATHS_PER_REFERENCE}. "
+                f"One observation cites {len(paths)} paths across answer parts; "
+                f"the maximum is {MAX_PATHS_PER_REFERENCE}. "
                 "Cite the readings this conclusion depends on and put the rest in detail."
             )
     if total_paths > MAX_TOTAL_REFERENCE_PATHS:
@@ -427,6 +445,8 @@ class SubmissionDraft:
                 details.update(
                     fact_tokens=fact_tokens,
                     fact_token_budget=HANDOFF_FACTS_TOKEN_BUDGET,
+                    handoff_tokens=handoff_total,
+                    transport_token_budget=HANDOFF_TRANSPORT_TOKEN_BUDGET,
                     text_tokens_used=max(0, handoff_total - fact_tokens),
                     text_token_budget=HANDOFF_TOKEN_BUDGET,
                 )
@@ -500,7 +520,9 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
             "Finish by composing the answer itself as ordered parts. A reference part EMITS the selected facts with their necessary subject, unit, scope and unknowns; it is not a citation attachment. "
             "For factual questions, reference parts alone are sufficient when they cover the requested facts. Add a text part only for additional interpretation, not a second restatement of the selected facts. "
             "Text-only answers use one {text:...} part. Optional detail is extra explanation for the full report. "
-            "The combined answer parts must fit 180 tokens; full report plus detail must fit 12000 characters. "
+            "Model-written answer text must fit 180 tokens; rendered facts have a separate budget, "
+            "and the complete short handoff must fit the host's 200-token transport limit. "
+            "Full report plus detail must fit 12000 characters. "
             "Use actual data-relative paths, with or without a leading slash: do not prefix /payload/data or /response/payload/data; array positions are integers, never metadata ~2 templates. "
             "Value/status paths bound to the same reading are rendered once. Valid inputs survive rejection. Changed answer requires reconfirming or clearing prior detail. Submit alone after reading query results."
         ),
@@ -529,9 +551,9 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
                                     "paths": {
                                         "type": "array",
                                         "minItems": 1,
-                                        "maxItems": 32,
+                                        "maxItems": MAX_PATHS_PER_REFERENCE,
                                         "items": {"type": "string"},
-                                        "description": "Existing paths relative to that observation's data. These values will appear in the answer; no formulas, new filters or invented labels. Omit for the whole bounded result.",
+                                        "description": "Existing paths relative to that observation's data (at most 16 for one observation; at most 32 total). These values will appear in the answer; no formulas, new filters or invented labels. Omit for the whole bounded result.",
                                     },
                                 },
                                 "required": ["observation_id"],
@@ -600,9 +622,8 @@ def validate_submission(full_text: object, agent_text: object, *, fact_tokens: i
             "handoff_tokens": handoff_tokens,
             "full_answer_tokens": full_tokens,
             "tokenizer": tokenizer,
-            # The host's nominal budget is HANDOFF_TOKEN_BUDGET; rendered facts may
-            # take the handoff past it. Report that rather than hide it.
-            "host_truncation_expected": handoff_tokens > HANDOFF_TOKEN_BUDGET,
+            "transport_token_budget": HANDOFF_TRANSPORT_TOKEN_BUDGET,
+            "host_truncation_expected": handoff_tokens > HANDOFF_TRANSPORT_TOKEN_BUDGET,
         },
     }
 
@@ -633,6 +654,10 @@ def attach_agent_handoff(result: object) -> dict[str, Any]:
         delivery = dict(validated["delivery"])
         delivery["submission_mode"] = submission_mode
     except HandoffValidationError as exception:
+        # The report may exist, but a failed callback is not successful delivery.
+        # Preserve cancelled/degraded states; never leave a new fallback as ok.
+        if status == "ok":
+            source["status"] = "degraded"
         text = _MISSING_HANDOFF
         handoff_tokens, tokenizer = count_handoff_tokens(text)
         full_tokens = count_handoff_tokens(answer)[0] if isinstance(answer, str) else None
@@ -657,6 +682,7 @@ __all__ = [
     "MAX_PATHS_PER_REFERENCE",
     "MAX_TOTAL_REFERENCE_PATHS",
     "HANDOFF_TOKEN_BUDGET",
+    "HANDOFF_TRANSPORT_TOKEN_BUDGET",
     "HandoffValidationError",
     "SubmissionDraft",
     "SubmissionPatchError",

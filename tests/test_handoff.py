@@ -5,7 +5,6 @@ import pytest
 from plugin.plugins.neko_rimworld.agent.handoff import (
     HANDOFF_FACTS_TOKEN_BUDGET,
     HANDOFF_TOKEN_BUDGET,
-    MAX_AGENT_TEXT_CHARS,
     HandoffValidationError,
     attach_agent_handoff,
     count_handoff_tokens,
@@ -29,10 +28,8 @@ def test_submission_preserves_both_agent_authored_texts() -> None:
 def test_over_budget_agent_text_is_rejected_without_truncation() -> None:
     """模型写的字超过 180 就被拒，且**不截断**。
 
-    这条走 `validate_agent_text(fact_tokens=...)` 而不是 `validate_submission`：
-    后者是最后一跳的传输校验，它看到的 agent_text 已经含渲染好的事实（事实另有
-    上限），所以它的天花板必须放宽到两者之和，不能用来判“模型写多了”。
-    权威判定在提交阶段，那里知道事实占多少。
+    模型文字与渲染事实分别记账，但合计仍受现有宿主 200-token 传输上限约束。
+    不能通过声明事实份额来绕过传输预算，也不能在最后一跳静默截断。
     """
     agent_text = "这是由内部Agent自己撰写的自然语言结果。" * 100
 
@@ -47,9 +44,11 @@ def test_over_budget_agent_text_is_rejected_without_truncation() -> None:
     with pytest.raises(HandoffValidationError) as strict:
         validate_submission("完整回答", agent_text)
     assert strict.value.code == "handoff_over_budget"
-    # 同一份文本，声明其中大部分是渲染事实后，模型份额就回到额度内。
+    # 声明事实份额能消除模型文字超额，但不能让宿主接收 1300-token 的摘要。
     facts = count_handoff_tokens(agent_text)[0] - HANDOFF_TOKEN_BUDGET + 10
-    assert validate_submission("完整回答", agent_text, fact_tokens=facts)["agent_text"] == agent_text
+    with pytest.raises(HandoffValidationError) as transport:
+        validate_submission("完整回答", agent_text, fact_tokens=facts)
+    assert transport.value.code == "handoff_transport_over_budget"
 
 
 def test_model_text_is_not_charged_for_rendered_facts() -> None:
@@ -167,6 +166,7 @@ async def test_text_tool_declares_only_text_parts_and_rejects_references():
 @pytest.mark.parametrize("extra", ["language", "detail", "unexpected"])
 async def test_text_mode_bad_parts_use_current_contract_in_real_registry(extra):
     import json
+
     from plugin.plugins.neko_rimworld.agent.contracts import ToolCall
     from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft, make_submission_tool
     from plugin.plugins.neko_rimworld.agent.tools import ToolRegistry
