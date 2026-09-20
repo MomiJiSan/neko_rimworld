@@ -15,7 +15,6 @@ _unavailable/provenance 这类代号，也不把 unknown 落成 0/null。
 from __future__ import annotations
 
 import copy
-import os
 from dataclasses import dataclass, field
 
 from .query_surface import SurfaceError
@@ -447,13 +446,6 @@ def route_object(obj):
 
 # --- aspects → blocks ---------------------------------------------------------
 
-# 配对实验开关：`off` 恢复修复前的口径——伤病名单只读健康界面列出的条目、不说明
-# 口径、分组读数不报组数。它把“把这个事实说出来”这一项单独配对，而不是和别的
-# 改动混在一起；默认 `on` 就是生产行为。用法见 planning/VERSION-1.10.md。
-STATED_FACTS = os.environ.get('NEKO_SEMANTIC_STATED_FACTS', 'on').strip().lower() not in {
-    '0', 'off', 'false', 'no', ''}
-
-
 def _entry(aspect, at, key, fields=None, limit=None, listing=False, args=None):
     value = {'aspect': aspect, 'at': at, 'key': key}
     if fields is not None:
@@ -479,7 +471,7 @@ def _pawn_entries(surface, aspect, detail):
             # 条目，模型看不到自己被筛过（v1.10 实测因此得出“没人受伤”）。
             _entry('health', 'health.conditions', 'conditions',
                    ['id', 'def_name', 'label', 'severity', 'severity_label', 'visible'], detail,
-                   args={'visible_only': False} if STATED_FACTS else None),
+                   args={'visible_only': False}),
             _entry('health', 'health.body_parts', 'body_parts',
                    ['key', 'def_name', 'label', 'index', 'health', 'max_health'], detail),
             _entry('health', 'health.capacities', 'capacities',
@@ -1117,8 +1109,7 @@ def _semantics(plan, surface, result, resolution=None):
     if 'health' in plan.aspects:
         notes.append(SEMANTICS['health'])
     if any(entry.get('key') == 'conditions' for entry in plan.structure):
-        if STATED_FACTS:
-            notes.append(SEMANTICS['conditions_scope'])
+        notes.append(SEMANTICS['conditions_scope'])
     # 字段是点分路径（parent_holder.runtime_type），必须用子串判断而不是全等。
     if any(any(f.startswith('parent_holder') for f in (entry.get('fields') or []))
            for entry in plan.structure):
@@ -1251,8 +1242,7 @@ def render(plan, native, resolution=None):
         # `listing: complete` 只说列举完整，不说**共几组**，于是模型得自己数。
         # 实测（v1.10 建筑题）：渲染从不说组数，模型列出 30 组却写了“分属 31 个
         # 定义”。组数观测里本来就有，缺的只是送到模型眼前。
-        if STATED_FACTS:
-            out['coverage']['groups'] = len(out['groups'])
+        out['coverage']['groups'] = len(out['groups'])
     else:
         out['facts'] = _facts(plan, result)
         # detail>0 时明细也是根行；单独回一份，不混进 aspects 事实。
