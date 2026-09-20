@@ -73,17 +73,22 @@ def semantic_surface_available(setup: Any) -> bool:
       compiles onto it;
     * a `query` tool must be present, because that handler is the only native read
       this adapter is allowed to perform;
-    * the directory must actually build a Surface, or every call would fail after
-      the prompt had already promised the tools.
+    * the directory must build the Surface **including its argument schema**, which
+      is what the constructor does. Checking only the directory would let a
+      directory that lacks the per-root argument branches pass here and then raise
+      while the run was already under way.
     """
     if not semantic_surface_requested():
         return False
-    if getattr(setup, "directory", None) is None:
+    directory = getattr(setup, "directory", None)
+    if directory is None:
         return False
-    if not any(getattr(tool, "name", None) == "query" for tool in setup.tools):
+    tools = {getattr(tool, "name", None): tool for tool in setup.tools}
+    if "query" not in tools:
         return False
     try:
-        Surface(setup.directory)
+        surface = Surface(directory)
+        surface.add_query_schema(tools["query"].parameters)
     except (KeyError, TypeError, ValueError):
         return False
     return True
