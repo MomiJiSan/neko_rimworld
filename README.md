@@ -34,6 +34,39 @@ coverage and the existing reconfirmation protection.
 `NEKO_PUBLIC_REFERENCES=1` enables reference parts only when the connected Mod
 advertises `observed_values.v1`. The public-query default remains text-only.
 
+### Semantic surface (shipped default)
+
+The agent reads through two closed-enum tools instead of the Mod's raw query:
+`look(object, aspects, detail?)` for facts and `count(object, metric, by?,
+detail?)` for measurements. The model never writes field paths, native argument
+keys or block structure, and `detail` defaults to 0 so a measurement returns
+counts rather than unrequested instance rows.
+
+The reason is token cost, not taste. The query interface needs the Mod's field
+directory in the prompt on every request so the model can name fields; that
+directory is 48,927 characters, about 84% of a first request. Replacing the
+vocabulary removes the need for it. In the paired study the same questions held
+quality level (12/12 both arms) while using two thirds fewer tokens, with the
+same request count and the same number of model attempts.
+
+`NEKO_SEMANTIC_SURFACE=0` returns to the Mod's own query interface without a code
+change. The surface also steps aside on its own, and the consultation then runs
+on the Mod interface, when:
+
+- the connected Mod advertises no query directory (legacy catalog), or
+- no `query` tool is present to read through, or
+- the directory does not compile, or
+- the caller attached a historical report. That path registers
+  `read_report_evidence` and appends reference text to the prompt, and an
+  interaction adapter rebuilds both every cycle, so the two cannot be combined.
+
+The closed enum covers the measured demand shapes (one object's condition, lookup
+by identity, scoped populations and measurements). A request outside it is not
+expressible; that is the accepted cost of the interface, and it is why the study
+that promoted it is paired rather than single-arm. Results are rendered as plain
+text with their scope, coverage, not_read and native semantics; unknown is never
+lowered to zero.
+
 Reference submissions preserve the program-rendered `fact_tokens` through the
 runtime's final result, including plain-text detail repair. Budgets are separate
 but **not additive host allowances**:
@@ -209,6 +242,9 @@ agent/loop.py            open request-scoped tool-calling loop
 agent/audit.py           append-only state transitions and run registry
 agent/handoff.py         composed answer and submission validation
 agent/presentation.py    faithful Mod-described fact presentation
+agent/semantic_tools.py  shipped interface: closed-enum look/count, or the Mod's query
+agent/semantic_surface.py closed-enum vocabulary compiled onto the Mod query
+agent/query_surface.py   field types and argument schemas from the Mod directory
 ui/panel.tsx             setup, result delivery, and audit inspection
 ```
 

@@ -19,6 +19,7 @@ from .model_client import (
     parse_agent_model_settings,
 )
 from .session import AgentRunSession
+from .semantic_tools import SemanticInteraction, semantic_interaction_factory
 from .tools import ToolExecutionError
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     "HandoffValidationError",
     "ModelClientError",
     "OpenAICompatibleModelClient",
+    "SemanticInteraction",
     "ToolCall",
     "ToolExecutionError",
     "ToolResult",
@@ -42,5 +44,6 @@ __all__ = [
     "build_agent_model_settings",
     "count_handoff_tokens",
     "parse_agent_model_settings",
+    "semantic_interaction_factory",
     "validate_submission",
 ]

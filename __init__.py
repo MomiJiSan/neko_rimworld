@@ -26,6 +26,7 @@ from .agent import (
     attach_agent_handoff,
     build_agent_model_settings,
     parse_agent_model_settings,
+    semantic_interaction_factory,
 )
 from .agent.handoff import count_handoff_tokens
 from .bridge import (
@@ -139,6 +140,12 @@ class NekoRimworldPlugin(NekoPluginBase):
             audit_registry=self._agent_audit,
             logger=self.get_logger("agent"),
             report_sink=self._save_report,
+            # The semantic surface replaces the Mod's query vocabulary with a
+            # closed enum, which removes the 48,927-character field catalogue
+            # from every request. It declines on its own when the deployment
+            # switched it off, when the Mod advertises no directory, or when an
+            # attached historical report needs the Mod's own tools.
+            interaction_factory=semantic_interaction_factory,
         )
 
     @lifecycle(id="startup")

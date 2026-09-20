@@ -100,7 +100,14 @@ class AgentRuntime:
         self, question: str, settings: AgentModelSettings, *, reference_report: Mapping[str, Any] | None = None
     ) -> dict[str, Any]:
         if self._interaction_factory is not None and reference_report is not None:
-            raise ValueError("Experimental interaction adapters do not support historical-report attachment yet")
+            # An attached historical report registers `read_report_evidence` and
+            # appends reference text to the prompt. An interaction adapter
+            # replaces both the tool registry and the prompt every cycle, so the
+            # two cannot be combined: the attached-report consultation stays on
+            # the Mod's own interface. `_run_loop` decides this per run.
+            self._logger.info(
+                "[agent] attached report uses the Mod interface; interaction adapter not engaged"
+            )
         ledger = AgentAuditLedger(question)
         self._audit_registry.start(ledger)
         task = asyncio.current_task()
@@ -328,9 +335,10 @@ class AgentRuntime:
             "\n\n" + setup.context if setup.context else ""
         )
 
-        if self._interaction_factory is not None:
+        if self._interaction_factory is not None and reference_report is None:
             session.interaction = self._interaction_factory(setup, session, submission_updated)
-            session.messages[0]["content"] = session.interaction.prompt(settings.preferred_cycles)
+            if session.interaction is not None:
+                session.messages[0]["content"] = session.interaction.prompt(settings.preferred_cycles)
 
         # Prepared-evidence experiments cross the same production tool/result interface.
         # The injected calls are explicit study inputs, not model-generated calls.
