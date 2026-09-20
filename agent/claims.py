@@ -123,8 +123,9 @@ CLAIM_CLASSES = (
         label="健康完整性断言",
         patterns=(r"完全健康", r"没有(?:任何)?(?:伤|病|问题)", r"无(?:伤|病)情", r"\bfully healthy\b",
                   r"\bno injuries\b", r"\bcompletely healthy\b"),
-        evidence=("health_conditions", "health_body_parts", "health_capacities"),
-        hint="先读 health 的 conditions/body_parts/capacities（完整集合），"
+        evidence=("health_conditions",),
+        hint="先读 health 的 conditions（含隐藏条目，visible_only=false）。"
+             "部位 HP 与行动能力都不能代替这份名单。"
              "或写“已读的汇总值正常，但不能据此认定完全健康”。",
     ),
 )
@@ -207,6 +208,14 @@ NEGATED_VERB_PREFIX = re.compile(r"(?:没有|不|未|没|无|非|别)(?:包含|�
 
 # 子句分隔：句末标点 + 对比/转折 + 分号 + 逗号。切到逗号是有意的——
 # 实测“是否属实无关紧要，这些黄金就是我们的物资。”曾靠逗号前的疑问词洗白整句。
+#
+# **已知局限（有意不修）**：冒号也切，于是“不能下：无疼痛、完全健康、疼痛相关影响”
+# 里的否定看不到后面的列表项，一项正确的“不能断言”被当成断言。这类句形在
+# “哪些结论不能下”这种提问下很常见。
+#
+# 之所以不修：一条“冒号后面是前面动词的宾语时不切句”的规则能消掉它，但那是
+# 为一种句形专门开口子，而且会重新打开自己的洗白路径；而否定跨冒号本来就不是
+# 机械短语匹配能可靠判定的。这里选择**宁可偶尔误报也不堆规则**，误报由复核兑付。
 CLAUSE_BREAK = "。！？!?\n，,、；;：:"
 CONTRAST = ("但", "然而", "而是", "不过", "只是", "却")
 
@@ -285,6 +294,11 @@ _LABEL_KEYS = ("name", "label", "full_name", "def_name", "title", "key")
 _ROW_KEYS = ("rows", "values", "items", "records")
 _MAX_NODES = 40_000
 _MAX_DEPTH = 14
+
+# 伤病名单这个关系在结果节点上自报名字（`scope.relation`），所以不需要靠 Python
+# 字典键名去猜。它按 `visible_only` 分两种口径，**默认是 true**（只看界面上显示的），
+# 而“含隐藏条目”需要显式要求；这决定它能不能证明“没有伤病”。
+HEALTH_CONDITIONS_RELATION = "Health.conditions"
 
 
 def _is_available(value: Any) -> bool:
@@ -464,6 +478,17 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
                 entry(value)
                 break
         collection(node, local)
+        # 关系自带的读取口径是**观测自己声明的**，不是模型说的：结果节点上的
+        # `scope.relation` 指出这是哪个关系，`scope.args` 是解析后的参数（默认值
+        # 也已展开）。健康名单按 `visible_only` 区分“只看界面上显示的”与“含隐藏
+        # 条目”，而这直接决定它能不能证明“没有伤病”。写在遍历里而不是
+        # `collection()` 里：只算计数的读取没有明细键，但同样声明了口径。
+        node_scope = node.get("scope")
+        if isinstance(node_scope, Mapping) and node_scope.get("relation") == HEALTH_CONDITIONS_RELATION:
+            options = node_scope.get("args")
+            included = isinstance(options, Mapping) and options.get("visible_only") is False
+            entry(local)["fields"].add(
+                "health_conditions_all" if included else "health_conditions_visible")
         for key, value in node.items():
             if key == "request":
                 # 请求参数不是观察结果：失败的请求不构成证据。
@@ -499,7 +524,8 @@ def observed_categories(observations: Iterable[Mapping[str, Any]],
     """
     idx = dict(index) if index is not None else build_read_index(observations)
     found = dict(identity=False, faction=False, held_by_faction=False,
-                 health_conditions=False, health_body_parts=False, health_capacities=False,
+                 health_conditions=False, health_conditions_visible_only=False,
+                 health_body_parts=False, health_capacities=False,
                  include_held_true=bool(idx["flags"]["include_held_true"]),
                  include_fogged_true=bool(idx["flags"]["include_fogged_true"]),
                  colonists_root=bool(idx["flags"]["colonists_root"]))
@@ -512,7 +538,10 @@ def observed_categories(observations: Iterable[Mapping[str, Any]],
             found["faction"] = True
         if fields & {"held_by_faction", "held_by"}:
             found["held_by_faction"] = True
-        for name in ("conditions", "body_parts", "capacities"):
+        # 健康名单两种口径分开：只有含隐藏条目的那次才能证明“没有伤病”。
+        found["health_conditions"] = "health_conditions_all" in fields
+        found["health_conditions_visible_only"] = "health_conditions_visible" in fields
+        for name in ("body_parts", "capacities"):
             if name in fields:
                 found["health_" + name] = True
     return found
@@ -523,14 +552,16 @@ def observed_categories(observations: Iterable[Mapping[str, Any]],
 # ---------------------------------------------------------------------------
 
 # 证据键 → 索引里实际记录的字段名。索引记的是工具结果里的原始键，
-# 而 CLAIM_CLASSES 用的是领域词汇（例如 health_conditions 对应嵌套的 `conditions`）。
+# 而 CLAIM_CLASSES 用的是领域词汇。
 _EVIDENCE_FIELDS: dict[str, tuple[str, ...]] = {
     "identity": ("is_player", "is_free_colonist", "is_colonist"),
     "faction": ("faction", "is_player"),
     "held_by_faction": ("held_by_faction", "held_by"),
-    "health_conditions": ("conditions",),
-    "health_body_parts": ("body_parts",),
-    "health_capacities": ("capacities",),
+    # 健康完整性只认**含隐藏条目**的那次读取，见 `HEALTH_CONDITIONS_RELATION`。
+    # 部位 HP 与行动能力不是伤病的记录：伤口、疾病、疤、植入体、成瘾都是 hediff，
+    # 而部位 HP 只给部位血量、行动能力只是派生工作效率值（早期流感照样满值），
+    # 所以这两者不能代替这份名单。
+    "health_conditions": ("health_conditions_all",),
 }
 
 
@@ -676,7 +707,7 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
     return rejected
 
 
-def check_claims(answer, detail=None, *, observations=(), categories=None,
+def check_claims(answer, detail=None, *, observations=(),
                  index: Mapping[str, Any] | None = None) -> list[dict]:
     """返回被拒绝的断言列表；空列表表示通过。
 
@@ -686,22 +717,6 @@ def check_claims(answer, detail=None, *, observations=(), categories=None,
     if not text.strip():
         return []
     idx = dict(index) if index is not None else build_read_index(observations)
-    if categories is not None:
-        # 兼容旧调用方：把扁平视图折回索引的 global 桶。
-        flat = {name: bool(value) for name, value in categories.items()}
-        boot = dict(idx["global"])
-        boot["fields"] = set(boot["fields"]) | {
-            name for name in ("identity", "faction", "held_by_faction",
-                              "health_conditions", "health_body_parts", "health_capacities")
-            if flat.get(name)
-        }
-        idx["global"] = boot
-        idx["flags"]["include_held_true"] = flat.get("include_held_true", idx["flags"]["include_held_true"])
-        idx["flags"]["include_fogged_true"] = flat.get("include_fogged_true", idx["flags"]["include_fogged_true"])
-        for name in ("identity", "faction"):
-            if flat.get(name) and not idx["global"]["fields"]:
-                idx["global"]["fields"].add(name)
-
     rejected = _quantifier_rejections(text, idx)
     for claim in CLAIM_CLASSES:
         hit = None
