@@ -210,10 +210,15 @@ def _object_schema():
         'type': 'object',
         'description': 'Closed object selector. No field names, paths or native argument keys are accepted.',
         'properties': {
-            'kind': {'type': 'string', 'enum': list(KINDS)},
+            'kind': {'type': 'string', 'enum': list(KINDS),
+                     'description': 'thing, pawn, map and thing_def read one object (exactly one id); '
+                                    'things, pawns, colonists, maps and thing_defs read a population.'},
             'name': {'type': 'string', 'description': 'Exact display name; ambiguity returns candidates, never a pick.'},
             'names': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Exact display names.'},
-            'ids': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Exact native object IDs.'},
+            'ids': {'type': 'array', 'items': {'type': 'string'},
+                    'description': 'Exact native object IDs. Identifiers always use this key, for a single '
+                                   'object and for a population alike; a single-object kind (thing, pawn, map) '
+                                   'takes exactly one element.'},
             'definition': {'type': 'string', 'description': 'Exact def_name or localized definition label.'},
             'category': {'type': 'string', 'description': 'Definition category, e.g. Building.'},
             'map': {'type': 'string', 'default': 'current'},
@@ -280,10 +285,20 @@ def normalize_object(raw):
     """把模型输入变成规范化 object；未知 kind/选择器/类型一律拒绝。"""
     if not isinstance(raw, dict):
         raise SurfaceError('object must be an object')
-    unknown = sorted(set(raw) - {'kind', 'name', 'names', 'ids', 'definition', 'category',
-                                 'map', 'include_held', 'include_fogged'})
+    recognized = ('kind', 'name', 'names', 'ids', 'definition', 'category',
+                  'map', 'include_held', 'include_fogged')
+    unknown = sorted(set(raw) - set(recognized))
     if unknown:
-        raise SurfaceError('object does not accept: ' + ', '.join(unknown))
+        # 只说“不接受”会把模型留在原地继续猜。列出被认可的键，并在拼写相近时指出那个
+        # （实测 v1.10：报错写着“reads exactly one id”，模型据此用了 `id`，而合法的键是 `ids`）。
+        hint = ''
+        for name in unknown:
+            close = [key for key in recognized if key.startswith(name) or name.startswith(key)]
+            if close:
+                hint = '. Did you mean ' + close[0] + '?'
+                break
+        raise SurfaceError('object does not accept: ' + ', '.join(unknown)
+                           + '; it accepts: ' + ', '.join(recognized) + hint)
     kind = raw.get('kind')
     if kind not in ROOTS:
         raise SurfaceError('kind must be one of: ' + ', '.join(KINDS))
@@ -294,7 +309,11 @@ def normalize_object(raw):
     allowed = OBJECT_SELECTORS[kind]
     for key in ('name', 'names', 'ids', 'definition', 'category', 'map', 'include_held', 'include_fogged'):
         if key in raw and key not in allowed and not (key == 'name' and 'names' in allowed):
-            raise SurfaceError('kind ' + kind + ' does not accept ' + key)
+            # 只说“不行”会把模型留在原地；给出它接受的键，并说明要读单个对象该换哪个 kind。
+            hint = ('. For one object use the singular kind (thing, pawn, map) with a single-element ids array'
+                    if key == 'ids' else '')
+            raise SurfaceError('kind ' + kind + ' does not accept ' + key
+                               + '; it accepts: ' + ', '.join(OBJECT_SELECTORS[kind]) + hint)
     obj = {'kind': kind}
     if 'name' in raw:
         obj['names'] = [_text(raw['name'], 'name')]
@@ -324,7 +343,8 @@ def normalize_object(raw):
         obj.setdefault('include_fogged', True)
     if 'ids' in obj:
         if kind in ('pawn', 'thing', 'map') and len(obj['ids']) != 1:
-            raise SurfaceError('kind ' + kind + ' reads exactly one id')
+            raise SurfaceError('kind ' + kind + ' takes exactly one id: pass ids with a single element '
+                               '(the key is ids, not id)')
     return obj
 
 
