@@ -94,6 +94,14 @@ class SemanticInteraction:
 
     supports_finalization = True
 
+    #: Reference answer parts cite data-relative paths into the native payload, and
+    #: this interface never shows the model a path: results arrive rendered, with
+    #: their scope, coverage and not_read already stated. A model asked for paths
+    #: here could only invent them, so the capability is off regardless of what the
+    #: connection advertises. The paired study that promoted this surface pinned
+    #: references off for the same reason and refused to run the combination.
+    references_supported = False
+
     def __init__(self, setup: Any, session: Any, update: Any) -> None:
         self.setup = setup
         self.session = session
@@ -114,14 +122,14 @@ class SemanticInteraction:
         the model may use instead.
         """
         build = build_finalization_prompt if self.finalizing else build_system_prompt
-        return build(preferred_cycles, references_supported=self.setup.references_supported) + "\n\n" + TOOL_GUIDE
+        return build(preferred_cycles, references_supported=self.references_supported) + "\n\n" + TOOL_GUIDE
 
     def submission(self) -> Any:
         return make_submission_tool(
             self.session.submission,
             self.session.observations,
             self.update,
-            references_supported=self.setup.references_supported,
+            references_supported=self.references_supported,
         )
 
     def tools(self) -> tuple[Any, ...]:
@@ -152,7 +160,13 @@ class SemanticInteraction:
         return attach_agent_handoff(result)
 
     def snapshot(self) -> dict[str, Any]:
-        return dict(native_reads=len(self.session.observations), finalizing=self.finalizing)
+        return dict(
+            native_reads=len(self.session.observations),
+            finalizing=self.finalizing,
+            # Recorded so the audit shows that a connection advertising references
+            # had them suppressed here rather than silently ignored.
+            references_suppressed=bool(getattr(self.setup, "references_supported", False)),
+        )
 
     async def aclose(self) -> None:
         return None

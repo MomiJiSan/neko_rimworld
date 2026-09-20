@@ -67,6 +67,13 @@ that promoted it is paired rather than single-arm. Results are rendered as plain
 text with their scope, coverage, not_read and native semantics; unknown is never
 lowered to zero.
 
+Reference answer parts stay off while this surface is active, even when
+`NEKO_PUBLIC_REFERENCES=1` and the Mod advertises `observed_values.v1`. A
+reference part cites a data-relative path into the native payload, and this
+interface never shows the model a path: results arrive rendered. The capability
+would be unusable rather than merely untested, so it is suppressed and the run's
+`interaction_state` records `references_suppressed: true`.
+
 Reference submissions preserve the program-rendered `fact_tokens` through the
 runtime's final result, including plain-text detail repair. Budgets are separate
 but **not additive host allowances**:
