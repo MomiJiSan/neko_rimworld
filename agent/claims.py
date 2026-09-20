@@ -30,6 +30,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -145,6 +146,34 @@ QUANTIFIER_TOTAL_PATTERNS = (
 # 因为“唯一”本身也常用于描述本次返回。
 QUANTIFIER_LABEL_PATTERNS = (r"唯一", r"仅有", r"只有", r"全部", r"所有", r"\bonly\b")
 
+# 聚合叙述 vs 明细列举：返回契约允许“完整聚合 + 部分明细页”，所以
+# “总量来自对全部 N 个匹配实例的完整聚合”是**正确**表述，不应被当成对部分列举的全称断言。
+# 但它不能授权“所有 N 个实例都已逐项检查”——那是明细层面的断言，需要列举完整。
+#
+# 判据是**子句**层面的：出现聚合名词，且没有任何明细列举措辞。
+# 实测（v1.10）：这条豁免只应用于“聚合本身被断言完整”的场合；
+# 后一句、另一个集合、聚合不完整（measure 无 complete / 扫描未完成 / 只有 request）都不适用。
+AGGREGATE_NARRATION_WORDS = ("聚合", "统计", "总计", "总量", "合计", "求和", "汇总", "总数")
+ROW_LEVEL_MARKERS = ("逐项", "逐条", "逐行", "逐个", "逐一", "每一项", "每一行", "每一件",
+                     "每个实例", "每个对象", "明细都", "完整明细", "完整清单", "完整列表",
+                     "全部读完", "全部读取", "均已读取", "都已读取", "均已检查", "都已检查",
+                     "均已核对", "都已核对", "均已确认", "都已确认")
+
+
+def _licenses_aggregate_narration(clause: str, item: Mapping[str, Any], *, require_noun: bool = True) -> bool:
+    """该子句是否只是在说“这个读数/聚合覆盖了全部 N 项”。
+
+    `require_noun=True`（标签型量词）：子句必须点名聚合，否则“唯一/只有”
+    这种排他断言会被聚合完整性放行。
+    `require_noun=False`（数字型量词）：“基于全部 20 个匹配项计算”这类正确说法
+    不一定含“聚合”二字，靠**逐行列举措辞**反过来排除行级断言。
+    """
+    if not item.get("aggregate_complete"):
+        return False
+    if any(marker in clause for marker in ROW_LEVEL_MARKERS):
+        return False
+    return any(word in clause for word in AGGREGATE_NARRATION_WORDS) if require_noun else True
+
 # ---------------------------------------------------------------------------
 # 否定 / 引号
 # ---------------------------------------------------------------------------
@@ -169,6 +198,12 @@ IMMEDIATE_NEGATION = ("没有", "无", "没", "未见", "未发现", "不存在"
 # 里的“不含被持有”命中了“含被持有”的模式，是一句正确的否定。
 # 只取紧贴一个字是为了不把“不少殖民者”这类反向表述误判成否定。
 LEADING_NEGATORS = ("不", "没", "无", "非", "未", "别")
+
+# 动词级否定：否定词与“包含/包/含”之间可能隔着一个“包”字，单字前缀看不见它。
+# 实测（v1.10 真实答案）：`include_held=未包含持有物（false）` 里“含持有”命中触发词，
+# 前面的“未包”却不被任何现有规则认作否定，正确的范围声明被误拒（1 次）。
+# 只匹配“否定词 + 可选 包含/包/含”且**紧贴命中点**，不扩大其它类别的抑制窗口。
+NEGATED_VERB_PREFIX = re.compile(r"(?:没有|不|未|没|无|非|别)(?:包含|包|含)?$")
 
 # 子句分隔：句末标点 + 对比/转折 + 分号 + 逗号。切到逗号是有意的——
 # 实测“是否属实无关紧要，这些黄金就是我们的物资。”曾靠逗号前的疑问词洗白整句。
@@ -223,7 +258,10 @@ def _hit_is_negated(text: str, hit: re.Match[str]) -> bool:
     if any(marker in before[-8:] for marker in IMMEDIATE_NEGATION):
         return True
     stripped = before.rstrip()
-    return bool(stripped) and stripped[-1] in LEADING_NEGATORS
+    if stripped and stripped[-1] in LEADING_NEGATORS:
+        return True
+    # 动词级否定（“未包含”“不包含”）：否定词后面还可以跟一个“包/包含/含”字。
+    return bool(NEGATED_VERB_PREFIX.search(stripped))
 
 
 def _all_negated(text: str, pattern: str) -> bool:
@@ -258,6 +296,28 @@ def _is_available(value: Any) -> bool:
 
 def _new_subject() -> dict[str, Any]:
     return {"fields": set(), "labels": set()}
+
+
+def _population_signature(node: Mapping[str, Any], total: int | None) -> str | None:
+    r"""一个结果节点的“总体”身份：同一个 from + 解析后 args + where + 总体规模。
+
+    用于把**完整聚合**与**部分明细页**关联起来——实测（v1.10）两者是不同结果节点：
+    模型先查一个只算聚合的请求，再查一个 limit=1 的明细页，两个节点 scope.args 完全相同。
+    规模必须一致：不同 def / 不同范围的两次查询即使声明了同样的 args 也不是同一批对象，
+    不能互相授权（回归 `test_another_results_complete_aggregate_cannot_license_this_one`）。
+    签名缺失时不关联，退回逐节点判定。
+    """
+    scope = node.get("scope")
+    if not isinstance(scope, Mapping):
+        return None
+    args = scope.get("args")
+    if not isinstance(args, Mapping):
+        return None
+    try:
+        return json.dumps([node.get("from"), dict(args), scope.get("where"), total],
+                          sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return None
 
 
 def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
@@ -315,40 +375,76 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
                 index["labels"].setdefault(value, subject)
 
     def collection(node: Mapping[str, Any], subject: str | None) -> None:
+        rows = None
         for key in _ROW_KEYS:
-            rows = node.get(key)
-            if not isinstance(rows, list):
-                continue
-            total = node.get("matched")
-            if total is None:
-                total = node.get("matched_count")
-            if total is None:
-                total = node.get("known_matches")
-            page = node.get("page") if isinstance(node.get("page"), Mapping) else {}
-            has_more = page.get("has_more")
-            if has_more is None:
-                has_more = node.get("has_more")
-            listing = node.get("listing")
-            complete = (has_more is False) or (listing == "complete")
-            if has_more is True or listing in ("partial", "incomplete"):
-                complete = False
-            labels: set[str] = set()
-            for row in rows:
-                if isinstance(row, Mapping):
-                    for label_key in _LABEL_KEYS:
-                        value = row.get(label_key)
-                        if isinstance(value, str) and len(value) >= 2:
-                            labels.add(value)
-                elif isinstance(row, str) and len(row) >= 2:
-                    labels.add(row)
+            value = node.get(key)
+            if isinstance(value, list):
+                rows = value
+                break
+        aggregates = node.get("aggregates")
+        if rows is None and not isinstance(aggregates, Mapping):
+            return
+        total = node.get("matched")
+        if total is None:
+            total = node.get("matched_count")
+        if total is None:
+            total = node.get("known_matches")
+        total = total if isinstance(total, int) else None
+        measures = aggregates if isinstance(aggregates, Mapping) else {}
+        # 聚合覆盖是**另一个问题**：发布过的返回契约说明，扫描与声明的度量
+        # 完整时，聚合就是精确值，即使明细页只展示了一部分。
+        aggregate_complete = (
+            bool(measures) and node.get("scan_complete") is True
+            and all(isinstance(measure, Mapping) and measure.get("complete") is True
+                    for measure in measures.values())
+        )
+        signature = _population_signature(node, total)
+        if rows is None:
+            # 只算聚合的结果节点没有明细键（limit 0）。它不构成“部分列举”，
+            # 但必须记录，否则它的聚合完整性就丢了——实测（v1.10）就是这种节点
+            # 与明细页分属两个结果，导致完整聚合被当成不完整明细。
             index["collections"].append({
-                "total": total if isinstance(total, int) else None,
-                "returned": len(rows),
-                "complete": bool(complete),
-                "labels": labels,
+                "total": total,
+                "returned": 0,
+                "complete": True,
+                "aggregate_complete": bool(aggregate_complete),
+                "signature": signature,
+                "labels": set(),
                 "subject": subject,
             })
             return
+        page = node.get("page") if isinstance(node.get("page"), Mapping) else {}
+        has_more = page.get("has_more")
+        if has_more is None:
+            has_more = node.get("has_more")
+        offset = page.get("offset", 0)
+        if type(offset) is not int or offset < 0:
+            offset = 0
+        listing = node.get("listing")
+        # 明细“读到哪儿”：只有**首页且没有下一页**才是整份列举。
+        # 实测漏过：非零 offset 的末页（has_more=false）被当成完整列举，
+        # 于是“所有 20 个实例都已逐项检查”在只看到最后一页时被放行。
+        complete = offset == 0 and ((has_more is False) or (listing == "complete"))
+        if has_more is True or listing in ("partial", "incomplete"):
+            complete = False
+        labels: set[str] = set()
+        for row in rows:
+            if isinstance(row, Mapping):
+                for label_key in _LABEL_KEYS:
+                    value = row.get(label_key)
+                    if isinstance(value, str) and len(value) >= 2:
+                        labels.add(value)
+            elif isinstance(row, str) and len(row) >= 2:
+                labels.add(row)
+        index["collections"].append({
+            "total": total,
+            "returned": len(rows),
+            "complete": bool(complete),
+            "aggregate_complete": bool(aggregate_complete),
+            "signature": signature,
+            "labels": labels,
+            "subject": subject,
+        })
 
     def walk(node: Any, subject: str | None, depth: int) -> None:
         if budget[0] <= 0 or depth > _MAX_DEPTH:
@@ -378,6 +474,17 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
             walk(value, local, depth + 1)
 
     walk(list(observations), None, 0)
+    # 聚合完整性与明细完整性可能来自**不同的结果节点**（先查聚合，再查明细页）。
+    # 返回契约按“同一总体”判定，所以把同一 from/args/where 的完整聚合关联到
+    # 该总体的所有集合条目上。不同 def/范围 → 不同签名 → 不会互相授权。
+    complete_populations = {
+        item["signature"] for item in index["collections"]
+        if item.get("aggregate_complete") and item.get("signature") is not None
+    }
+    if complete_populations:
+        for item in index["collections"]:
+            if item.get("signature") in complete_populations:
+                item["aggregate_complete"] = True
     index["flags"]["colonists_root"] = bool(
         index["roots"] & {"spawned_free_colonists", "colonists", "colonist"})
     return index
@@ -481,12 +588,16 @@ def _evidence_present(index: Mapping[str, Any], evidence: Sequence[str], text: s
 
 
 def _cited_numbers(clause: str) -> set[int]:
-    """子句里真正作为测量被写出来的数字。
+    r"""子句里真正作为测量被写出来的数字。
 
     排除标识符里的数字：`Thing_Human465` 的 465 不是被引用的读数（实测
     “目前唯一受损器官是右眼” 的判定期里混进了 465）。
+
+    边界只排除 **ASCII 标识符字符**，不能用 `\w`：中文汉字在 `\w` 里也算单词字符，
+    于是“全部20个”的数字根本没被提取。实测漏过：`所有20实例都已逐项检查`
+    因此完全没有进入量词检查。
     """
-    return {int(value) for value in re.findall(r"(?<![\w])\d+", clause)}
+    return {int(value) for value in re.findall(r"(?<![A-Za-z0-9_])\d+", clause)}
 
 
 def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
@@ -498,13 +609,15 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
       * 量词与一个数字**紧邻**，且该数字等于某个 partial 集合的 total；或
       * 子句点名了某个 partial 集合里**已返回的行标签**
 
+    唯一豁免：子句只是在陈述“聚合覆盖了全部 N 项”，且该集合的聚合确实完整
+    （见 `_licenses_aggregate_narration`）。
+
     这个宽度是实测调出来的：第一版用裸词（“全部/所有/唯一”）加“存在 partial 即拒”，
     在 105 份已复核答案上误报 49 条（其中 0 条复核有 issue）。
     """
     partial = [item for item in index["collections"] if not item["complete"]]
     if not partial:
         return []
-    totals = {item["total"] for item in partial if isinstance(item["total"], int)}
     rejected: list[dict] = []
     reported: set[tuple[int, int]] = set()
 
@@ -544,6 +657,8 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
             item = next((c for c in partial if isinstance(c["total"], int) and c["total"] in local), None)
             if item is None:
                 continue
+            if _licenses_aggregate_narration(clause, item, require_noun=False):
+                continue
             record(hit, item, f"这句话用“{hit.group(0)}”数了一个只返回了 {item['returned']} 项的集合")
 
     for pattern in QUANTIFIER_LABEL_PATTERNS:
@@ -554,6 +669,8 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
             clause = text[start:end]
             item = next((c for c in partial if any(label in clause for label in c["labels"])), None)
             if item is None:
+                continue
+            if _licenses_aggregate_narration(clause, item):
                 continue
             record(hit, item, f"这句话把只返回了 {item['returned']} 项的集合当成已知全体")
     return rejected
@@ -587,7 +704,7 @@ def check_claims(answer, detail=None, *, observations=(), categories=None,
 
     rejected = _quantifier_rejections(text, idx)
     for claim in CLAIM_CLASSES:
-        matched = None
+        hit = None
         for pattern in claim["patterns"]:
             # 必须找**第一处未被否定的**出现。旧版只在“全部出现都被否定”时才跳过，
             # 然后用 `re.search` 报出**第一处**（可能正是被否定的那处）。实测真实答案
@@ -595,13 +712,18 @@ def check_claims(answer, detail=None, *, observations=(), categories=None,
             # 因此被误拒。
             hit = next((h for h in re.finditer(pattern, text) if not _hit_is_negated(text, h)), None)
             if hit is not None:
-                matched = hit.group(0)
                 break
-        if not matched:
+        if hit is None:
             continue
-        if not claim.get("always_reject") and _evidence_present(idx, claim["evidence"] or (), text):
+        # 证据必须绑定到**命中所在的子句**，不是整篇。用整篇算“被提及的主体”时，
+        # 只要同篇里提过某个已读对象（或者只是列了一堆行 id），就能为另一句里
+        # 另一个对象的断言授权——实测跨主体串证：`Alice 的身份已读取。Bob 是殖民者。`
+        # 被放行。反向也会误伤：建筑题的明细里到处都是 Thing_* 行 id，
+        # 而“按阵营筛选属于玩家阵营的实例为 0”的子句里并没有对象名。
+        start, end = _clause_span(text, hit.start())
+        if not claim.get("always_reject") and _evidence_present(idx, claim["evidence"] or (), text[start:end]):
             continue
-        rejected.append(dict(code=claim["code"], label=claim["label"], quote=matched, hint=claim["hint"]))
+        rejected.append(dict(code=claim["code"], label=claim["label"], quote=hit.group(0), hint=claim["hint"]))
     return rejected
 
 
@@ -623,5 +745,5 @@ def describe(rejected: Iterable[Mapping[str, Any]]) -> str:
     return " ".join(lines)
 
 
-__all__ = ["CLAIM_CLASSES", "QUANTIFIER_PATTERNS", "build_read_index", "check_claims",
+__all__ = ["CLAIM_CLASSES", "build_read_index", "check_claims",
            "describe", "observed_categories"]
