@@ -1239,10 +1239,6 @@ def render(plan, native, resolution=None):
         out['groups'] = [{'key': {by: (row.get('key') or {}).get(native)},
                           'measures': dict(row.get('aggregates') or {})}
                          for row in (result.get('rows') or []) if isinstance(row, dict)]
-        # `listing: complete` 只说列举完整，不说**共几组**，于是模型得自己数。
-        # 实测（v1.10 建筑题）：渲染从不说组数，模型列出 30 组却写了“分属 31 个
-        # 定义”。组数观测里本来就有，缺的只是送到模型眼前。
-        out['coverage']['groups'] = len(out['groups'])
     else:
         out['facts'] = _facts(plan, result)
         # detail>0 时明细也是根行；单独回一份，不混进 aspects 事实。
