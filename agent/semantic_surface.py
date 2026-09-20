@@ -165,10 +165,6 @@ SEMANTICS = {
                      'building type means it is inside that holder. Two instances sharing a parent_holder have '
                      'the same immediate holder - containment, not ownership, and it never proves a location '
                      'beyond what that type states.',
-    'conditions_scope': 'health.conditions is the hediff record: injuries, diseases, scars, implants and '
-                        'addictions. It is read with hidden records included, not only the entries the health '
-                        'interface lists, so a short or empty list here is the whole record and not a visible '
-                        'subset. Body-part HP and capacity values are not this record.',
     'durability': 'hit_points/max_hit_points are the native Thing getters for this instance. A null with no '
                   'issue at its path is the game returning no value for this member (some definitions carry no '
                   'durability); that is neither zero nor a failed read. An issue at the path means the read failed.',
@@ -446,7 +442,7 @@ def route_object(obj):
 
 # --- aspects → blocks ---------------------------------------------------------
 
-def _entry(aspect, at, key, fields=None, limit=None, listing=False, args=None):
+def _entry(aspect, at, key, fields=None, limit=None, listing=False):
     value = {'aspect': aspect, 'at': at, 'key': key}
     if fields is not None:
         value['fields'] = list(fields)
@@ -454,8 +450,6 @@ def _entry(aspect, at, key, fields=None, limit=None, listing=False, args=None):
         value['limit'] = limit
     if listing:
         value['listing'] = True
-    if args:
-        value['args'] = dict(args)
     return value
 
 
@@ -466,12 +460,8 @@ def _pawn_entries(surface, aspect, detail):
         return [
             _entry('health', 'health.summary', 'summary',
                    ['health_percent', 'pain', 'bleed_rate', 'in_pain_shock', 'downed']),
-            # 读**含隐藏条目**的那一版：这份名单是伤病、疾病、疤、植入体、成瘾的记录，
-            # 而“有没有人受伤”这个问题要的正是整份记录。默认的那版只列健康界面显示的
-            # 条目，模型看不到自己被筛过（v1.10 实测因此得出“没人受伤”）。
             _entry('health', 'health.conditions', 'conditions',
-                   ['id', 'def_name', 'label', 'severity', 'severity_label', 'visible'], detail,
-                   args={'visible_only': False}),
+                   ['id', 'def_name', 'label', 'severity', 'severity_label', 'visible'], detail),
             _entry('health', 'health.body_parts', 'body_parts',
                    ['key', 'def_name', 'label', 'index', 'health', 'max_health'], detail),
             _entry('health', 'health.capacities', 'capacities',
@@ -705,8 +695,6 @@ def _assemble(surface, tool, obj, aspects, detail, entries, metrics, grouping, n
             block['fields'] = list(entry['fields'])
         if entry.get('limit') is not None:
             block['limit'] = entry['limit']
-        if entry.get('args'):
-            block['args'] = copy.deepcopy(entry['args'])
         blocks.append(block)
     plan.covers = _covers(entries)
     plan.request = surface.compile({'source': root, 'blocks': blocks})
@@ -1108,8 +1096,6 @@ def _semantics(plan, surface, result, resolution=None):
         notes.append(SEMANTICS['pawn'])
     if 'health' in plan.aspects:
         notes.append(SEMANTICS['health'])
-    if any(entry.get('key') == 'conditions' for entry in plan.structure):
-        notes.append(SEMANTICS['conditions_scope'])
     # 字段是点分路径（parent_holder.runtime_type），必须用子串判断而不是全等。
     if any(any(f.startswith('parent_holder') for f in (entry.get('fields') or []))
            for entry in plan.structure):
