@@ -272,6 +272,14 @@ class SemanticInteraction:
     async def inspect_space(self, args: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(args, dict) or not isinstance(args.get("from"), dict) or not isinstance(args.get("to"), dict):
             raise SurfaceError("inspect_space requires from and to references")
+        detail = args.get("detail", "summary")
+        if detail not in ("summary", "route"):
+            raise SurfaceError('detail must be summary or route')
+        capability = self.setup.directory.get("spatial_query", {})
+        if "detail" in args and "detail" not in capability.get("parameters", {}).get("properties", {}):
+            raise SurfaceError("This connection does not support detail; omit it for reachability only")
+        if detail == "route" and capability.get("route_summary") != "native_path_summary.v1":
+            raise SurfaceError("This connection does not support path summaries")
         actor = args["from"]
         target = args["to"]
         self._validate_space_ref(actor, "from", {"pawn"})
@@ -282,7 +290,7 @@ class SemanticInteraction:
             raise ToolExecutionError("spatial_invalid_result", "The game returned no spatial result.")
         # Keep the result claim-shaped. Do not make the model reconstruct reachability
         # from transport/session metadata or unrelated Room/Region fields.
-        return {
+        rendered = {
             "answer": data.get("answer", "unknown"),
             "from": data.get("from"),
             "to": data.get("target"),
@@ -300,6 +308,9 @@ class SemanticInteraction:
             "meaning": data.get("meaning"),
             "issues": native.get("issues", []),
         }
+        if "route" in data:
+            rendered["route"] = data["route"]
+        return rendered
 
     @staticmethod
     def _validate_space_ref(value: dict[str, Any], path: str, kinds: set[str]) -> None:

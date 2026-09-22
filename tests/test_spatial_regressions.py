@@ -63,3 +63,41 @@ def test_native_pack_preserves_actual_lookup_root_and_scope():
     assert result['lookup']['source']=='thing_defs'
     assert result['lookup']['scope']['notes']==['Loaded definitions, not quantities.']
     assert result['execution']=='not_run'
+
+
+def test_route_is_one_dispatch_and_partial_keeps_reachability():
+    import asyncio
+    from .test_semantic_tools import public_source, Session, _update
+    from plugin.plugins.neko_rimworld.query_tools import make_game_tools
+    from plugin.plugins.neko_rimworld.agent.semantic_tools import semantic_interaction_factory
+    from plugin.plugins.neko_rimworld.observation import Observation
+    from plugin.plugins.neko_rimworld.protocol import QUERY_RESULT, Payload, SessionDescriptor, make_envelope
+    source=public_source(spatial=True)
+    cap=source['spatial_query']; cap['route_summary']='native_path_summary.v1'
+    cap['parameters']['properties']['detail']={'type':'string','enum':['summary','route']}
+    requests=[]
+    async def backend(request):
+        requests.append(request)
+        data={'answer':'reachable','route':{'status':'unavailable','reason':'deadline_exceeded'},'checked':{'native_reachability':True}}
+        response=make_envelope(QUERY_RESULT,'1'*32,1,payload=Payload(status='partial',data=data,issues=[{'code':'deadline_exceeded','path':['route'],'message':'path unavailable'}]),session=SessionDescriptor('2'*32,'3'*32,42,1),request_id='4'*32)
+        return Observation.from_response(request['operation'],request['arguments'],response)
+    session=Session();adapter=semantic_interaction_factory(make_game_tools(source,backend),session,_update)
+    spec=next(t for t in adapter.tools() if t.name=='inspect_space')
+    assert 'detail="route"' in spec.description
+    args={'from':{'kind':'pawn','name':'Alice'},'to':{'kind':'thing','id':'t'},'detail':'route'}
+    result=asyncio.run(spec.handler(args))
+    assert requests==[{'operation':'spatial_query','arguments':args}]
+    assert result['answer']=='reachable' and result['route']['status']=='unavailable'
+    assert len(session.observations)==1
+
+
+def test_old_spatial_mod_does_not_advertise_or_dispatch_route():
+    import asyncio
+    from .test_semantic_tools import setup_for, Session, _update
+    from plugin.plugins.neko_rimworld.agent.semantic_tools import semantic_interaction_factory
+    adapter=semantic_interaction_factory(setup_for(spatial=True),Session(),_update)
+    spec=next(t for t in adapter.tools() if t.name=='inspect_space')
+    assert 'detail' not in spec.parameters['properties']
+    from plugin.plugins.neko_rimworld.agent.tools import ToolExecutionError
+    with pytest.raises(ToolExecutionError):
+        asyncio.run(spec.handler({'from':{'kind':'pawn','id':'p'},'to':{'kind':'thing','id':'t'},'detail':'route'}))

@@ -494,3 +494,27 @@ schema advertises per-kind aspect combinations. Failed definition/name resolutio
 reports lookup source/scope/coverage separately: the requested instance read or
 count is **not_run**, never a complete zero count. A complete missing exact-ID
 public query is an empty result; an interrupted lookup remains partial.
+
+## V2.1-B optional native path summary
+
+`inspect_space(from,to,detail="route")` uses the existing spatial request to check
+reachability and, if true, run at most one native `FindPathNow`. Omitting `detail`
+or using `summary` retains reachability-only behavior. Discovery advertises
+`spatial_query.route_summary = native_path_summary.v1`; older Mods do not expose
+the route parameter. No preliminary `look` or separate reach request is required.
+
+A found `route` reports `steps` (grid transitions), `grid_distance` (sum of cardinal
+1 and diagonal sqrt(2) cell widths), `native_cost` (native weighted search cost),
+and start/end map cells. The native GenPath endpoint normalization is applied
+before pathfinding: a Thing's returned endpoint need not be its occupied cell.
+The path is not guaranteed shortest; cost is not seconds, elapsed ticks or ETA.
+Paths are never issued to a Pawn and are disposed after reduction; no full node
+array or persistent path handle reaches the Agent.
+
+The route status is `found`, `not_computed` (lookup/unsupported/unreachable), or
+`unavailable` (pathfinding/projection failure). A failed route leaves a completed
+reachability result usable. The synchronous game call cannot be preempted; a
+completed valid summary that exceeds the cooperative 12ms target is preserved
+with `route_budget_overrun` and `read_budget_exceeded`, not discarded or retried.
+Node reduction remains bounded. This is not a hard frame-time or travel-time
+guarantee, nor a diagnosis of which obstacle caused a negative reachability result.

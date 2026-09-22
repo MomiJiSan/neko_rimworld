@@ -314,14 +314,20 @@ def spatial_tool_schema(directory=None):
             'required': ['from', 'to'],
             'additionalProperties': False,
         }
-    return dict(
-        name='inspect_space',
-        description=('Check whether one Pawn can currently reach one Thing or map cell. '
-                     'Use this directly with names or IDs; do not call look first just to resolve them. '
-                     'This is current-tick native reachability only: it does not assess WorkGivers, hauling, '
-                     'reservations, Rooms, Regions, routes or future success. Ambiguous names return candidates.'),
-        parameters=parameters,
-    )
+    route_supported = isinstance(capability, dict) and capability.get('route_summary') == 'native_path_summary.v1'
+    description = ('Check whether one Pawn can currently reach one Thing or map cell. '
+                   'Use names or IDs directly; do not call look first just to resolve them. '
+                   'Ambiguous names return candidates. No work eligibility, reservation, '
+                   'blocking-cause diagnosis or future-action guarantee. ')
+    if route_supported:
+        description += ('Use detail="route" to also get a native path summary in this call; '
+                        'do not call reachability first. Default summary computes no path. '
+                        'Steps, geometric grid distance and native weighted cost are different; '
+                        'none is ETA, and the returned path is not guaranteed shortest.')
+    else:
+        description += 'This connection provides reachability only; no route or distance tool is available.'
+    return dict(name='inspect_space', description=description, parameters=parameters)
+
 
 
 # --- 校验 ---------------------------------------------------------------------
