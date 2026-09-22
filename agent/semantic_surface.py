@@ -46,7 +46,7 @@ OBJECT_SELECTORS = {
     'maps': ('ids', 'names'),
     'map': ('ids', 'names'),
     'colony': (),
-    'pawn': ('ids', 'names'),
+    'pawn': ('ids', 'names', 'map'),
     'pawns': ('ids', 'names', 'map'),
     'colonists': ('ids', 'names', 'map'),
     'thing': ('ids', 'names', 'map'),
@@ -213,6 +213,7 @@ def _object_schema():
             'kind': {'type': 'string', 'enum': list(KINDS)},
             'name': {'type': 'string', 'description': 'Exact display name; ambiguity returns candidates, never a pick.'},
             'names': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Exact display names.'},
+            'id': {'type': 'string', 'description': 'One exact native object ID; use id or ids, never both.'},
             'ids': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Exact native object IDs.'},
             'definition': {'type': 'string', 'description': 'Exact def_name or localized definition label.'},
             'category': {'type': 'string', 'description': 'Definition category, e.g. Building.'},
@@ -262,12 +263,14 @@ def _space_ref_schema(kind_enum):
 
 def tool_schemas():
     """模型可见读取工具；空间能力由连接 capability 决定。"""
-    return [
+    specs = [
         dict(name='look',
              description=('Read one object or a population through closed aspects: '
                           'identity health skills gear work mood profile resources quantity distribution. '
                           'No field names or native arguments; the program routes them. '
-                          'detail is the number of detail rows (0 = counts only). '
+                          'Pawn supports identity/health/skills/gear/work/mood/profile; Thing supports identity; '
+                          'map supports identity/resources. Populations also support quantity, and some distribution. '
+                          'detail controls nested detail; ordinary look always returns object facts. '
                           'Results inline scope, coverage, not_read and meanings; unknown is not zero.'),
              parameters={'type': 'object',
                          'properties': {'object': _object_schema(),
@@ -289,6 +292,13 @@ def tool_schemas():
                                         'detail': {'type': 'integer', 'minimum': 0, 'maximum': 100, 'default': 0}},
                          'required': ['object', 'metric'], 'additionalProperties': False}),
     ]
+
+    specs[0]['parameters']['allOf'] = [
+        {'if': {'properties': {'object': {'properties': {'kind': {'const': kind}}}}},
+         'then': {'properties': {'aspects': {'items': {'enum': list(supported_aspects(kind))}}}}}
+        for kind in KINDS
+    ]
+    return specs
 
 
 def spatial_tool_schema(directory=None):
@@ -332,6 +342,11 @@ def normalize_object(raw):
     """把模型输入变成规范化 object；未知 kind/选择器/类型一律拒绝。"""
     if not isinstance(raw, dict):
         raise SurfaceError('object must be an object')
+    raw = dict(raw)
+    if 'id' in raw:
+        if 'ids' in raw:
+            raise SurfaceError('use id or ids, not both')
+        raw['ids'] = [_text(raw.pop('id'), 'id')]
     unknown = sorted(set(raw) - {'kind', 'name', 'names', 'ids', 'definition', 'category',
                                  'map', 'include_held', 'include_fogged'})
     if unknown:
@@ -449,7 +464,7 @@ def route_object(obj):
         args['id'] = obj['ids'][0] if 'ids' in obj else 'current'
         return ROOTS[kind], args, where
     if kind in ('pawn', 'pawns'):
-        if kind == 'pawn' and 'ids' in obj and len(obj['ids']) == 1:
+        if kind == 'pawn' and 'ids' in obj and len(obj['ids']) == 1 and 'map' not in obj:
             args['id'] = obj['ids'][0]
             return 'pawn', args, where
         # pawns 覆盖人类/动物/机械族；pawn 多 id 时也落到同一根，避免伪造单 id。
@@ -762,7 +777,7 @@ def lookup_spec(surface, obj):
     if 'names' in obj:
         names = list(obj['names'])
         if kind in ('pawn', 'pawns'):
-            root, field, args = 'pawns', 'name', {}
+            root, field, args = 'pawns', 'name', ({'map_id': obj['map']} if 'map' in obj else {})
         elif kind == 'colonists':
             root, field, args = 'spawned_free_colonists', 'name', {'map_id': obj.get('map', 'current')}
         elif kind in ('map', 'maps'):
@@ -828,6 +843,7 @@ def interpret_lookup(lookup, packed):
     else:
         status = 'resolved'
     return {'status': status, 'field': field, 'requested': wanted,
+            'source': result.get('from'), 'scope': copy.deepcopy(result.get('scope', {})),
             'ids': [row.get('id') or row.get('def_name') for row in matches],
             'candidates': [_candidate(row) for row in rows],
             'ambiguous': ambiguous, 'missing': missing,
@@ -904,6 +920,8 @@ def _collection_literal(value):
     out = {'state': 'complete' if value.get('scan_complete') is True else 'partial'}
     if value.get('scan_complete') is not True:
         out['reason'] = 'the source scan was incomplete'
+    if 'from' in value:
+        out['from'] = value['from']
     out['fields'] = 'complete' if value.get('fields_complete') else 'partial'
     out['matched'] = value.get('matched_count')
     out['known_matches'] = value.get('known_matches')
@@ -1301,7 +1319,15 @@ def render_blocked(tool, obj, resolution, native):
         'tool': tool,
         'object': {k: v for k, v in obj.items() if v is not None},
         'resolution': resolution,
-        'coverage': coverage_of(result),
+        'lookup': {'source': result.get('from'), 'scope': copy.deepcopy(result.get('scope', {})),
+                   'coverage': coverage_of(result)},
+        'coverage': {'scan': 'not_run', 'fields': 'not_run', 'listing': 'not_run',
+                     'matched': None, 'known_matches': None},
+        'execution': 'not_run',
+        'explanation': ('Definition lookup did not resolve the requested definition. Instance counting/reading was not executed; '
+                        'zero matching definitions does not establish absence of an instance ID or display name.'
+                        if resolution.get('field') == 'def_name' else
+                        'Object lookup did not resolve the requested identity. The requested reading/counting was not executed.'),
         'measures': {},
         'facts': [],
         'not_read': ['object facts (the object was not resolved to exactly one match)'],

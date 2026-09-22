@@ -475,3 +475,22 @@ are cached per tool setup. Missing directory on an older Mod prompts an upgrade.
 The cache limit is 256k characters, distinct from the model's compact directory.
 
 Map list and map-reference fields now match and share their summary reader. Upward ownership/storage references default to identity/summary rather than implicit contents; explicit selection still permits contents. IThingHolder.parent is a native relation, not an invented ownership classifier. The compact field index covers every type reachable through current public roots; discovered metadata remains available for detailed semantics.
+
+## V2.1 identity and scope repair
+
+Spatial name/ID lookup now runs within one request over cooperative main-thread
+slices (2 ms yield target, 12 ms slice guard, 2-second total request lifetime).
+Individual native getters and membership capture cannot be preempted; these are
+not hard frame-time guarantees. Each reference captures up to 100000 candidate
+identities at its lookup start; held membership remains bounded and cycle-aware.
+No persistent index or background Verse access is added. Lookup start/end ticks
+and membership semantics are returned; reachability is checked on the resolved
+objects at the final tick. Objects created after membership capture are outside
+that lookup. The map is bound once at request start. Unknown remains unknown.
+
+The plugin accepts `map` for Pawn reads and supports `id` as the singular alias
+of `ids`; the map constraint is carried through lookup and final read. The look
+schema advertises per-kind aspect combinations. Failed definition/name resolution
+reports lookup source/scope/coverage separately: the requested instance read or
+count is **not_run**, never a complete zero count. A complete missing exact-ID
+public query is an empty result; an interrupted lookup remains partial.

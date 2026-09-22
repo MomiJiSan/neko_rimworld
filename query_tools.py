@@ -237,6 +237,13 @@ def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHa
         return copy.deepcopy(data)
 
     directory = {key: public[key] for key in ("roots", "rules", "common_fields", "field_index", "field_notes", "value_domains", "examples") if key in public}
+    spatial_tools = ()
+    capability = catalog.get("spatial_query")
+    if isinstance(capability, dict) and capability.get("version") == "spatial_query.v1" and isinstance(capability.get("parameters"), dict):
+        directory["spatial_query"] = copy.deepcopy(capability)
+        async def spatial(arguments):
+            return await query({"operation": "spatial_query", "arguments": copy.deepcopy(arguments)})
+        spatial_tools = (ToolSpec("spatial_query", capability.get("description", "Native reachability"), copy.deepcopy(capability["parameters"]), spatial),)
     context_blocks = (
         ("catalog", "Game query directory (" + catalog["schema_id"] + "):\n" + json.dumps(directory, ensure_ascii=False, separators=(",", ":"))),
         ("reminder_completion", "\nAnswer once the requested facts are known; read more only for an unresolved fact."),
@@ -250,7 +257,7 @@ def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHa
                 "type": "object", "properties": {"types": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8}},
                 "required": ["types"], "additionalProperties": False,
             }, describe),
-        ),
+        ) + spatial_tools,
         context="".join(text for _,text in context_blocks),
         # Capability-driven, but opt-in: the Mod must advertise a per-surface result
         # description AND the run must explicitly select the candidate arm. See

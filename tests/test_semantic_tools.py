@@ -75,6 +75,7 @@ def public_source(*, directory=True, spatial=False):
         source["spatial_query"] = {
             "version": "spatial_query.v1",
             "operation": "spatial_query",
+            "parameters": __import__("plugin.plugins.neko_rimworld.agent.semantic_surface", fromlist=["spatial_tool_schema"]).spatial_tool_schema()["parameters"],
         }
     return source
 
@@ -156,7 +157,7 @@ def test_spatial_tool_forwards_names_directly_and_renders_claim_shaped_result():
     adapter = semantic_interaction_factory(setup_for(spatial=True), Session(), _update)
     seen = []
 
-    async def native(request):
+    async def native(request, **kwargs):
         seen.append(request)
         return {
             "data": {
@@ -180,11 +181,8 @@ def test_spatial_tool_forwards_names_directly_and_renders_claim_shaped_result():
         )
     )
     assert seen == [{
-        "operation": "spatial_query",
-        "arguments": {
             "from": {"kind": "pawn", "name": "Alice"},
             "to": {"kind": "thing", "name": "steel"},
-        },
     }]
     assert result["answer"] == "reachable"
     assert result["checked"]["native_reachability"] is True
@@ -301,3 +299,28 @@ def report():
         "full_text": "早先的完整报告。",
         "observations": [],
     }
+
+
+def test_spatial_catalog_to_real_handler_dispatch_and_observation_retention():
+    import asyncio
+    from plugin.plugins.neko_rimworld.observation import Observation
+    from plugin.plugins.neko_rimworld.protocol import QUERY_RESULT, Payload, SessionDescriptor, make_envelope
+    calls = []
+    async def backend(request):
+        calls.append(request)
+        envelope = make_envelope(QUERY_RESULT, '1'*32, 1,
+            payload=Payload(status='ok', data={'answer':'unreachable','checked':{'native_reachability':True},'explanation':'Native check returned false.','meaning':'The blocking cause is not identified.'}, issues=[]),
+            session=SessionDescriptor('2'*32,'3'*32,42,1), request_id='4'*32)
+        return Observation.from_response(request['operation'], request['arguments'], envelope)
+    session = Session()
+    adapter = semantic_interaction_factory(make_game_tools(public_source(spatial=True), backend), session, _update)
+    tool = next(t for t in adapter.tools() if t.name == 'inspect_space')
+    args = {'from':{'kind':'pawn','name':'Alice'},'to':{'kind':'cell','map':'current','x':1,'z':2}}
+    result = asyncio.run(tool.handler(args))
+    assert calls == [{'operation':'spatial_query','arguments':args}]
+    assert result['answer'] == 'unreachable'
+    assert result['meaning'] == 'The blocking cause is not identified.'
+    assert len(session.observations) == 1
+    assert session.observations[0]['request']['operation'] == 'spatial_query'
+    adapter.finalizing = True
+    assert [t.name for t in adapter.tools()] == ['submit_response']

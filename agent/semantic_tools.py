@@ -122,7 +122,7 @@ class SemanticInteraction:
         self.surface.add_query_schema(self.original["query"].parameters)
         self.sample_identity: tuple[Any, Any] | None = None
         directory = setup.directory if isinstance(getattr(setup, "directory", None), dict) else {}
-        self.spatial_supported = isinstance(directory.get("spatial_query"), dict)
+        self.spatial_supported = (directory.get("spatial_query", {}).get("version") == "spatial_query.v1" and "spatial_query" in self.original)
 
     # -- runtime contract -------------------------------------------------
 
@@ -194,14 +194,14 @@ class SemanticInteraction:
 
     # -- native read ------------------------------------------------------
 
-    async def execute_native(self, request: dict[str, Any]) -> dict[str, Any]:
+    async def execute_native(self, request: dict[str, Any], *, tool_name: str = "query") -> dict[str, Any]:
         """Perform the only native read this adapter makes, and record it once.
 
         A loaded-world change is fatal rather than merged: facts from two loads
         are not the same colony state, so the run must restart instead of
         answering with a mixture.
         """
-        observation = await self.original["query"].handler(request)
+        observation = await self.original[tool_name].handler(request)
         value = observation.to_dict()
         response = value["response"]
         payload = response["payload"]
@@ -276,7 +276,7 @@ class SemanticInteraction:
         target = args["to"]
         self._validate_space_ref(actor, "from", {"pawn"})
         self._validate_space_ref(target, "to", {"thing", "cell"})
-        native = await self.execute_native({"operation": "spatial_query", "arguments": args})
+        native = await self.execute_native(args, tool_name="spatial_query")
         data = native.get("data")
         if not isinstance(data, dict):
             raise ToolExecutionError("spatial_invalid_result", "The game returned no spatial result.")
@@ -290,6 +290,14 @@ class SemanticInteraction:
             "explanation": data.get("explanation"),
             "sample": data.get("sample"),
             "candidates": data.get("candidates"),
+            "candidates_truncated": data.get("candidates_truncated", False),
+            "stage": data.get("stage"),
+            "request": data.get("request"),
+            "lookup_started_tick": data.get("lookup_started_tick"),
+            "lookup_finished_tick": data.get("lookup_finished_tick"),
+            "lookup_consistency": data.get("lookup_consistency"),
+            "policy": data.get("policy"),
+            "meaning": data.get("meaning"),
             "issues": native.get("issues", []),
         }
 
@@ -298,12 +306,17 @@ class SemanticInteraction:
         unknown = set(value).difference({"kind", "id", "name", "map", "x", "z"})
         if unknown:
             raise SurfaceError(path + " contains unsupported fields: " + ", ".join(sorted(unknown)))
+        for field in ("kind", "id", "name", "map"):
+            if field in value and (not isinstance(value[field], str) or not value[field].strip() or len(value[field]) > 256):
+                raise SurfaceError(path + "." + field + " must be nonempty text (at most 256 characters)")
         kind = value.get("kind")
         if kind not in kinds:
             raise SurfaceError(path + ".kind must be one of: " + ", ".join(sorted(kinds)))
         if kind == "cell":
-            if "id" in value or "name" in value or not isinstance(value.get("x"), int) or not isinstance(value.get("z"), int):
+            if "id" in value or "name" in value or type(value.get("x")) is not int or type(value.get("z")) is not int:
                 raise SurfaceError(path + " cell references require integer x/z and no id/name")
+            if any(not -(2**31) <= value[a] < 2**31 for a in ("x", "z")):
+                raise SurfaceError(path + " cell coordinates must be 32-bit integers")
             return
         if "x" in value or "z" in value or ("id" in value) == ("name" in value):
             raise SurfaceError(path + " requires exactly one id or name and no coordinates")
