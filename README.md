@@ -16,12 +16,14 @@ configured finalization reserve with only submit_response available. This reserv
 time but cannot guarantee the provider finishes a valid answer. Stream packaging
 and effective answer/tool bytes are bounded separately (8 MiB and 2 MiB).
 
-With the current Mod, the specialist Agent uses `query`, `describe_query` and
-`submit_response`. The Mod owns the field vocabulary, selection grammar and
-read semantics; the plugin forwards that generated directory, including field
-notes and native enum value domains. Invalid enum names are rejected by the Mod
-before reads; the plugin does not maintain a second value table. See [DATA_PATH.md](DATA_PATH.md) for the current contract. No additional
-business-specific tool or focus preset is added.
+With a compatible current Mod, the specialist Agent defaults to `look`, `count`
+and `submit_response`, plus `wiki` when a local Def directory is ready.
+`query` / `describe_query` remain the native fallback when the semantic adapter
+is disabled or unavailable. The Mod owns the underlying field vocabulary,
+selection grammar and read semantics, including field notes and native enum
+value domains. Invalid enum names are rejected by the Mod before reads; the
+plugin does not maintain a second value table. See [DATA_PATH.md](DATA_PATH.md)
+for the native contract and the semantic-surface section below for Agent usage.
 
 Submission errors now follow the connected Mod's capability. In text mode,
 answer parts contain only `text`; `language` belongs at the submission's top
@@ -81,6 +83,11 @@ distinguishes actual null from the string `"null"` with `type="System.String"`.
 Older facts without `type` remain supported without inventing a type.
 `status` describes object resolution/source integrity; `response_truncated`,
 `read_complete`, `not_read` and `directory_truncated` describe the returned view.
+Explicit leaf fields are budgeted before optional siblings. `read_complete` refers
+to the requested paths; `context_not_read` / `context_not_read_count` separately
+record omitted sibling context. A successful leaf read does not expand a large
+parent directory just because optional context was omitted. Smaller requested
+groups are budgeted before larger groups, which may still require a follow-up.
 Older snapshots without diagnostics, warnings or provenance metadata
 remain supported. Entry diagnostics (`path`, `kind`, `reason`) are validated and
 returned within bounds, prioritizing `incomplete`; omitted diagnostic detail is
