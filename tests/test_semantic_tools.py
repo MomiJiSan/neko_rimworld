@@ -35,7 +35,7 @@ def catalog():
     return json.loads((FIXTURES / "query_catalog.json").read_text(encoding="utf-8-sig"))
 
 
-def public_source(*, directory=True):
+def public_source(*, directory=True, spatial=False):
     """A public_query catalog, with or without the directory the Surface needs."""
     source = catalog()
     parameters = {
@@ -71,6 +71,11 @@ def public_source(*, directory=True):
             field_notes={},
         )
     source["public_query"] = public
+    if spatial:
+        source["spatial_query"] = {
+            "version": "spatial_query.v1",
+            "operation": "spatial_query",
+        }
     return source
 
 
@@ -132,6 +137,58 @@ def test_semantic_surface_replaces_the_query_vocabulary():
 
     adapter.finalizing = True
     assert [tool.name for tool in adapter.tools()] == ["submit_response"]
+
+
+def test_spatial_tool_is_capability_gated_and_does_not_add_a_navigation_step():
+    without = semantic_interaction_factory(setup_for(), Session(), _update)
+    assert [tool.name for tool in without.tools()] == ["look", "count", "submit_response"]
+
+    with_spatial = semantic_interaction_factory(setup_for(spatial=True), Session(), _update)
+    assert [tool.name for tool in with_spatial.tools()] == ["look", "count", "inspect_space", "submit_response"]
+    inspect = next(tool for tool in with_spatial.tools() if tool.name == "inspect_space")
+    assert inspect.parameters["required"] == ["from", "to"]
+    assert "look first" in inspect.description
+    assert inspect.parameters["properties"]["from"]["properties"]["kind"]["enum"] == ["pawn"]
+    assert inspect.parameters["properties"]["to"]["properties"]["kind"]["enum"] == ["thing", "cell"]
+
+
+def test_spatial_tool_forwards_names_directly_and_renders_claim_shaped_result():
+    adapter = semantic_interaction_factory(setup_for(spatial=True), Session(), _update)
+    seen = []
+
+    async def native(request):
+        seen.append(request)
+        return {
+            "data": {
+                "answer": "reachable",
+                "from": {"kind": "pawn", "id": "Pawn_A"},
+                "target": {"kind": "thing", "id": "Thing_Steel"},
+                "checked": {"same_map": True, "native_reachability": True},
+                "sample": {"game_tick": 42},
+                "explanation": "Native reachability found a valid current path.",
+            },
+            "issues": [],
+        }
+
+    adapter.execute_native = native
+    result = __import__("asyncio").run(
+        adapter.inspect_space(
+            {
+                "from": {"kind": "pawn", "name": "Alice"},
+                "to": {"kind": "thing", "name": "steel"},
+            }
+        )
+    )
+    assert seen == [{
+        "operation": "spatial_query",
+        "arguments": {
+            "from": {"kind": "pawn", "name": "Alice"},
+            "to": {"kind": "thing", "name": "steel"},
+        },
+    }]
+    assert result["answer"] == "reachable"
+    assert result["checked"]["native_reachability"] is True
+    assert result["sample"]["game_tick"] == 42
 
 
 def test_a_mod_without_the_directory_keeps_its_own_interface():

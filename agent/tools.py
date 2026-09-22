@@ -127,8 +127,10 @@ class ToolRegistry:
             }
             if observation is not None:
                 payload = observation["response"]["payload"]
-                if observation.get("request", {}).get("operation") == "query":
-                    # Preserve full provenance in the audit observation; the model needs facts and issues.
+                if observation.get("request", {}).get("operation") in {"query", "spatial_query"}:
+                    # Preserve full provenance in the audit observation; the model needs only the
+                    # operation's data and issues. Keeping the full envelope here made specialized
+                    # semantic tools accidentally expose transport/session noise to the model.
                     value["data"] = {
                         "observation_id": observation["observation_id"],
                         "status": payload["status"],

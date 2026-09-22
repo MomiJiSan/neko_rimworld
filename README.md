@@ -25,6 +25,13 @@ value domains. Invalid enum names are rejected by the Mod before reads; the
 plugin does not maintain a second value table. See [DATA_PATH.md](DATA_PATH.md)
 for the native contract and the semantic-surface section below for Agent usage.
 
+When the connected Mod advertises `spatial_query.v1`, the semantic surface also
+provides `inspect_space(from, to)`. It is a single current-tick native reachability
+read from one Pawn to one Thing or map cell; names and IDs are accepted directly,
+so a preceding `look` is not required just to resolve objects. Ambiguous names
+return candidates. The result does not claim WorkGiver eligibility, reservation,
+route distance, Room membership or future success.
+
 Submission errors now follow the connected Mod's capability. In text mode,
 answer parts contain only `text`; `language` belongs at the submission's top
 level. Repair feedback reports the text budget and actual input problem,

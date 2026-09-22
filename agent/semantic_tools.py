@@ -41,6 +41,7 @@ from .semantic_surface import (
     render,
     render_blocked,
     tool_schemas,
+    spatial_tool_schema,
     validate_aspects,
     validate_by,
     validate_detail,
@@ -120,6 +121,8 @@ class SemanticInteraction:
         self.surface = Surface(setup.directory)
         self.surface.add_query_schema(self.original["query"].parameters)
         self.sample_identity: tuple[Any, Any] | None = None
+        directory = setup.directory if isinstance(getattr(setup, "directory", None), dict) else {}
+        self.spatial_supported = isinstance(directory.get("spatial_query"), dict)
 
     # -- runtime contract -------------------------------------------------
 
@@ -150,7 +153,11 @@ class SemanticInteraction:
             return (submit,)
         handlers = {"look": self.look, "count": self.count}
         specs = []
-        for tool in tool_schemas():
+        semantic_specs = tool_schemas()
+        if self.spatial_supported:
+            semantic_specs.append(spatial_tool_schema())
+            handlers["inspect_space"] = self.inspect_space
+        for tool in semantic_specs:
             handler = handlers[tool["name"]]
 
             async def guarded(args, handler=handler):
@@ -176,6 +183,7 @@ class SemanticInteraction:
         return dict(
             native_reads=len(self.session.observations),
             finalizing=self.finalizing,
+            spatial_supported=self.spatial_supported,
             # Recorded so the audit shows that a connection advertising references
             # had them suppressed here rather than silently ignored.
             references_suppressed=bool(getattr(self.setup, "references_supported", False)),
@@ -260,6 +268,45 @@ class SemanticInteraction:
         plan = plan_count(self.surface, obj, metric, by, detail)
         native = await self.execute_native(plan.request)
         return render(plan, native, resolution)
+
+    async def inspect_space(self, args: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(args, dict) or not isinstance(args.get("from"), dict) or not isinstance(args.get("to"), dict):
+            raise SurfaceError("inspect_space requires from and to references")
+        actor = args["from"]
+        target = args["to"]
+        self._validate_space_ref(actor, "from", {"pawn"})
+        self._validate_space_ref(target, "to", {"thing", "cell"})
+        native = await self.execute_native({"operation": "spatial_query", "arguments": args})
+        data = native.get("data")
+        if not isinstance(data, dict):
+            raise ToolExecutionError("spatial_invalid_result", "The game returned no spatial result.")
+        # Keep the result claim-shaped. Do not make the model reconstruct reachability
+        # from transport/session metadata or unrelated Room/Region fields.
+        return {
+            "answer": data.get("answer", "unknown"),
+            "from": data.get("from"),
+            "to": data.get("target"),
+            "checked": data.get("checked", {}),
+            "explanation": data.get("explanation"),
+            "sample": data.get("sample"),
+            "candidates": data.get("candidates"),
+            "issues": native.get("issues", []),
+        }
+
+    @staticmethod
+    def _validate_space_ref(value: dict[str, Any], path: str, kinds: set[str]) -> None:
+        unknown = set(value).difference({"kind", "id", "name", "map", "x", "z"})
+        if unknown:
+            raise SurfaceError(path + " contains unsupported fields: " + ", ".join(sorted(unknown)))
+        kind = value.get("kind")
+        if kind not in kinds:
+            raise SurfaceError(path + ".kind must be one of: " + ", ".join(sorted(kinds)))
+        if kind == "cell":
+            if "id" in value or "name" in value or not isinstance(value.get("x"), int) or not isinstance(value.get("z"), int):
+                raise SurfaceError(path + " cell references require integer x/z and no id/name")
+            return
+        if "x" in value or "z" in value or ("id" in value) == ("name" in value):
+            raise SurfaceError(path + " requires exactly one id or name and no coordinates")
 
 
 def semantic_interaction_factory(setup: Any, session: Any, update: Any):

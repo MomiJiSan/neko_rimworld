@@ -48,6 +48,13 @@ Append-only observations and audit remain the authoritative record.
 
 The current Mod advertises `public_query.v2` (the initial v1.4 revision used v1). The plugin exposes `query` and `describe_query`; it does not simultaneously advertise legacy templates, GraphQL or the separate resource tool. Older connected Mods retain their existing adapter. Legacy transports below are retained for compatibility/development, not a second recommended Agent workflow.
 
+When advertised by the connected Mod, `spatial_query.v1` is exposed by the
+semantic plugin as `inspect_space(from,to)`. This is a single current-tick,
+read-only native reachability check from one Pawn to one Thing or map cell.
+References accept exact names or IDs directly; ambiguity returns candidates and
+never silently selects one. The operation does not infer WorkGiver eligibility,
+reservation, route distance, Room/Region membership or future job success.
+
 ## Single executable field vocabulary
 
 `PublicFields` derives canonical snake_case names, native mappings, types, arguments and operations from the executable Mod schema. `def` becomes `definition`; `def_name`, instance `id`, and display `label` remain distinct. Python forwards requests without renaming game fields or maintaining classification tables. Public conditions translate to the same typed condition evaluator used by existing native reads. Internal `fields/types/arguments/match` aliases are rejected.

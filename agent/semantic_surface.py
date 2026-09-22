@@ -231,8 +231,37 @@ def _object_schema():
     }
 
 
+def _space_ref_schema(kind_enum):
+    kinds = tuple(kind_enum)
+    selector_forms = [
+        {'required': ['id'], 'not': {'required': ['name']}},
+        {'required': ['name'], 'not': {'required': ['id']}},
+    ]
+    if 'cell' in kinds:
+        selector_forms.append({
+            'required': ['x', 'z'],
+            'properties': {'kind': {'const': 'cell'}},
+            'not': {'anyOf': [{'required': ['id']}, {'required': ['name']}]},
+        })
+    return {
+        'type': 'object',
+        'description': 'A Pawn/Thing name or ID, or a map cell. The tool resolves names and returns candidates on ambiguity.',
+        'properties': {
+            'kind': {'type': 'string', 'enum': list(kind_enum)},
+            'id': {'type': 'string', 'description': 'Exact native object ID when already known.'},
+            'name': {'type': 'string', 'description': 'Exact display name; ambiguity is returned, never guessed.'},
+            'map': {'type': 'string', 'default': 'current'},
+            'x': {'type': 'integer'},
+            'z': {'type': 'integer'},
+        },
+        'required': ['kind'],
+        'oneOf': selector_forms,
+        'additionalProperties': False,
+    }
+
+
 def tool_schemas():
-    """模型可见工具集：只有 look 与 count（submit_response 由 handoff 提供）。"""
+    """模型可见读取工具；空间能力由连接 capability 决定。"""
     return [
         dict(name='look',
              description=('Read one object or a population through closed aspects: '
@@ -260,6 +289,25 @@ def tool_schemas():
                                         'detail': {'type': 'integer', 'minimum': 0, 'maximum': 100, 'default': 0}},
                          'required': ['object', 'metric'], 'additionalProperties': False}),
     ]
+
+
+def spatial_tool_schema():
+    return dict(
+        name='inspect_space',
+        description=('Check whether one Pawn can currently reach one Thing or map cell. '
+                     'Use this directly with names or IDs; do not call look first just to resolve them. '
+                     'This is current-tick native reachability only: it does not assess WorkGivers, hauling, '
+                     'reservations, Rooms, Regions, routes or future success. Ambiguous names return candidates.'),
+        parameters={
+            'type': 'object',
+            'properties': {
+                'from': _space_ref_schema(('pawn',)),
+                'to': _space_ref_schema(('thing', 'cell')),
+            },
+            'required': ['from', 'to'],
+            'additionalProperties': False,
+        },
+    )
 
 
 # --- 校验 ---------------------------------------------------------------------
