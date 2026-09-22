@@ -291,14 +291,11 @@ def tool_schemas():
     ]
 
 
-def spatial_tool_schema():
-    return dict(
-        name='inspect_space',
-        description=('Check whether one Pawn can currently reach one Thing or map cell. '
-                     'Use this directly with names or IDs; do not call look first just to resolve them. '
-                     'This is current-tick native reachability only: it does not assess WorkGivers, hauling, '
-                     'reservations, Rooms, Regions, routes or future success. Ambiguous names return candidates.'),
-        parameters={
+def spatial_tool_schema(directory=None):
+    capability = directory.get('spatial_query') if isinstance(directory, dict) else None
+    parameters = copy.deepcopy(capability.get('parameters')) if isinstance(capability, dict) else None
+    if not isinstance(parameters, dict):
+        parameters = {
             'type': 'object',
             'properties': {
                 'from': _space_ref_schema(('pawn',)),
@@ -306,7 +303,14 @@ def spatial_tool_schema():
             },
             'required': ['from', 'to'],
             'additionalProperties': False,
-        },
+        }
+    return dict(
+        name='inspect_space',
+        description=('Check whether one Pawn can currently reach one Thing or map cell. '
+                     'Use this directly with names or IDs; do not call look first just to resolve them. '
+                     'This is current-tick native reachability only: it does not assess WorkGivers, hauling, '
+                     'reservations, Rooms, Regions, routes or future success. Ambiguous names return candidates.'),
+        parameters=parameters,
     )
 
 

@@ -155,7 +155,7 @@ class SemanticInteraction:
         specs = []
         semantic_specs = tool_schemas()
         if self.spatial_supported:
-            semantic_specs.append(spatial_tool_schema())
+            semantic_specs.append(spatial_tool_schema(self.setup.directory))
             handlers["inspect_space"] = self.inspect_space
         for tool in semantic_specs:
             handler = handlers[tool["name"]]
