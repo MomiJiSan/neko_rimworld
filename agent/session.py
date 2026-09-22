@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -17,6 +19,8 @@ class AgentRunSession:
     model_calls: int = 0
     tool_calls: int = 0
     observations: list[dict[str, Any]] = field(default_factory=list)
+    knowledge: list[dict[str, Any]] = field(default_factory=list)
+    knowledge_omitted: int = 0
     last_assistant_content: str = ""
     submission: SubmissionDraft = field(default_factory=SubmissionDraft)
     interaction: Any = None  # Optional per-run adapter; never shared by the catalog cache.
@@ -55,6 +59,18 @@ class AgentRunSession:
         self.messages.append(turn.as_message())
         if turn.content:
             self.last_assistant_content = turn.content
+
+    def retain_knowledge(self, result: Any) -> None:
+        """Retain the bounded wiki result separately; never license live claims."""
+        data = result.value.get("data")
+        if result.name != "wiki" or not result.ok or not isinstance(data, dict):
+            return
+        if data.get("knowledge_kind") != "definition":
+            return
+        if len(self.knowledge) >= 16:
+            self.knowledge_omitted += 1
+            return
+        self.knowledge.append(copy.deepcopy({"query": result.arguments.get("query"), "result": data}))
 
     def append_tool_message(self, message: dict[str, Any]) -> None:
         self.messages.append(message)

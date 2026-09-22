@@ -97,9 +97,11 @@ def make_plugin(config: object) -> tuple[NekoRimworldPlugin, list[dict[str, Any]
     plugin._reports = ReportStore()
     plugin._agent_audit = AgentAuditRegistry()
     plugin._catalog_tools = CatalogTools(lambda: plugin._bridge, plugin._agent_query_tool)
+    from types import SimpleNamespace
+    plugin._knowledge = SimpleNamespace(request_refresh=lambda: None, close=lambda: None, open_view=lambda: None)
     plugin._agent_runtime = AgentRuntime(
         observation_tools=[],
-        tools_provider=plugin._catalog_tools.load,
+        tools_provider=plugin._load_agent_tools,
         audit_registry=plugin._agent_audit,
         logger=logger,
     )

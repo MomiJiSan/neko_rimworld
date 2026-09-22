@@ -47,6 +47,10 @@ from .semantic_surface import (
     validate_metric,
 )
 from .tools import ToolExecutionError, ToolSpec
+from .wiki_tools import WIKI_GUIDANCE
+
+# Only this explicitly approved non-observation tool survives the adapter.
+PASSTHROUGH_TOOLS = frozenset({"wiki"})
 
 ENVIRONMENT_SWITCH = "NEKO_SEMANTIC_SURFACE"
 
@@ -127,7 +131,10 @@ class SemanticInteraction:
         the model may use instead.
         """
         build = build_finalization_prompt if self.finalizing else build_system_prompt
-        return build(preferred_cycles, references_supported=self.references_supported) + "\n\n" + TOOL_GUIDE
+        prompt = build(preferred_cycles, references_supported=self.references_supported) + "\n\n" + TOOL_GUIDE
+        if not self.finalizing and "wiki" in self.original:
+            prompt += "\n\n" + WIKI_GUIDANCE
+        return prompt
 
     def submission(self) -> Any:
         return make_submission_tool(
@@ -153,7 +160,8 @@ class SemanticInteraction:
                     raise ToolExecutionError("semantic_request_invalid", str(error)) from error
 
             specs.append(ToolSpec(tool["name"], tool["description"], tool["parameters"], guarded))
-        return (*specs, submit)
+        passthrough = tuple(self.original[name] for name in sorted(PASSTHROUGH_TOOLS) if name in self.original)
+        return (*specs, *passthrough, submit)
 
     def request_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return messages

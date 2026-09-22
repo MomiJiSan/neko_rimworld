@@ -29,6 +29,9 @@ from .agent import (
     semantic_interaction_factory,
 )
 from .agent.handoff import count_handoff_tokens
+from .agent.tools import ToolSetup
+from .agent.wiki_tools import compose_wiki_tools, knowledge_directory
+from .knowledge import KnowledgeLibrary
 from .bridge import (
     BridgeBusyError,
     BridgeError,
@@ -134,9 +137,11 @@ class NekoRimworldPlugin(NekoPluginBase):
         self._agent_audit = AgentAuditRegistry()
         self._reports = ReportStore(self.data_path("reports"))
         self._catalog_tools = CatalogTools(lambda: self._bridge, self._agent_query_tool)
+        self._knowledge_directory = knowledge_directory()
+        self._knowledge = KnowledgeLibrary(self._knowledge_directory, self.data_path("knowledge-index"), allow_legacy_import=False)
         self._agent_runtime = AgentRuntime(
             observation_tools=[],
-            tools_provider=self._catalog_tools.load,
+            tools_provider=self._load_agent_tools,
             audit_registry=self._agent_audit,
             logger=self.get_logger("agent"),
             report_sink=self._save_report,
@@ -150,6 +155,9 @@ class NekoRimworldPlugin(NekoPluginBase):
 
     @lifecycle(id="startup")
     async def startup(self, **_: object):
+        if getattr(self._knowledge, "closed", False):
+            self._knowledge = KnowledgeLibrary(self._knowledge_directory, self.data_path("knowledge-index"), allow_legacy_import=False)
+        self._knowledge.request_refresh()
         async with self._reconfigure_lock:
             if not await self._stop_existing_bridge():
                 self._state_store.transition(
@@ -192,6 +200,7 @@ class NekoRimworldPlugin(NekoPluginBase):
     @lifecycle(id="shutdown")
     async def shutdown(self, **_: object):
         await self._agent_runtime.cancel_all()
+        self._knowledge.close()
         async with self._reconfigure_lock:
             stopped = await self._stop_existing_bridge()
             self._state_store.transition(
@@ -670,7 +679,7 @@ class NekoRimworldPlugin(NekoPluginBase):
         name="Consult RimWorld specialist",
         description=(
             "Ask the plugin-owned, memoryless RimWorld specialist agent to answer a question. "
-            "Use only when the user needs RimWorld game-state analysis. Optionally attach an exact report_id from rimworld_report to ask about a saved historical report."
+            "Use for RimWorld game-state questions or locally indexed game/Mod definition knowledge. Optionally attach an exact report_id from rimworld_report to ask about a saved historical report."
         ),
         input_schema={
             "type": "object",
@@ -726,6 +735,13 @@ class NekoRimworldPlugin(NekoPluginBase):
         if result.get("report", {}).get("saved"):
             result["report"]["export"] = await self._export_report(result["report"]["report_id"], kwargs.get("_ctx"))
         return Ok(_agent_handoff(result))
+
+    async def _load_agent_tools(self) -> ToolSetup:
+        setup = await self._catalog_tools.load()
+        # Import runs outside this consultation. A ready database version is
+        # pinned immediately; a first import never consumes the model deadline.
+        self._knowledge.request_refresh()
+        return compose_wiki_tools(setup, self._knowledge)
 
     async def _save_report(self, record: Mapping[str, Any]) -> Mapping[str, Any]:
         return await asyncio.to_thread(self._reports.save, record)

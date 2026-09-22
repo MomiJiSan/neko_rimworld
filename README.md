@@ -2,8 +2,9 @@
 
 The current checkout retains the v1.6 Agent runtime and supports the v1.6.1
 query revision supplied by the Mod.
-Version metadata remains 1.0.0. This source change is not a stable release or
-proof that all natural-language answers are correct.
+The local Def Wiki is the v2.0 feature milestone described below; package
+metadata remains 1.0.0 under the repository's existing release convention.
+This milestone is not a claim that all natural-language answers are correct.
 
 The v1.6 input candidates were implemented and tested through the actual runtime,
 then withdrawn from defaults because normal-budget confirmation did not establish
@@ -28,6 +29,77 @@ level. Repair feedback reports the text budget and actual input problem,
 without recommending unavailable observation-reference parts. The short
 handoff remains capped at 180 tokens; `detail` retains requested factual
 coverage and the existing reconfirmation protection.
+
+### Local Def knowledge (optional offline tool)
+
+When the connected game Mod has published a valid `ready.json` directory, the
+specialist agent advertises one additional tool: `wiki(query)`. It reads the
+local `neko.defs.v1` payload written automatically by NekoRimWorld; it does not
+run an external command, use HTTP, or require the game bridge to be connected.
+The older `current.json` file remains a compatibility input for explicit legacy
+or offline import, not the production fast-path publication contract. The
+location is `NEKO_RIMWORLD_KNOWLEDGE_DIR` when set, otherwise the platform
+LocalApplicationData directory under `neko-rimworld/knowledge`.
+
+The game publisher now creates `ready.json` (`neko.defs.index.v1`): a compact
+names/descriptions directory with byte offsets and per-entry SHA-256, pointing to
+an immutable `snapshot-<id>.json` containing the complete definitions. The plugin
+loads and validates this small directory at startup; it does not reparse/copy the
+whole payload or build SQLite before use. Each lookup seeks to the selected record,
+checks its SHA-256 and validates that record before returning it. The payload's
+whole-file hash is publisher provenance; full-file verification is an explicit
+offline audit, not secretly included in the sub-second startup claim.
+
+A single background worker checks for a replaced directory every five seconds.
+Consultations pin an immutable file version; failed replacements keep the previous
+version with unverified applicability. Production never silently falls back to a
+slow full-file import when `ready.json` is missing. The old `current.json` importer
+(ijson + SQLite in `knowledge-index`) remains available for explicit legacy/offline
+use, outside the one-second fast-path contract. No SQLite library is shipped into
+the game. Old generations remain available for active runs; no lease/refcount system
+is used. `compose_wiki_tools` is shared by product and bench.
+
+The tool accepts one query string of at most 4096 characters: a name, collected
+label, full `type/defName` key, or description keywords. This is keyword lookup,
+not natural-language question answering. It also searches labels and descriptions
+already collected in facts, including Trait `degreeDatas[].label` and Thought
+`stages[].label` when the root label is empty. Discovery returns compact candidate
+cards. A full key fixes the object and never falls back to another definition.
+Append literal fields/groups, e.g. `Verse.RecipeDef/Make_Wort products[0].count
+recipeUsers`, to read them with indexed siblings. Small entries fit in full;
+large entries return whole groups plus `not_read` and a structural `directory`.
+Facts, types and paths are never clipped. Fields that do not exist appear in
+`missing_fields`; explicit null remains a fact. Referenced Defs may receive their
+original label through a bounded one-level read. Relations remain directed, with
+no inferred exclusivity. No field-intent alias table is used. Full source fields
+remain in the pinned snapshot regardless of response selection.
+
+Snapshots remain `neko.defs.v1`, with string `name`/`value` facts and a 512 MiB
+input limit. Optional fact `type` is validated as a string and retained within
+response bounds: CLR names distinguish scalar types, and `type="null"`
+distinguishes actual null from the string `"null"` with `type="System.String"`.
+Older facts without `type` remain supported without inventing a type.
+`status` describes object resolution/source integrity; `response_truncated`,
+`read_complete`, `not_read` and `directory_truncated` describe the returned view.
+Older snapshots without diagnostics, warnings or provenance metadata
+remain supported. Entry diagnostics (`path`, `kind`, `reason`) are validated and
+returned within bounds, prioritizing `incomplete`; omitted diagnostic detail is
+marked. Incomplete diagnostics and actual snapshot issues yield partial results.
+Provenance warnings and `provenance_complete=false` alone do not lower definition
+completeness. Responses stay within 8 KiB. Keys are returned exactly, never clipped
+into a different query identity; a key that exceeds 4096 characters or cannot fit
+the response budget is returned as null with an explicit `key_unavailable` reason.
+
+The tool returns an ordinary tool mapping, not an Observation: the snapshot describes
+loaded definitions and relations, not the current save, inventory, ownership,
+research completion, or final computed effect. Its snapshot hash, game/language
+metadata and unverified applicability are retained separately in reports. A
+missing or incomplete snapshot is never advertised as a successful empty wiki.
+
+Use `look`/`count` for current-save facts. The model is not forced to call
+`wiki`; purely state questions should not pay for definition lookup. The tool
+is removed during finalization so the reserved submission phase cannot start a
+new knowledge read.
 
 ### Reference delivery (opt-in, not promoted)
 

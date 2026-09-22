@@ -72,7 +72,7 @@ input_schema = { "type" = "object", "properties" = {  } }
 [[entries]]
 id = "rimworld_consult"
 name = "Consult RimWorld specialist"
-description = "Ask the plugin-owned, memoryless RimWorld specialist agent to answer a question. Use only when the user needs RimWorld game-state analysis. Optionally attach an exact report_id from rimworld_report to ask about a saved historical report."
+description = "Ask the plugin-owned, memoryless RimWorld specialist agent to answer a question. Use for RimWorld game-state questions or locally indexed game/Mod definition knowledge. Optionally attach an exact report_id from rimworld_report to ask about a saved historical report."
 timeout = 100.0
 llm_result_fields = ["summary"]
 metadata = { "llm_result_fields" = ["summary"] }

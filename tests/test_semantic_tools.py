@@ -202,6 +202,39 @@ class _Model:
         return self._turns.pop(0)
 
 
+@pytest.mark.asyncio
+async def test_wiki_is_the_only_extra_passthrough_and_never_an_observation(tmp_path):
+    from dataclasses import replace
+
+    from plugin.plugins.neko_rimworld.agent.tools import ToolRegistry, ToolSpec
+    from plugin.plugins.neko_rimworld.agent.wiki_tools import WikiStore, make_wiki_tool
+
+    from .test_wiki_tools import write_snapshot
+
+    write_snapshot(tmp_path)
+    wiki = make_wiki_tool(WikiStore(tmp_path))
+    forbidden = ToolSpec("unapproved", "not exposed", {}, _noop_query)
+    setup = setup_for()
+    setup = replace(setup, tools=(*setup.tools, wiki, forbidden))
+    session = Session()
+    adapter = semantic_interaction_factory(setup, session, _update)
+    assert [tool.name for tool in adapter.tools()] == ["look", "count", "wiki", "submit_response"]
+    assert "definition knowledge" in adapter.prompt(4)
+    registry = ToolRegistry()
+    for tool in adapter.tools():
+        registry.register(tool)
+    result = await registry.execute(registry.prepare(ToolCall("wiki1", "wiki", '{"query":"Steel"}')))
+    assert result.observation is None
+    assert session.observations == []
+    adapter.finalizing = True
+    assert [tool.name for tool in adapter.tools()] == ["submit_response"]
+
+
+def test_missing_wiki_does_not_advertise_knowledge():
+    adapter = semantic_interaction_factory(setup_for(), Session(), _update)
+    assert "wiki(query)" not in adapter.prompt(4)
+
+
 def report():
     return {
         "report_id": "report-1",

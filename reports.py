@@ -192,9 +192,14 @@ class ReportStore:
 
     @staticmethod
     def reference(record: Mapping[str, Any]) -> dict[str, Any]:
+        knowledge = record.get("knowledge", [])
+        if not isinstance(knowledge, list):
+            knowledge = []
         return {
             **ReportStore.metadata(record),
             "full_text": record["full_text"],
+            "knowledge": copy.deepcopy(knowledge[:16]),
+            "knowledge_omitted": int(record.get("knowledge_omitted", 0) or 0),
             "evidence_index": [
                 {"index": i, "received_at": obs.get("received_at"), "request": obs.get("request")}
                 for i, obs in enumerate(record.get("observations", []))

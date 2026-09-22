@@ -278,6 +278,9 @@ class AgentRuntime:
         reference: Mapping[str, Any] | None,
     ) -> None:
         result["provenance"] = session.submission.provenance
+        if session.knowledge or session.knowledge_omitted:
+            result["knowledge"] = session.knowledge
+            result["knowledge_omitted"] = session.knowledge_omitted
         if self._report_sink is None or not session.submission.full_text:
             return
         record = {
@@ -291,6 +294,8 @@ class AgentRuntime:
             "provenance": session.submission.provenance,
             "submission": session.submission.snapshot(),
             "observations": session.observations,
+            "knowledge": session.knowledge,
+            "knowledge_omitted": session.knowledge_omitted,
             "reference_report_id": reference.get("report_id") if reference else None,
         }
         try:
@@ -643,6 +648,7 @@ class AgentRuntime:
                             finalizing = reserve > 0
                         if result.observation is not None:
                             session.observations.append(result.observation)
+                        session.retain_knowledge(result)
                         ledger.record(
                             "tool_completed" if result.ok else "tool_failed",
                             {
