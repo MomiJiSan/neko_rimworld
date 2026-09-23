@@ -58,6 +58,27 @@ PASSTHROUGH_TOOLS = frozenset({"wiki"})
 ENVIRONMENT_SWITCH = "NEKO_SEMANTIC_SURFACE"
 
 
+def _with_field_semantics(result):
+    """Annotate observed measures in place within the projection, never raw evidence."""
+    result = copy.deepcopy(result)
+    for item in result.get("facts", []):
+        facts = item.get("facts", {})
+        summary = facts.get("health", {}).get("summary")
+        if isinstance(summary, dict) and summary.get("state") != "unavailable":
+            meanings = {
+                "health_percent": {"unit": "fraction", "meaning": "Overall game health summary, not blood volume or proof of no injuries."},
+                "bleed_rate": {"unit": "blood_loss_fraction_per_game_day", "ticks_per_game_day": 60000,
+                               "meaning": "Multiply by 100 for percentage points of blood loss per game day; not per second or an ETA."},
+                "pain": {"unit": "fraction", "meaning": "Game pain total, separate from injury severity and blood loss."},
+            }
+            summary["field_semantics"] = {key: value for key, value in meanings.items() if key in summary}
+        traits = facts.get("profile", {}).get("traits")
+        if isinstance(traits, dict) and traits.get("state") != "unavailable":
+            traits["field_semantics"] = {"degree": "Trait variant code, not a numeric speed or stat bonus.",
+                                         "description": "Game-generated trait tooltip, including effects when available. Respect suppressed; a trait effect is not the pawn's final stat value."}
+    return result
+
+
 def semantic_surface_requested() -> bool:
     """Whether this deployment wants the semantic surface.
 
@@ -155,7 +176,7 @@ class SemanticInteraction:
             return (submit,)
         handlers = {"look": self.look, "count": self.count}
         specs = []
-        semantic_specs = tool_schemas()
+        semantic_specs = tool_schemas(self.setup.directory)
         if self.spatial_supported:
             semantic_specs.append(spatial_tool_schema(self.setup.directory))
             handlers["inspect_space"] = self.inspect_space
@@ -255,7 +276,7 @@ class SemanticInteraction:
             return render_blocked("look", original, resolution, lookup_native)
         plan = plan_look(self.surface, obj, aspects, detail)
         native = await self.execute_native(plan.request)
-        return render(plan, native, resolution)
+        return _with_field_semantics(render(plan, native, resolution))
 
     async def count(self, args: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(args, dict) or "object" not in args or "metric" not in args:
@@ -291,11 +312,17 @@ class SemanticInteraction:
         actor = args["from"]
         target = args["to"]
         self._validate_space_ref(actor, "from", {"pawn"})
-        self._validate_space_ref(target, "to", {"thing", "cell"})
-        native = await self.execute_native(args, tool_name="spatial_query")
+        self._validate_space_ref(target, "to", {"thing", "cell", "pawn"})
+        request = copy.deepcopy(args)
+        if target["kind"] == "pawn":
+            request["to"]["kind"] = "thing"
+        native = await self.execute_native(request, tool_name="spatial_query")
         data = native.get("data")
         if not isinstance(data, dict):
             raise ToolExecutionError("spatial_invalid_result", "The game returned no spatial result.")
+        resolved_target = data.get("target")
+        if target["kind"] == "pawn" and isinstance(resolved_target, dict) and resolved_target.get("kind") != "pawn":
+            raise ToolExecutionError("spatial_target_kind_mismatch", "The resolved target is not a Pawn; use a Pawn ID or a more specific name.")
         # Keep the result claim-shaped. Do not make the model reconstruct reachability
         # from transport/session metadata or unrelated Room/Region fields.
         rendered = {
@@ -326,6 +353,7 @@ class SemanticInteraction:
             if isinstance(route.get("path_length"), dict):
                 route["path_length"]["meaning"] = "Sum of segment lengths along this returned path; not straight-line distance between its endpoints."
             route["optimality"] = {'status':'not_evaluated', 'meaning':'Neither shortest nor non-shortest has been established. No shortest-path proof was performed.'}
+            route["endpoint_meaning"] = "end is the path stopping cell, not the target's position. Touch can stop beside the target. Use to.position for the actual target location when available; do not infer it when absent."
             rendered["route"] = route
         return rendered
 
@@ -345,7 +373,7 @@ class SemanticInteraction:
             raise SurfaceError("Ordering needs routes; omit detail or use route")
         self._validate_space_ref(args["from"], "from", {"pawn"})
         for i, target in enumerate(targets):
-            self._validate_space_ref(target, f"to[{i}]", {"thing", "cell"})
+            self._validate_space_ref(target, f"to[{i}]", {"thing", "cell", "pawn"})
         rows = []
         for i, target in enumerate(targets):
             try:

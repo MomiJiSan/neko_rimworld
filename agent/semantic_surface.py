@@ -50,7 +50,7 @@ OBJECT_SELECTORS = {
     'pawns': ('ids', 'names', 'map'),
     'colonists': ('ids', 'names', 'map'),
     'thing': ('ids', 'names', 'map'),
-    'things': ('names', 'definition', 'category', 'map', 'include_held', 'include_fogged'),
+    'things': ('ids', 'names', 'definition', 'category', 'map', 'include_held', 'include_fogged'),
     'thing_def': ('definition',),
     'thing_defs': ('definition', 'category'),
 }
@@ -86,7 +86,7 @@ FACTION_FIELDS = ['faction.def_name', 'faction.name', 'faction.is_player', 'fact
 # 物品归属链：谁持有它、那个持有者的派系。沿真实持有关系合成，不是所有权推断。
 HOLDER_FIELDS = ['held_by.id', 'held_by.runtime_type',
                  'held_by_faction.def_name', 'held_by_faction.is_player', 'held_by_faction.player_relation']
-PAWN_IDENTITY_FIELDS = ['is_free_colonist', 'is_colonist', 'is_prisoner_of_colony', 'is_slave_of_colony',
+PAWN_IDENTITY_FIELDS = ['status.position.map_id', 'status.position.x', 'status.position.z', 'is_free_colonist', 'is_colonist', 'is_prisoner_of_colony', 'is_slave_of_colony',
                         'guest_status']
 IDENTITY_FIELDS = {
     'game': ['paused', 'current_map_id'],
@@ -96,9 +96,9 @@ IDENTITY_FIELDS = {
     'pawns': ['id', 'name', 'map_id'] + PAWN_IDENTITY_FIELDS + FACTION_FIELDS,
     'colonists': ['id', 'name', 'map_id'] + PAWN_IDENTITY_FIELDS + FACTION_FIELDS,
     'thing': ['id', 'runtime_type', 'label', 'spawned', 'destroyed', 'definition.def_name',
-              'definition.label', 'map_held.id'] + FACTION_FIELDS + HOLDER_FIELDS,
+              'definition.label', 'map_held.id', 'position.x', 'position.z'] + FACTION_FIELDS + HOLDER_FIELDS,
     'things': ['id', 'runtime_type', 'label', 'spawned', 'destroyed', 'definition.def_name',
-               'definition.label', 'map_held.id'] + FACTION_FIELDS + HOLDER_FIELDS,
+               'definition.label', 'map_held.id', 'position.x', 'position.z'] + FACTION_FIELDS + HOLDER_FIELDS,
     'thing_def': ['def_name', 'label', 'thing_class', 'category'],
     'thing_defs': ['def_name', 'label', 'thing_class', 'category'],
 }
@@ -205,18 +205,20 @@ FINISH = ('Finish with submit_response: answer is one concise text string coveri
 
 # --- schema -------------------------------------------------------------------
 
-def _object_schema():
-    return {
+def _object_schema(directory=None):
+    schema = {
         'type': 'object',
-        'description': 'Closed object selector. No field names, paths or native argument keys are accepted.',
+        'description': 'Closed object selector. Supported selectors by kind: ' + '; '.join(
+            kind + ': ' + (', '.join(selectors) if selectors else 'none')
+            for kind, selectors in OBJECT_SELECTORS.items()) + '. id aliases one ids entry; name aliases one names entry. No field names, paths or native argument keys.',
         'properties': {
             'kind': {'type': 'string', 'enum': list(KINDS)},
             'name': {'type': 'string', 'description': 'Exact display name; ambiguity returns candidates, never a pick.'},
             'names': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Exact display names.'},
             'id': {'type': 'string', 'description': 'One exact native object ID; use id or ids, never both.'},
-            'ids': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Exact native object IDs.'},
+            'ids': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1, 'description': 'Exact native object IDs. kind thing/pawn/map accepts one; use things/pawns/maps for a set.'},
             'definition': {'type': 'string', 'description': 'Exact def_name or localized definition label.'},
-            'category': {'type': 'string', 'description': 'Definition category, e.g. Building.'},
+            'category': {'type': 'string', 'description': 'For things: native broad ThingCategory kind (e.g. Item, Building), not a gameplay use such as medicine. For thing_defs: exact ThingCategoryDef content-category name. These are distinct domains.'},
             'map': {'type': 'string', 'default': 'current', 'description': 'Loaded map ID or current. For kind map this selects the map itself (alias for id); for Pawn/Thing populations it restricts their map scope.'},
             'include_held': {'type': 'boolean', 'default': True,
                              'description': 'true = also count/count things inside holders (inventory, containers, equipment). '
@@ -230,6 +232,17 @@ def _object_schema():
         'required': ['kind'],
         'additionalProperties': False,
     }
+
+    # Preserve the existing content-category selector on thing_defs. Only the
+    # physical things predicate uses the native ThingCategory enum.
+    domains = directory.get('value_domains', {}) if isinstance(directory, dict) else {}
+    values = domains.get('Verse.ThingCategory', {}).get('values')
+    if isinstance(values, list) and values and all(isinstance(v, str) for v in values):
+        schema['allOf'] = [{
+            'if': {'properties': {'kind': {'const': 'things'}}, 'required': ['kind']},
+            'then': {'properties': {'category': {'enum': list(values)}}},
+        }]
+    return schema
 
 
 def _space_ref_schema(kind_enum):
@@ -261,7 +274,7 @@ def _space_ref_schema(kind_enum):
     }
 
 
-def tool_schemas():
+def tool_schemas(directory=None):
     """模型可见读取工具；空间能力由连接 capability 决定。"""
     specs = [
         dict(name='look',
@@ -273,7 +286,7 @@ def tool_schemas():
                           'detail controls nested detail; ordinary look always returns object facts. '
                           'Results inline scope, coverage, not_read and meanings; unknown is not zero.'),
              parameters={'type': 'object',
-                         'properties': {'object': _object_schema(),
+                         'properties': {'object': _object_schema(directory),
                                         'aspects': {'type': 'array', 'minItems': 1,
                                                     'items': {'type': 'string', 'enum': list(ASPECTS)}},
                                         'detail': {'type': 'integer', 'minimum': 0, 'maximum': 100, 'default': 0}},
@@ -286,7 +299,7 @@ def tool_schemas():
                           'current/max hit_points and the immediate parent_holder type. '
                           'The aggregate is complete or explicitly a lower bound/unavailable, never silently zero.'),
              parameters={'type': 'object',
-                         'properties': {'object': _object_schema(),
+                         'properties': {'object': _object_schema(directory),
                                         'metric': {'type': 'string', 'enum': list(METRICS)},
                                         'by': {'type': 'string', 'enum': list(GROUPINGS)},
                                         'detail': {'type': 'integer', 'minimum': 0, 'maximum': 100, 'default': 0}},
@@ -309,11 +322,22 @@ def spatial_tool_schema(directory=None):
             'type': 'object',
             'properties': {
                 'from': _space_ref_schema(('pawn',)),
-                'to': _space_ref_schema(('thing', 'cell')),
+                'to': _space_ref_schema(('thing', 'pawn', 'cell')),
             },
             'required': ['from', 'to'],
             'additionalProperties': False,
         }
+    # Pawn targets use the same native Thing lookup; expose the natural alias
+    # in the model schema without modifying the Mod-owned wire contract.
+    target = parameters.get('properties', {}).get('to', {})
+    target_kinds = target.get('properties', {}).get('kind', {}).get('enum')
+    if isinstance(target_kinds, list) and 'thing' in target_kinds and 'pawn' not in target_kinds:
+        target_kinds.append('pawn')
+    for form in target.get('oneOf', []):
+        kind_schema = form.get('properties', {}).get('kind', {})
+        if kind_schema.get('const') == 'thing':
+            kind_schema.pop('const')
+            kind_schema['enum'] = ['thing', 'pawn']
     route_supported = isinstance(capability, dict) and capability.get('route_summary') == 'native_path_summary.v1'
     description = ('Check whether one Pawn can currently reach one Thing or map cell. '
                    'Use names or IDs directly; do not call look first just to resolve them. '
@@ -396,6 +420,8 @@ def normalize_object(raw):
             obj[key] = raw[key]
     if kind == 'map' and 'map' in obj and ('ids' in obj or 'names' in obj):
         raise SurfaceError('map reads one map: use map, id/ids, or name/names, not competing selectors')
+    if 'ids' in obj and ('definition' in obj or 'category' in obj):
+        raise SurfaceError('use exact ids or definition/category, not competing selectors')
     if 'definition' in obj and 'category' in obj:
         raise SurfaceError('use either definition or category, not both')
     if kind in ('colonists', 'things', 'pawns'):
@@ -576,7 +602,8 @@ def _pawn_entries(surface, aspect, detail):
             _entry('profile', 'profile.age', 'age', ['biological_years', 'chronological_years', 'life_stage']),
             _entry('profile', 'profile.backstories', 'backstories', ['slot', 'def_name', 'title'], detail),
             _entry('profile', 'profile.traits', 'traits',
-                   ['def_name', 'label', 'degree', 'suppressed'], detail),
+                   ['def_name', 'label', 'degree', 'suppressed'] +
+                   (['description'] if _supported(surface, 'pawn', ['profile.traits.description']) else []), detail),
         ]
     raise SurfaceError('unsupported aspect for this kind: ' + aspect)
 

@@ -388,7 +388,8 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
             if subject is not None:
                 index["labels"].setdefault(value, subject)
 
-    def collection(node: Mapping[str, Any], subject: str | None) -> None:
+    def collection(node: Mapping[str, Any], subject: str | None,
+                   refresh_key: str | None, sequence: int | None) -> None:
         rows = None
         for key in _ROW_KEYS:
             value = node.get(key)
@@ -423,6 +424,8 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
                 "complete": True,
                 "aggregate_complete": bool(aggregate_complete),
                 "signature": signature,
+                "refresh_key": (refresh_key, total) if refresh_key is not None else None,
+                "snapshot_sequence": sequence,
                 "labels": set(),
                 "subject": subject,
             })
@@ -453,19 +456,26 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
         index["collections"].append({
             "total": total,
             "returned": len(rows),
+            "refresh_complete": (complete and node.get("scan_complete") is True
+                                 and node.get("fields_complete") is True
+                                 and total == len(rows)),
             "complete": bool(complete),
             "aggregate_complete": bool(aggregate_complete),
             "signature": signature,
+            "refresh_key": (refresh_key, total) if refresh_key is not None else None,
+            "snapshot_sequence": sequence,
             "labels": labels,
             "subject": subject,
         })
 
-    def walk(node: Any, subject: str | None, depth: int) -> None:
+    def walk(node: Any, subject: str | None, depth: int,
+             path: tuple[str, ...] = (), sample: tuple[Any, ...] | None = None,
+             scopes: tuple[Any, ...] = ()) -> None:
         if budget[0] <= 0 or depth > _MAX_DEPTH:
             return
         if isinstance(node, list):
             for item in node:
-                walk(item, subject, depth + 1)
+                walk(item, subject, depth + 1, path, sample, scopes)
             return
         if not isinstance(node, Mapping):
             return
@@ -477,7 +487,32 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
                 local = value
                 entry(value)
                 break
-        collection(node, local)
+        # Once a stable row identity is known, its child relations no longer
+        # depend on how that row was selected (pawn by ID vs pawns filtered by ID).
+        # Relation scopes below it still bind args/where and the collection path.
+        if local != subject and not isinstance(node.get("scope"), Mapping):
+            path = ()
+            scopes = ()
+        # Only observed response metadata establishes freshness. Missing identity
+        # is deliberately not a wildcard; request arguments never authorize refresh.
+        sample_keys = ("connection_epoch", "colony_id", "load_epoch", "game_tick",
+                       "snapshot_sequence")
+        if all(key in node and node[key] is not None for key in sample_keys):
+            sample = tuple(node[key] for key in sample_keys)
+        scope = node.get("scope")
+        if isinstance(scope, Mapping):
+            scopes = (*scopes, {"from": node.get("from"),
+                               "relation": scope.get("relation"),
+                               "args": scope.get("args"),
+                               "where": scope.get("where"),
+                               "result_where": node.get("where")})
+        refresh_key = None
+        sequence = sample[-1] if sample is not None else None
+        if (sample is not None and type(sequence) is int and sequence >= 0
+                and isinstance(scope, Mapping) and isinstance(scope.get("args"), Mapping)):
+            refresh_key = json.dumps([sample[:-1], local, path, scopes], sort_keys=True,
+                                     ensure_ascii=False, default=str)
+        collection(node, local, refresh_key, sequence)
         # 关系自带的读取口径是**观测自己声明的**，不是模型说的：结果节点上的
         # `scope.relation` 指出这是哪个关系，`scope.args` 是解析后的参数（默认值
         # 也已展开）。健康名单按 `visible_only` 区分“只看界面上显示的”与“含隐藏
@@ -496,9 +531,25 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
             note(local, str(key), value)
             if key in _LABEL_KEYS:
                 note_label(local, value)
-            walk(value, local, depth + 1)
+            walk(value, local, depth + 1, (*path, str(key)), sample, scopes)
 
     walk(list(observations), None, 0)
+    # A later complete reading supersedes earlier partial listings only for the
+    # exact observed population and same world/tick. Native snapshot_sequence
+    # increments per query, so a newer (or replay-equal) sequence can refresh an
+    # older one; receipt order alone cannot license a reversed native sequence.
+    # Keep every original collection intact
+    # for diagnostics, and never let an earlier complete read erase a later partial.
+    later_complete: dict[tuple[str, int | None], int] = {}
+    for item in reversed(index["collections"]):
+        key = item.get("refresh_key")
+        if key is None:
+            continue
+        if item.get("refresh_complete"):
+            later_complete[key] = max(later_complete.get(key, -1), item["snapshot_sequence"])
+        elif (not item["complete"] and key in later_complete
+              and later_complete[key] >= item["snapshot_sequence"]):
+            item["superseded"] = True
     # 聚合完整性与明细完整性可能来自**不同的结果节点**（先查聚合，再查明细页）。
     # 返回契约按“同一总体”判定，所以把同一 from/args/where 的完整聚合关联到
     # 该总体的所有集合条目上。不同 def/范围 → 不同签名 → 不会互相授权。
@@ -646,7 +697,7 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
     这个宽度是实测调出来的：第一版用裸词（“全部/所有/唯一”）加“存在 partial 即拒”，
     在 105 份已复核答案上误报 49 条（其中 0 条复核有 issue）。
     """
-    partial = [item for item in index["collections"] if not item["complete"]]
+    partial = [item for item in index["collections"] if not item["complete"] and not item.get("superseded")]
     if not partial:
         return []
     rejected: list[dict] = []

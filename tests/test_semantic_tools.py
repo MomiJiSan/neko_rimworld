@@ -150,7 +150,7 @@ def test_spatial_tool_is_capability_gated_and_does_not_add_a_navigation_step():
     assert inspect.parameters["required"] == ["from", "to"]
     assert "look first" in inspect.description
     assert inspect.parameters["properties"]["from"]["properties"]["kind"]["enum"] == ["pawn"]
-    assert inspect.parameters["properties"]["to"]["properties"]["kind"]["enum"] == ["thing", "cell"]
+    assert set(inspect.parameters["properties"]["to"]["properties"]["kind"]["enum"]) == {"thing", "cell", "pawn"}
 
 
 def test_spatial_tool_forwards_names_directly_and_renders_claim_shaped_result():

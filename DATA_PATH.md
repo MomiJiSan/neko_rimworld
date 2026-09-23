@@ -552,3 +552,34 @@ The route projection explicitly returns `optimality.status="not_evaluated"`:
 neither shortest nor non-shortest has been established. This prevents the
 contract from conflating an absent shortest-path proof with a non-shortest path,
 but does not guarantee that a model will paraphrase it correctly.
+
+## Rescue-study contract repairs (2026-09-23)
+
+- A later complete observation can supersede an earlier partial list only for the
+  same connection/colony/load/tick, subject, relation path, resolved scope and
+  total. Snapshot sequence must not decrease. Original evidence is retained;
+  different ticks and unknown sampling identity remain conservative boundaries.
+- `look`/`count` accept `kind:things,ids:[...]`; ID and name/definition/category
+  selectors cannot compete. The native engine pushes exact top-level id.eq/in
+  into candidate enumeration, preserving map/held/fog/definition scope. This
+  avoids spending the 8192 candidate budget on unrelated objects; it is not an
+  O(1) index and does not remove the native time budget. Older Mods may still
+  hit their original broad-scan limit for this selector.
+- `inspect_space.to.kind:pawn` is an accepted alias; the adapter uses the existing
+  native Thing reference and rejects a resolved non-Pawn. No native wire enum
+  change is required. Ambiguous names still require disambiguation.
+- `things.category` advertises the connected game's native ThingCategory values;
+  `thing_defs.category` retains its separate ThingCategoryDef content semantics.
+- Identity reads include supported spawned positions. Spatial results provide
+  the target's own `position` separately from `route.end`, the stopping cell.
+  Unspawned objects have no own position; absent fields on older Mods remain
+  absent, never inferred from Touch endpoints or holder positions.
+- Health summaries carry adjacent field semantics: health_percent is an overall
+  health fraction, bleed_rate is blood-loss fraction per game day (60000 ticks),
+  pain is the game's pain fraction. No survival estimate is invented.
+- Profile reads include the existing game-generated trait description/tooltip
+  when supported. `degree` is a variant code, not a numeric stat bonus;
+  suppression remains explicit and a trait bonus is not the final Pawn stat.
+
+These are data/contract repairs, not a guarantee of correct model prose. No
+region/safety/rescue-action tool or task-specific scoring rule was added.

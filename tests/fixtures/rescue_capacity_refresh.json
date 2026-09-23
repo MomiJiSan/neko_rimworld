@@ -1,0 +1,2121 @@
+[
+  {
+    "observation_id": "838e6f155a3a",
+    "response": {
+      "connection_epoch": "3d9d42e62f02452c9747505ba23bd9a5",
+      "colony_id": "1caadd7b17d94733a9675824e0d61d35",
+      "load_epoch": "1e16ab01e42440f193a05cc652098842",
+      "game_tick": 8,
+      "snapshot_sequence": 1,
+      "payload": {
+        "status": "ok",
+        "data": {
+          "results": [
+            {
+              "scan_complete": true,
+              "matched_count": 1,
+              "known_matches": 1,
+              "page": {
+                "offset": 0,
+                "returned": 1,
+                "has_more": false,
+                "next_offset": null,
+                "consistency": "fresh_observation"
+              },
+              "rows": [
+                {
+                  "id": "Thing_Human39662",
+                  "name": "Rescue_Patient",
+                  "health": {
+                    "capacities": {
+                      "scan_complete": true,
+                      "matched_count": 11,
+                      "known_matches": 11,
+                      "page": {
+                        "offset": 0,
+                        "returned": 5,
+                        "has_more": true,
+                        "next_offset": 5,
+                        "consistency": "fresh_observation"
+                      },
+                      "rows": [
+                        {
+                          "def_name": "Consciousness",
+                          "label": "意识",
+                          "level": 0.1
+                        },
+                        {
+                          "def_name": "Moving",
+                          "label": "移动能力",
+                          "level": 0.0
+                        },
+                        {
+                          "def_name": "Manipulation",
+                          "label": "操作能力",
+                          "level": 0.0
+                        },
+                        {
+                          "def_name": "Talking",
+                          "label": "语言能力",
+                          "level": 0.0
+                        },
+                        {
+                          "def_name": "Eating",
+                          "label": "进食能力",
+                          "level": 0.0
+                        }
+                      ],
+                      "fields_complete": true,
+                      "scope": {
+                        "relation": "Health.capacities",
+                        "args": {},
+                        "where": {}
+                      }
+                    }
+                  }
+                }
+              ],
+              "fields_complete": true,
+              "from": "pawns",
+              "scope": {
+                "args": {
+                  "map_id": "Map_0"
+                },
+                "description": "Pawn instances enumerated from selected loaded maps and their nested holders, including humans, animals and mechanoids regardless of faction. No fog filter. This is object enumeration, not pathfinding access; excludes world caravans. The resolved args and requested where below define this reading; completeness is per aggregate/collection.",
+                "argument_semantics": {
+                  "map_id": "Loaded map ID; omitted means all loaded maps."
+                },
+                "where": {
+                  "id": {
+                    "in": [
+                      "Thing_Human39662"
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "relation_semantics": {},
+          "sample": {
+            "load_epoch": "1e16ab01e42440f193a05cc652098842",
+            "game_tick": 8,
+            "sequence": 1
+          }
+        },
+        "issues": [],
+        "execution": {
+          "schema_id": "de7968fa1450c59a898cb529d764e5e4a893dd057ea73970ef1e5c9d530715d6",
+          "contract": "public_query.v2",
+          "requests": [
+            {
+              "from": "pawns",
+              "args": {
+                "map_id": "Map_0"
+              },
+              "where": {
+                "id": {
+                  "in": [
+                    "Thing_Human39662"
+                  ]
+                }
+              },
+              "select": {
+                "id": true,
+                "name": true,
+                "map_id": true,
+                "is_free_colonist": true,
+                "is_colonist": true,
+                "is_prisoner_of_colony": true,
+                "is_slave_of_colony": true,
+                "guest_status": true,
+                "faction": {
+                  "select": {
+                    "def_name": true,
+                    "name": true,
+                    "is_player": true,
+                    "player_relation": true
+                  }
+                },
+                "health": {
+                  "select": {
+                    "summary": {
+                      "select": {
+                        "health_percent": true,
+                        "pain": true,
+                        "bleed_rate": true,
+                        "in_pain_shock": true,
+                        "downed": true
+                      }
+                    },
+                    "conditions": {
+                      "select": {
+                        "id": true,
+                        "def_name": true,
+                        "label": true,
+                        "severity": true,
+                        "severity_label": true,
+                        "visible": true
+                      },
+                      "limit": 5
+                    },
+                    "body_parts": {
+                      "select": {
+                        "key": true,
+                        "def_name": true,
+                        "label": true,
+                        "index": true,
+                        "health": true,
+                        "max_health": true
+                      },
+                      "limit": 5
+                    },
+                    "capacities": {
+                      "select": {
+                        "def_name": true,
+                        "label": true,
+                        "level": true
+                      },
+                      "limit": 5
+                    }
+                  }
+                },
+                "mood": {
+                  "select": {
+                    "level": true,
+                    "instant": true,
+                    "break_thresholds": {
+                      "select": {
+                        "minor": true,
+                        "major": true,
+                        "extreme": true
+                      }
+                    },
+                    "thought_groups": {
+                      "select": {
+                        "def_name": true,
+                        "label": true,
+                        "stage_index": true,
+                        "mood_offset": true,
+                        "member_count": true
+                      },
+                      "limit": 5
+                    },
+                    "memories": {
+                      "select": {
+                        "ref": true,
+                        "def_name": true,
+                        "label": true,
+                        "mood_offset": true,
+                        "age_ticks": true
+                      },
+                      "limit": 5
+                    }
+                  }
+                }
+              },
+              "limit": 5
+            }
+          ],
+          "phases": [
+            {
+              "path": "/results/0",
+              "scan_ms": 0.2304,
+              "aggregate_ms": 0.00020000000000000573,
+              "output_ms": 8.3225,
+              "known_matches": 1,
+              "returned": 1
+            }
+          ],
+          "evidence": {
+            "version": "observed_values.v1",
+            "nodes": {
+              "": {
+                "kind": "object",
+                "name": "Query",
+                "type": "observed_values.v1",
+                "native": "Query"
+              },
+              "/results": {
+                "kind": "collection",
+                "name": "results",
+                "type": "Array",
+                "native": "Query.results"
+              },
+              "/results/~2": {
+                "kind": "object",
+                "name": "item",
+                "type": "Object",
+                "native": "Query.results"
+              },
+              "/results/~2/scan_complete": {
+                "kind": "scalar",
+                "name": "scan_complete",
+                "type": "Boolean",
+                "native": "item.scan_complete"
+              },
+              "/results/~2/matched_count": {
+                "kind": "scalar",
+                "name": "matched_count",
+                "type": "Integer",
+                "native": "item.matched_count"
+              },
+              "/results/~2/known_matches": {
+                "kind": "scalar",
+                "name": "known_matches",
+                "type": "Integer",
+                "native": "item.known_matches"
+              },
+              "/results/~2/page": {
+                "kind": "object",
+                "name": "page",
+                "type": "Object",
+                "native": "item.page"
+              },
+              "/results/~2/page/offset": {
+                "kind": "scalar",
+                "name": "offset",
+                "type": "Integer",
+                "native": "page.offset"
+              },
+              "/results/~2/page/returned": {
+                "kind": "scalar",
+                "name": "returned",
+                "type": "Integer",
+                "native": "page.returned"
+              },
+              "/results/~2/page/has_more": {
+                "kind": "scalar",
+                "name": "has_more",
+                "type": "Boolean",
+                "native": "page.has_more"
+              },
+              "/results/~2/page/next_offset": {
+                "kind": "scalar",
+                "name": "next_offset",
+                "type": "Null",
+                "native": "page.next_offset"
+              },
+              "/results/~2/page/consistency": {
+                "kind": "scalar",
+                "name": "consistency",
+                "type": "String",
+                "native": "page.consistency"
+              },
+              "/results/~2/rows": {
+                "kind": "collection",
+                "name": "rows",
+                "type": "Array",
+                "native": "item.rows"
+              },
+              "/results/~2/rows/~2": {
+                "kind": "object",
+                "name": "item",
+                "type": "Object",
+                "native": "item.rows"
+              },
+              "/results/~2/rows/~2/id": {
+                "kind": "scalar",
+                "name": "id",
+                "type": "String",
+                "native": "item.id"
+              },
+              "/results/~2/rows/~2/name": {
+                "kind": "scalar",
+                "name": "name",
+                "type": "String",
+                "native": "item.name"
+              },
+              "/results/~2/rows/~2/map_id": {
+                "kind": "scalar",
+                "name": "map_id",
+                "type": "String",
+                "native": "item.map_id"
+              },
+              "/results/~2/rows/~2/is_free_colonist": {
+                "kind": "scalar",
+                "name": "is_free_colonist",
+                "type": "Boolean",
+                "native": "item.is_free_colonist"
+              },
+              "/results/~2/rows/~2/is_colonist": {
+                "kind": "scalar",
+                "name": "is_colonist",
+                "type": "Boolean",
+                "native": "item.is_colonist"
+              },
+              "/results/~2/rows/~2/is_prisoner_of_colony": {
+                "kind": "scalar",
+                "name": "is_prisoner_of_colony",
+                "type": "Boolean",
+                "native": "item.is_prisoner_of_colony"
+              },
+              "/results/~2/rows/~2/is_slave_of_colony": {
+                "kind": "scalar",
+                "name": "is_slave_of_colony",
+                "type": "Boolean",
+                "native": "item.is_slave_of_colony"
+              },
+              "/results/~2/rows/~2/guest_status": {
+                "kind": "scalar",
+                "name": "guest_status",
+                "type": "Null",
+                "native": "item.guest_status"
+              },
+              "/results/~2/rows/~2/faction": {
+                "kind": "object",
+                "name": "faction",
+                "type": "Object",
+                "native": "item.faction"
+              },
+              "/results/~2/rows/~2/faction/def_name": {
+                "kind": "scalar",
+                "name": "def_name",
+                "type": "String",
+                "native": "faction.def_name"
+              },
+              "/results/~2/rows/~2/faction/name": {
+                "kind": "scalar",
+                "name": "name",
+                "type": "String",
+                "native": "faction.name"
+              },
+              "/results/~2/rows/~2/faction/is_player": {
+                "kind": "scalar",
+                "name": "is_player",
+                "type": "Boolean",
+                "native": "faction.is_player"
+              },
+              "/results/~2/rows/~2/faction/player_relation": {
+                "kind": "scalar",
+                "name": "player_relation",
+                "type": "String",
+                "native": "faction.player_relation"
+              },
+              "/results/~2/rows/~2/health": {
+                "kind": "object",
+                "name": "health",
+                "type": "Object",
+                "native": "item.health"
+              },
+              "/results/~2/rows/~2/health/summary": {
+                "kind": "object",
+                "name": "summary",
+                "type": "Object",
+                "native": "health.summary"
+              },
+              "/results/~2/rows/~2/health/summary/health_percent": {
+                "kind": "scalar",
+                "name": "health_percent",
+                "type": "Float",
+                "native": "summary.health_percent"
+              },
+              "/results/~2/rows/~2/health/summary/pain": {
+                "kind": "scalar",
+                "name": "pain",
+                "type": "Float",
+                "native": "summary.pain"
+              },
+              "/results/~2/rows/~2/health/summary/bleed_rate": {
+                "kind": "scalar",
+                "name": "bleed_rate",
+                "type": "Float",
+                "native": "summary.bleed_rate"
+              },
+              "/results/~2/rows/~2/health/summary/in_pain_shock": {
+                "kind": "scalar",
+                "name": "in_pain_shock",
+                "type": "Boolean",
+                "native": "summary.in_pain_shock"
+              },
+              "/results/~2/rows/~2/health/summary/downed": {
+                "kind": "scalar",
+                "name": "downed",
+                "type": "Boolean",
+                "native": "summary.downed"
+              },
+              "/results/~2/rows/~2/health/conditions": {
+                "kind": "object",
+                "name": "conditions",
+                "type": "Object",
+                "native": "health.conditions"
+              },
+              "/results/~2/rows/~2/health/conditions/scan_complete": {
+                "kind": "scalar",
+                "name": "scan_complete",
+                "type": "Boolean",
+                "native": "conditions.scan_complete"
+              },
+              "/results/~2/rows/~2/health/conditions/matched_count": {
+                "kind": "scalar",
+                "name": "matched_count",
+                "type": "Integer",
+                "native": "conditions.matched_count"
+              },
+              "/results/~2/rows/~2/health/conditions/known_matches": {
+                "kind": "scalar",
+                "name": "known_matches",
+                "type": "Integer",
+                "native": "conditions.known_matches"
+              },
+              "/results/~2/rows/~2/health/conditions/page": {
+                "kind": "object",
+                "name": "page",
+                "type": "Object",
+                "native": "conditions.page"
+              },
+              "/results/~2/rows/~2/health/conditions/page/offset": {
+                "kind": "scalar",
+                "name": "offset",
+                "type": "Integer",
+                "native": "page.offset"
+              },
+              "/results/~2/rows/~2/health/conditions/page/returned": {
+                "kind": "scalar",
+                "name": "returned",
+                "type": "Integer",
+                "native": "page.returned"
+              },
+              "/results/~2/rows/~2/health/conditions/page/has_more": {
+                "kind": "scalar",
+                "name": "has_more",
+                "type": "Boolean",
+                "native": "page.has_more"
+              },
+              "/results/~2/rows/~2/health/conditions/page/next_offset": {
+                "kind": "scalar",
+                "name": "next_offset",
+                "type": "Null",
+                "native": "page.next_offset"
+              },
+              "/results/~2/rows/~2/health/conditions/page/consistency": {
+                "kind": "scalar",
+                "name": "consistency",
+                "type": "String",
+                "native": "page.consistency"
+              },
+              "/results/~2/rows/~2/health/conditions/rows": {
+                "kind": "collection",
+                "name": "rows",
+                "type": "Array",
+                "native": "conditions.rows"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2": {
+                "kind": "object",
+                "name": "item",
+                "type": "Object",
+                "native": "conditions.rows"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2/id": {
+                "kind": "scalar",
+                "name": "id",
+                "type": "String",
+                "native": "item.id"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2/def_name": {
+                "kind": "scalar",
+                "name": "def_name",
+                "type": "String",
+                "native": "item.def_name"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2/label": {
+                "kind": "scalar",
+                "name": "label",
+                "type": "String",
+                "native": "item.label"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2/severity": {
+                "kind": "scalar",
+                "name": "severity",
+                "type": "Float",
+                "native": "item.severity"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2/severity_label": {
+                "kind": "scalar",
+                "name": "severity_label",
+                "type": "String",
+                "native": "item.severity_label"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2/visible": {
+                "kind": "scalar",
+                "name": "visible",
+                "type": "Boolean",
+                "native": "item.visible"
+              },
+              "/results/~2/rows/~2/health/conditions/fields_complete": {
+                "kind": "scalar",
+                "name": "fields_complete",
+                "type": "Boolean",
+                "native": "conditions.fields_complete"
+              },
+              "/results/~2/rows/~2/health/conditions/scope": {
+                "kind": "object",
+                "name": "scope",
+                "type": "Object",
+                "native": "conditions.scope"
+              },
+              "/results/~2/rows/~2/health/conditions/scope/relation": {
+                "kind": "scalar",
+                "name": "relation",
+                "type": "String",
+                "native": "scope.relation"
+              },
+              "/results/~2/rows/~2/health/conditions/scope/args": {
+                "kind": "object",
+                "name": "args",
+                "type": "Object",
+                "native": "scope.args"
+              },
+              "/results/~2/rows/~2/health/conditions/scope/args/visible_only": {
+                "kind": "scalar",
+                "name": "visible_only",
+                "type": "Boolean",
+                "native": "args.visible_only"
+              },
+              "/results/~2/rows/~2/health/conditions/scope/where": {
+                "kind": "object",
+                "name": "where",
+                "type": "Object",
+                "native": "scope.where"
+              },
+              "/results/~2/rows/~2/health/body_parts": {
+                "kind": "object",
+                "name": "body_parts",
+                "type": "Object",
+                "native": "health.body_parts"
+              },
+              "/results/~2/rows/~2/health/body_parts/scan_complete": {
+                "kind": "scalar",
+                "name": "scan_complete",
+                "type": "Boolean",
+                "native": "body_parts.scan_complete"
+              },
+              "/results/~2/rows/~2/health/body_parts/matched_count": {
+                "kind": "scalar",
+                "name": "matched_count",
+                "type": "Integer",
+                "native": "body_parts.matched_count"
+              },
+              "/results/~2/rows/~2/health/body_parts/known_matches": {
+                "kind": "scalar",
+                "name": "known_matches",
+                "type": "Integer",
+                "native": "body_parts.known_matches"
+              },
+              "/results/~2/rows/~2/health/body_parts/page": {
+                "kind": "object",
+                "name": "page",
+                "type": "Object",
+                "native": "body_parts.page"
+              },
+              "/results/~2/rows/~2/health/body_parts/page/offset": {
+                "kind": "scalar",
+                "name": "offset",
+                "type": "Integer",
+                "native": "page.offset"
+              },
+              "/results/~2/rows/~2/health/body_parts/page/returned": {
+                "kind": "scalar",
+                "name": "returned",
+                "type": "Integer",
+                "native": "page.returned"
+              },
+              "/results/~2/rows/~2/health/body_parts/page/has_more": {
+                "kind": "scalar",
+                "name": "has_more",
+                "type": "Boolean",
+                "native": "page.has_more"
+              },
+              "/results/~2/rows/~2/health/body_parts/page/next_offset": {
+                "kind": "scalar",
+                "name": "next_offset",
+                "type": "Integer",
+                "native": "page.next_offset"
+              },
+              "/results/~2/rows/~2/health/body_parts/page/consistency": {
+                "kind": "scalar",
+                "name": "consistency",
+                "type": "String",
+                "native": "page.consistency"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows": {
+                "kind": "collection",
+                "name": "rows",
+                "type": "Array",
+                "native": "body_parts.rows"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2": {
+                "kind": "object",
+                "name": "item",
+                "type": "Object",
+                "native": "body_parts.rows"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2/key": {
+                "kind": "scalar",
+                "name": "key",
+                "type": "String",
+                "native": "item.key"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2/def_name": {
+                "kind": "scalar",
+                "name": "def_name",
+                "type": "String",
+                "native": "item.def_name"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2/label": {
+                "kind": "scalar",
+                "name": "label",
+                "type": "String",
+                "native": "item.label"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2/index": {
+                "kind": "scalar",
+                "name": "index",
+                "type": "Integer",
+                "native": "item.index"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2/health": {
+                "kind": "scalar",
+                "name": "health",
+                "type": "Float",
+                "native": "item.health"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2/max_health": {
+                "kind": "scalar",
+                "name": "max_health",
+                "type": "Float",
+                "native": "item.max_health"
+              },
+              "/results/~2/rows/~2/health/body_parts/fields_complete": {
+                "kind": "scalar",
+                "name": "fields_complete",
+                "type": "Boolean",
+                "native": "body_parts.fields_complete"
+              },
+              "/results/~2/rows/~2/health/body_parts/scope": {
+                "kind": "object",
+                "name": "scope",
+                "type": "Object",
+                "native": "body_parts.scope"
+              },
+              "/results/~2/rows/~2/health/body_parts/scope/relation": {
+                "kind": "scalar",
+                "name": "relation",
+                "type": "String",
+                "native": "scope.relation"
+              },
+              "/results/~2/rows/~2/health/body_parts/scope/args": {
+                "kind": "object",
+                "name": "args",
+                "type": "Object",
+                "native": "scope.args"
+              },
+              "/results/~2/rows/~2/health/body_parts/scope/where": {
+                "kind": "object",
+                "name": "where",
+                "type": "Object",
+                "native": "scope.where"
+              },
+              "/results/~2/rows/~2/health/capacities": {
+                "kind": "object",
+                "name": "capacities",
+                "type": "Object",
+                "native": "health.capacities"
+              },
+              "/results/~2/rows/~2/health/capacities/scan_complete": {
+                "kind": "scalar",
+                "name": "scan_complete",
+                "type": "Boolean",
+                "native": "capacities.scan_complete"
+              },
+              "/results/~2/rows/~2/health/capacities/matched_count": {
+                "kind": "scalar",
+                "name": "matched_count",
+                "type": "Integer",
+                "native": "capacities.matched_count"
+              },
+              "/results/~2/rows/~2/health/capacities/known_matches": {
+                "kind": "scalar",
+                "name": "known_matches",
+                "type": "Integer",
+                "native": "capacities.known_matches"
+              },
+              "/results/~2/rows/~2/health/capacities/page": {
+                "kind": "object",
+                "name": "page",
+                "type": "Object",
+                "native": "capacities.page"
+              },
+              "/results/~2/rows/~2/health/capacities/page/offset": {
+                "kind": "scalar",
+                "name": "offset",
+                "type": "Integer",
+                "native": "page.offset"
+              },
+              "/results/~2/rows/~2/health/capacities/page/returned": {
+                "kind": "scalar",
+                "name": "returned",
+                "type": "Integer",
+                "native": "page.returned"
+              },
+              "/results/~2/rows/~2/health/capacities/page/has_more": {
+                "kind": "scalar",
+                "name": "has_more",
+                "type": "Boolean",
+                "native": "page.has_more"
+              },
+              "/results/~2/rows/~2/health/capacities/page/next_offset": {
+                "kind": "scalar",
+                "name": "next_offset",
+                "type": "Integer",
+                "native": "page.next_offset"
+              },
+              "/results/~2/rows/~2/health/capacities/page/consistency": {
+                "kind": "scalar",
+                "name": "consistency",
+                "type": "String",
+                "native": "page.consistency"
+              },
+              "/results/~2/rows/~2/health/capacities/rows": {
+                "kind": "collection",
+                "name": "rows",
+                "type": "Array",
+                "native": "capacities.rows"
+              },
+              "/results/~2/rows/~2/health/capacities/rows/~2": {
+                "kind": "object",
+                "name": "item",
+                "type": "Object",
+                "native": "capacities.rows"
+              },
+              "/results/~2/rows/~2/health/capacities/rows/~2/def_name": {
+                "kind": "scalar",
+                "name": "def_name",
+                "type": "String",
+                "native": "item.def_name"
+              },
+              "/results/~2/rows/~2/health/capacities/rows/~2/label": {
+                "kind": "scalar",
+                "name": "label",
+                "type": "String",
+                "native": "item.label"
+              },
+              "/results/~2/rows/~2/health/capacities/rows/~2/level": {
+                "kind": "scalar",
+                "name": "level",
+                "type": "Float",
+                "native": "item.level"
+              },
+              "/results/~2/rows/~2/health/capacities/fields_complete": {
+                "kind": "scalar",
+                "name": "fields_complete",
+                "type": "Boolean",
+                "native": "capacities.fields_complete"
+              },
+              "/results/~2/rows/~2/health/capacities/scope": {
+                "kind": "object",
+                "name": "scope",
+                "type": "Object",
+                "native": "capacities.scope"
+              },
+              "/results/~2/rows/~2/health/capacities/scope/relation": {
+                "kind": "scalar",
+                "name": "relation",
+                "type": "String",
+                "native": "scope.relation"
+              },
+              "/results/~2/rows/~2/health/capacities/scope/args": {
+                "kind": "object",
+                "name": "args",
+                "type": "Object",
+                "native": "scope.args"
+              },
+              "/results/~2/rows/~2/health/capacities/scope/where": {
+                "kind": "object",
+                "name": "where",
+                "type": "Object",
+                "native": "scope.where"
+              },
+              "/results/~2/rows/~2/mood": {
+                "kind": "object",
+                "name": "mood",
+                "type": "Object",
+                "native": "item.mood"
+              },
+              "/results/~2/rows/~2/mood/level": {
+                "kind": "scalar",
+                "name": "level",
+                "type": "Float",
+                "native": "mood.level"
+              },
+              "/results/~2/rows/~2/mood/instant": {
+                "kind": "scalar",
+                "name": "instant",
+                "type": "Float",
+                "native": "mood.instant"
+              },
+              "/results/~2/rows/~2/mood/break_thresholds": {
+                "kind": "object",
+                "name": "break_thresholds",
+                "type": "Object",
+                "native": "mood.break_thresholds"
+              },
+              "/results/~2/rows/~2/mood/break_thresholds/minor": {
+                "kind": "scalar",
+                "name": "minor",
+                "type": "Float",
+                "native": "break_thresholds.minor"
+              },
+              "/results/~2/rows/~2/mood/break_thresholds/major": {
+                "kind": "scalar",
+                "name": "major",
+                "type": "Float",
+                "native": "break_thresholds.major"
+              },
+              "/results/~2/rows/~2/mood/break_thresholds/extreme": {
+                "kind": "scalar",
+                "name": "extreme",
+                "type": "Float",
+                "native": "break_thresholds.extreme"
+              },
+              "/results/~2/rows/~2/mood/thought_groups": {
+                "kind": "object",
+                "name": "thought_groups",
+                "type": "Object",
+                "native": "mood.thought_groups"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/scan_complete": {
+                "kind": "scalar",
+                "name": "scan_complete",
+                "type": "Boolean",
+                "native": "thought_groups.scan_complete"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/matched_count": {
+                "kind": "scalar",
+                "name": "matched_count",
+                "type": "Integer",
+                "native": "thought_groups.matched_count"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/known_matches": {
+                "kind": "scalar",
+                "name": "known_matches",
+                "type": "Integer",
+                "native": "thought_groups.known_matches"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/page": {
+                "kind": "object",
+                "name": "page",
+                "type": "Object",
+                "native": "thought_groups.page"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/page/offset": {
+                "kind": "scalar",
+                "name": "offset",
+                "type": "Integer",
+                "native": "page.offset"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/page/returned": {
+                "kind": "scalar",
+                "name": "returned",
+                "type": "Integer",
+                "native": "page.returned"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/page/has_more": {
+                "kind": "scalar",
+                "name": "has_more",
+                "type": "Boolean",
+                "native": "page.has_more"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/page/next_offset": {
+                "kind": "scalar",
+                "name": "next_offset",
+                "type": "Null",
+                "native": "page.next_offset"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/page/consistency": {
+                "kind": "scalar",
+                "name": "consistency",
+                "type": "String",
+                "native": "page.consistency"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/rows": {
+                "kind": "collection",
+                "name": "rows",
+                "type": "Array",
+                "native": "thought_groups.rows"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/rows/~2": {
+                "kind": "object",
+                "name": "item",
+                "type": "Object",
+                "native": "thought_groups.rows"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/rows/~2/def_name": {
+                "kind": "scalar",
+                "name": "def_name",
+                "type": "String",
+                "native": "item.def_name"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/rows/~2/label": {
+                "kind": "scalar",
+                "name": "label",
+                "type": "String",
+                "native": "item.label"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/rows/~2/stage_index": {
+                "kind": "scalar",
+                "name": "stage_index",
+                "type": "Integer",
+                "native": "item.stage_index"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/rows/~2/mood_offset": {
+                "kind": "scalar",
+                "name": "mood_offset",
+                "type": "Float",
+                "native": "item.mood_offset"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/rows/~2/member_count": {
+                "kind": "scalar",
+                "name": "member_count",
+                "type": "Integer",
+                "native": "item.member_count"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/fields_complete": {
+                "kind": "scalar",
+                "name": "fields_complete",
+                "type": "Boolean",
+                "native": "thought_groups.fields_complete"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/scope": {
+                "kind": "object",
+                "name": "scope",
+                "type": "Object",
+                "native": "thought_groups.scope"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/scope/relation": {
+                "kind": "scalar",
+                "name": "relation",
+                "type": "String",
+                "native": "scope.relation"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/scope/args": {
+                "kind": "object",
+                "name": "args",
+                "type": "Object",
+                "native": "scope.args"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/scope/args/visible_only": {
+                "kind": "scalar",
+                "name": "visible_only",
+                "type": "Boolean",
+                "native": "args.visible_only"
+              },
+              "/results/~2/rows/~2/mood/thought_groups/scope/where": {
+                "kind": "object",
+                "name": "where",
+                "type": "Object",
+                "native": "scope.where"
+              },
+              "/results/~2/rows/~2/mood/memories": {
+                "kind": "object",
+                "name": "memories",
+                "type": "Object",
+                "native": "mood.memories"
+              },
+              "/results/~2/rows/~2/mood/memories/scan_complete": {
+                "kind": "scalar",
+                "name": "scan_complete",
+                "type": "Boolean",
+                "native": "memories.scan_complete"
+              },
+              "/results/~2/rows/~2/mood/memories/matched_count": {
+                "kind": "scalar",
+                "name": "matched_count",
+                "type": "Integer",
+                "native": "memories.matched_count"
+              },
+              "/results/~2/rows/~2/mood/memories/known_matches": {
+                "kind": "scalar",
+                "name": "known_matches",
+                "type": "Integer",
+                "native": "memories.known_matches"
+              },
+              "/results/~2/rows/~2/mood/memories/page": {
+                "kind": "object",
+                "name": "page",
+                "type": "Object",
+                "native": "memories.page"
+              },
+              "/results/~2/rows/~2/mood/memories/page/offset": {
+                "kind": "scalar",
+                "name": "offset",
+                "type": "Integer",
+                "native": "page.offset"
+              },
+              "/results/~2/rows/~2/mood/memories/page/returned": {
+                "kind": "scalar",
+                "name": "returned",
+                "type": "Integer",
+                "native": "page.returned"
+              },
+              "/results/~2/rows/~2/mood/memories/page/has_more": {
+                "kind": "scalar",
+                "name": "has_more",
+                "type": "Boolean",
+                "native": "page.has_more"
+              },
+              "/results/~2/rows/~2/mood/memories/page/next_offset": {
+                "kind": "scalar",
+                "name": "next_offset",
+                "type": "Null",
+                "native": "page.next_offset"
+              },
+              "/results/~2/rows/~2/mood/memories/page/consistency": {
+                "kind": "scalar",
+                "name": "consistency",
+                "type": "String",
+                "native": "page.consistency"
+              },
+              "/results/~2/rows/~2/mood/memories/rows": {
+                "kind": "collection",
+                "name": "rows",
+                "type": "Array",
+                "native": "memories.rows"
+              },
+              "/results/~2/rows/~2/mood/memories/fields_complete": {
+                "kind": "scalar",
+                "name": "fields_complete",
+                "type": "Boolean",
+                "native": "memories.fields_complete"
+              },
+              "/results/~2/rows/~2/mood/memories/scope": {
+                "kind": "object",
+                "name": "scope",
+                "type": "Object",
+                "native": "memories.scope"
+              },
+              "/results/~2/rows/~2/mood/memories/scope/relation": {
+                "kind": "scalar",
+                "name": "relation",
+                "type": "String",
+                "native": "scope.relation"
+              },
+              "/results/~2/rows/~2/mood/memories/scope/args": {
+                "kind": "object",
+                "name": "args",
+                "type": "Object",
+                "native": "scope.args"
+              },
+              "/results/~2/rows/~2/mood/memories/scope/args/visible_only": {
+                "kind": "scalar",
+                "name": "visible_only",
+                "type": "Boolean",
+                "native": "args.visible_only"
+              },
+              "/results/~2/rows/~2/mood/memories/scope/where": {
+                "kind": "object",
+                "name": "where",
+                "type": "Object",
+                "native": "scope.where"
+              },
+              "/results/~2/fields_complete": {
+                "kind": "scalar",
+                "name": "fields_complete",
+                "type": "Boolean",
+                "native": "item.fields_complete"
+              },
+              "/results/~2/from": {
+                "kind": "scalar",
+                "name": "from",
+                "type": "String",
+                "native": "item.from"
+              },
+              "/results/~2/scope": {
+                "kind": "object",
+                "name": "scope",
+                "type": "Object",
+                "native": "item.scope"
+              },
+              "/results/~2/scope/args": {
+                "kind": "object",
+                "name": "args",
+                "type": "Object",
+                "native": "scope.args"
+              },
+              "/results/~2/scope/args/map_id": {
+                "kind": "scalar",
+                "name": "map_id",
+                "type": "String",
+                "native": "args.map_id"
+              },
+              "/results/~2/scope/description": {
+                "kind": "scalar",
+                "name": "description",
+                "type": "String",
+                "native": "scope.description"
+              },
+              "/results/~2/scope/argument_semantics": {
+                "kind": "object",
+                "name": "argument_semantics",
+                "type": "Object",
+                "native": "scope.argument_semantics"
+              },
+              "/results/~2/scope/argument_semantics/map_id": {
+                "kind": "scalar",
+                "name": "map_id",
+                "type": "String",
+                "native": "argument_semantics.map_id"
+              },
+              "/results/~2/scope/where": {
+                "kind": "object",
+                "name": "where",
+                "type": "Object",
+                "native": "scope.where"
+              },
+              "/results/~2/scope/where/id": {
+                "kind": "object",
+                "name": "id",
+                "type": "Object",
+                "native": "where.id"
+              },
+              "/results/~2/scope/where/id/in": {
+                "kind": "collection",
+                "name": "in",
+                "type": "Array",
+                "native": "id.in"
+              },
+              "/results/~2/scope/where/id/in/~2": {
+                "kind": "scalar",
+                "name": "item",
+                "type": "String",
+                "native": "id.in"
+              },
+              "/relation_semantics": {
+                "kind": "object",
+                "name": "relation_semantics",
+                "type": "Object",
+                "native": "Query.relation_semantics"
+              },
+              "/sample": {
+                "kind": "object",
+                "name": "sample",
+                "type": "Object",
+                "native": "Query.sample"
+              },
+              "/sample/load_epoch": {
+                "kind": "scalar",
+                "name": "load_epoch",
+                "type": "String",
+                "native": "sample.load_epoch"
+              },
+              "/sample/game_tick": {
+                "kind": "scalar",
+                "name": "game_tick",
+                "type": "Integer",
+                "native": "sample.game_tick"
+              },
+              "/sample/sequence": {
+                "kind": "scalar",
+                "name": "sequence",
+                "type": "Integer",
+                "native": "sample.sequence"
+              }
+            },
+            "contexts": {},
+            "subjects": {
+              "/results/0": {
+                "from": "pawns",
+                "selection": {
+                  "map_id": "Map_0"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "observation_id": "d5f6cd9f26c1",
+    "response": {
+      "connection_epoch": "3d9d42e62f02452c9747505ba23bd9a5",
+      "colony_id": "1caadd7b17d94733a9675824e0d61d35",
+      "load_epoch": "1e16ab01e42440f193a05cc652098842",
+      "game_tick": 8,
+      "snapshot_sequence": 1,
+      "payload": {
+        "status": "ok",
+        "data": {
+          "results": [
+            {
+              "scan_complete": true,
+              "matched_count": 1,
+              "known_matches": 1,
+              "page": {
+                "offset": 0,
+                "returned": 1,
+                "has_more": false,
+                "next_offset": null,
+                "consistency": "fresh_observation"
+              },
+              "rows": [
+                {
+                  "id": "Thing_Human39662",
+                  "name": "Rescue_Patient",
+                  "health": {
+                    "capacities": {
+                      "scan_complete": true,
+                      "matched_count": 11,
+                      "known_matches": 11,
+                      "page": {
+                        "offset": 0,
+                        "returned": 11,
+                        "has_more": false,
+                        "next_offset": null,
+                        "consistency": "fresh_observation"
+                      },
+                      "rows": [
+                        {
+                          "def_name": "Consciousness",
+                          "label": "意识",
+                          "level": 0.1
+                        },
+                        {
+                          "def_name": "Moving",
+                          "label": "移动能力",
+                          "level": 0.0
+                        },
+                        {
+                          "def_name": "Manipulation",
+                          "label": "操作能力",
+                          "level": 0.0
+                        },
+                        {
+                          "def_name": "Talking",
+                          "label": "语言能力",
+                          "level": 0.0
+                        },
+                        {
+                          "def_name": "Eating",
+                          "label": "进食能力",
+                          "level": 0.0
+                        },
+                        {
+                          "def_name": "Sight",
+                          "label": "视觉能力",
+                          "level": 1.0
+                        },
+                        {
+                          "def_name": "Hearing",
+                          "label": "听觉能力",
+                          "level": 1.0
+                        },
+                        {
+                          "def_name": "Breathing",
+                          "label": "呼吸能力",
+                          "level": 1.0
+                        },
+                        {
+                          "def_name": "BloodFiltration",
+                          "label": "血液过滤",
+                          "level": 1.0
+                        },
+                        {
+                          "def_name": "BloodPumping",
+                          "label": "血液循环",
+                          "level": 1.0
+                        },
+                        {
+                          "def_name": "Metabolism",
+                          "label": "消化能力",
+                          "level": 1.0
+                        }
+                      ],
+                      "fields_complete": true,
+                      "scope": {
+                        "relation": "Health.capacities",
+                        "args": {},
+                        "where": {}
+                      }
+                    }
+                  }
+                }
+              ],
+              "fields_complete": true,
+              "from": "pawn",
+              "scope": {
+                "args": {
+                  "id": "Thing_Human39662"
+                },
+                "description": "One Pawn found by stable ID in the loaded-map and holder enumeration, including humans, animals and mechanoids; no fog filter. Not a free-colonist identity check. The resolved args and requested where below define this reading; completeness is per aggregate/collection.",
+                "argument_semantics": {
+                  "id": "Exact pawn ID."
+                },
+                "where": {}
+              }
+            }
+          ],
+          "relation_semantics": {},
+          "sample": {
+            "load_epoch": "1e16ab01e42440f193a05cc652098842",
+            "game_tick": 8,
+            "sequence": 1
+          }
+        },
+        "issues": [],
+        "execution": {
+          "schema_id": "de7968fa1450c59a898cb529d764e5e4a893dd057ea73970ef1e5c9d530715d6",
+          "contract": "public_query.v2",
+          "requests": [
+            {
+              "from": "pawn",
+              "args": {
+                "id": "Thing_Human39662"
+              },
+              "select": {
+                "id": true,
+                "name": true,
+                "map_id": true,
+                "faction": {
+                  "select": {
+                    "def_name": true,
+                    "name": true,
+                    "is_player": true,
+                    "player_relation": true
+                  }
+                },
+                "health": {
+                  "select": {
+                    "summary": {
+                      "select": {
+                        "health_percent": true,
+                        "pain": true,
+                        "bleed_rate": true,
+                        "in_pain_shock": true,
+                        "downed": true
+                      }
+                    },
+                    "conditions": {
+                      "select": {
+                        "id": true,
+                        "def_name": true,
+                        "label": true,
+                        "severity": true,
+                        "severity_label": true,
+                        "visible": true
+                      },
+                      "limit": 40
+                    },
+                    "body_parts": {
+                      "select": {
+                        "key": true,
+                        "def_name": true,
+                        "label": true,
+                        "index": true,
+                        "health": true,
+                        "max_health": true
+                      },
+                      "limit": 40
+                    },
+                    "capacities": {
+                      "select": {
+                        "def_name": true,
+                        "label": true,
+                        "level": true
+                      },
+                      "limit": 40
+                    }
+                  }
+                }
+              },
+              "limit": 40
+            }
+          ],
+          "phases": [
+            {
+              "path": "/results/0",
+              "scan_ms": 0.1322,
+              "aggregate_ms": 0.0005000000000000004,
+              "output_ms": 2.0487,
+              "known_matches": 1,
+              "returned": 1
+            }
+          ],
+          "evidence": {
+            "version": "observed_values.v1",
+            "nodes": {
+              "": {
+                "kind": "object",
+                "name": "Query",
+                "type": "observed_values.v1",
+                "native": "Query"
+              },
+              "/results": {
+                "kind": "collection",
+                "name": "results",
+                "type": "Array",
+                "native": "Query.results"
+              },
+              "/results/~2": {
+                "kind": "object",
+                "name": "item",
+                "type": "Object",
+                "native": "Query.results"
+              },
+              "/results/~2/scan_complete": {
+                "kind": "scalar",
+                "name": "scan_complete",
+                "type": "Boolean",
+                "native": "item.scan_complete"
+              },
+              "/results/~2/matched_count": {
+                "kind": "scalar",
+                "name": "matched_count",
+                "type": "Integer",
+                "native": "item.matched_count"
+              },
+              "/results/~2/known_matches": {
+                "kind": "scalar",
+                "name": "known_matches",
+                "type": "Integer",
+                "native": "item.known_matches"
+              },
+              "/results/~2/page": {
+                "kind": "object",
+                "name": "page",
+                "type": "Object",
+                "native": "item.page"
+              },
+              "/results/~2/page/offset": {
+                "kind": "scalar",
+                "name": "offset",
+                "type": "Integer",
+                "native": "page.offset"
+              },
+              "/results/~2/page/returned": {
+                "kind": "scalar",
+                "name": "returned",
+                "type": "Integer",
+                "native": "page.returned"
+              },
+              "/results/~2/page/has_more": {
+                "kind": "scalar",
+                "name": "has_more",
+                "type": "Boolean",
+                "native": "page.has_more"
+              },
+              "/results/~2/page/next_offset": {
+                "kind": "scalar",
+                "name": "next_offset",
+                "type": "Null",
+                "native": "page.next_offset"
+              },
+              "/results/~2/page/consistency": {
+                "kind": "scalar",
+                "name": "consistency",
+                "type": "String",
+                "native": "page.consistency"
+              },
+              "/results/~2/rows": {
+                "kind": "collection",
+                "name": "rows",
+                "type": "Array",
+                "native": "item.rows"
+              },
+              "/results/~2/rows/~2": {
+                "kind": "object",
+                "name": "item",
+                "type": "Object",
+                "native": "item.rows"
+              },
+              "/results/~2/rows/~2/id": {
+                "kind": "scalar",
+                "name": "id",
+                "type": "String",
+                "native": "item.id"
+              },
+              "/results/~2/rows/~2/name": {
+                "kind": "scalar",
+                "name": "name",
+                "type": "String",
+                "native": "item.name"
+              },
+              "/results/~2/rows/~2/map_id": {
+                "kind": "scalar",
+                "name": "map_id",
+                "type": "String",
+                "native": "item.map_id"
+              },
+              "/results/~2/rows/~2/faction": {
+                "kind": "object",
+                "name": "faction",
+                "type": "Object",
+                "native": "item.faction"
+              },
+              "/results/~2/rows/~2/faction/def_name": {
+                "kind": "scalar",
+                "name": "def_name",
+                "type": "String",
+                "native": "faction.def_name"
+              },
+              "/results/~2/rows/~2/faction/name": {
+                "kind": "scalar",
+                "name": "name",
+                "type": "String",
+                "native": "faction.name"
+              },
+              "/results/~2/rows/~2/faction/is_player": {
+                "kind": "scalar",
+                "name": "is_player",
+                "type": "Boolean",
+                "native": "faction.is_player"
+              },
+              "/results/~2/rows/~2/faction/player_relation": {
+                "kind": "scalar",
+                "name": "player_relation",
+                "type": "String",
+                "native": "faction.player_relation"
+              },
+              "/results/~2/rows/~2/health": {
+                "kind": "object",
+                "name": "health",
+                "type": "Object",
+                "native": "item.health"
+              },
+              "/results/~2/rows/~2/health/summary": {
+                "kind": "object",
+                "name": "summary",
+                "type": "Object",
+                "native": "health.summary"
+              },
+              "/results/~2/rows/~2/health/summary/health_percent": {
+                "kind": "scalar",
+                "name": "health_percent",
+                "type": "Float",
+                "native": "summary.health_percent"
+              },
+              "/results/~2/rows/~2/health/summary/pain": {
+                "kind": "scalar",
+                "name": "pain",
+                "type": "Float",
+                "native": "summary.pain"
+              },
+              "/results/~2/rows/~2/health/summary/bleed_rate": {
+                "kind": "scalar",
+                "name": "bleed_rate",
+                "type": "Float",
+                "native": "summary.bleed_rate"
+              },
+              "/results/~2/rows/~2/health/summary/in_pain_shock": {
+                "kind": "scalar",
+                "name": "in_pain_shock",
+                "type": "Boolean",
+                "native": "summary.in_pain_shock"
+              },
+              "/results/~2/rows/~2/health/summary/downed": {
+                "kind": "scalar",
+                "name": "downed",
+                "type": "Boolean",
+                "native": "summary.downed"
+              },
+              "/results/~2/rows/~2/health/conditions": {
+                "kind": "object",
+                "name": "conditions",
+                "type": "Object",
+                "native": "health.conditions"
+              },
+              "/results/~2/rows/~2/health/conditions/scan_complete": {
+                "kind": "scalar",
+                "name": "scan_complete",
+                "type": "Boolean",
+                "native": "conditions.scan_complete"
+              },
+              "/results/~2/rows/~2/health/conditions/matched_count": {
+                "kind": "scalar",
+                "name": "matched_count",
+                "type": "Integer",
+                "native": "conditions.matched_count"
+              },
+              "/results/~2/rows/~2/health/conditions/known_matches": {
+                "kind": "scalar",
+                "name": "known_matches",
+                "type": "Integer",
+                "native": "conditions.known_matches"
+              },
+              "/results/~2/rows/~2/health/conditions/page": {
+                "kind": "object",
+                "name": "page",
+                "type": "Object",
+                "native": "conditions.page"
+              },
+              "/results/~2/rows/~2/health/conditions/page/offset": {
+                "kind": "scalar",
+                "name": "offset",
+                "type": "Integer",
+                "native": "page.offset"
+              },
+              "/results/~2/rows/~2/health/conditions/page/returned": {
+                "kind": "scalar",
+                "name": "returned",
+                "type": "Integer",
+                "native": "page.returned"
+              },
+              "/results/~2/rows/~2/health/conditions/page/has_more": {
+                "kind": "scalar",
+                "name": "has_more",
+                "type": "Boolean",
+                "native": "page.has_more"
+              },
+              "/results/~2/rows/~2/health/conditions/page/next_offset": {
+                "kind": "scalar",
+                "name": "next_offset",
+                "type": "Null",
+                "native": "page.next_offset"
+              },
+              "/results/~2/rows/~2/health/conditions/page/consistency": {
+                "kind": "scalar",
+                "name": "consistency",
+                "type": "String",
+                "native": "page.consistency"
+              },
+              "/results/~2/rows/~2/health/conditions/rows": {
+                "kind": "collection",
+                "name": "rows",
+                "type": "Array",
+                "native": "conditions.rows"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2": {
+                "kind": "object",
+                "name": "item",
+                "type": "Object",
+                "native": "conditions.rows"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2/id": {
+                "kind": "scalar",
+                "name": "id",
+                "type": "String",
+                "native": "item.id"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2/def_name": {
+                "kind": "scalar",
+                "name": "def_name",
+                "type": "String",
+                "native": "item.def_name"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2/label": {
+                "kind": "scalar",
+                "name": "label",
+                "type": "String",
+                "native": "item.label"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2/severity": {
+                "kind": "scalar",
+                "name": "severity",
+                "type": "Float",
+                "native": "item.severity"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2/severity_label": {
+                "kind": "scalar",
+                "name": "severity_label",
+                "type": "String",
+                "native": "item.severity_label"
+              },
+              "/results/~2/rows/~2/health/conditions/rows/~2/visible": {
+                "kind": "scalar",
+                "name": "visible",
+                "type": "Boolean",
+                "native": "item.visible"
+              },
+              "/results/~2/rows/~2/health/conditions/fields_complete": {
+                "kind": "scalar",
+                "name": "fields_complete",
+                "type": "Boolean",
+                "native": "conditions.fields_complete"
+              },
+              "/results/~2/rows/~2/health/conditions/scope": {
+                "kind": "object",
+                "name": "scope",
+                "type": "Object",
+                "native": "conditions.scope"
+              },
+              "/results/~2/rows/~2/health/conditions/scope/relation": {
+                "kind": "scalar",
+                "name": "relation",
+                "type": "String",
+                "native": "scope.relation"
+              },
+              "/results/~2/rows/~2/health/conditions/scope/args": {
+                "kind": "object",
+                "name": "args",
+                "type": "Object",
+                "native": "scope.args"
+              },
+              "/results/~2/rows/~2/health/conditions/scope/args/visible_only": {
+                "kind": "scalar",
+                "name": "visible_only",
+                "type": "Boolean",
+                "native": "args.visible_only"
+              },
+              "/results/~2/rows/~2/health/conditions/scope/where": {
+                "kind": "object",
+                "name": "where",
+                "type": "Object",
+                "native": "scope.where"
+              },
+              "/results/~2/rows/~2/health/body_parts": {
+                "kind": "object",
+                "name": "body_parts",
+                "type": "Object",
+                "native": "health.body_parts"
+              },
+              "/results/~2/rows/~2/health/body_parts/scan_complete": {
+                "kind": "scalar",
+                "name": "scan_complete",
+                "type": "Boolean",
+                "native": "body_parts.scan_complete"
+              },
+              "/results/~2/rows/~2/health/body_parts/matched_count": {
+                "kind": "scalar",
+                "name": "matched_count",
+                "type": "Integer",
+                "native": "body_parts.matched_count"
+              },
+              "/results/~2/rows/~2/health/body_parts/known_matches": {
+                "kind": "scalar",
+                "name": "known_matches",
+                "type": "Integer",
+                "native": "body_parts.known_matches"
+              },
+              "/results/~2/rows/~2/health/body_parts/page": {
+                "kind": "object",
+                "name": "page",
+                "type": "Object",
+                "native": "body_parts.page"
+              },
+              "/results/~2/rows/~2/health/body_parts/page/offset": {
+                "kind": "scalar",
+                "name": "offset",
+                "type": "Integer",
+                "native": "page.offset"
+              },
+              "/results/~2/rows/~2/health/body_parts/page/returned": {
+                "kind": "scalar",
+                "name": "returned",
+                "type": "Integer",
+                "native": "page.returned"
+              },
+              "/results/~2/rows/~2/health/body_parts/page/has_more": {
+                "kind": "scalar",
+                "name": "has_more",
+                "type": "Boolean",
+                "native": "page.has_more"
+              },
+              "/results/~2/rows/~2/health/body_parts/page/next_offset": {
+                "kind": "scalar",
+                "name": "next_offset",
+                "type": "Integer",
+                "native": "page.next_offset"
+              },
+              "/results/~2/rows/~2/health/body_parts/page/consistency": {
+                "kind": "scalar",
+                "name": "consistency",
+                "type": "String",
+                "native": "page.consistency"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows": {
+                "kind": "collection",
+                "name": "rows",
+                "type": "Array",
+                "native": "body_parts.rows"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2": {
+                "kind": "object",
+                "name": "item",
+                "type": "Object",
+                "native": "body_parts.rows"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2/key": {
+                "kind": "scalar",
+                "name": "key",
+                "type": "String",
+                "native": "item.key"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2/def_name": {
+                "kind": "scalar",
+                "name": "def_name",
+                "type": "String",
+                "native": "item.def_name"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2/label": {
+                "kind": "scalar",
+                "name": "label",
+                "type": "String",
+                "native": "item.label"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2/index": {
+                "kind": "scalar",
+                "name": "index",
+                "type": "Integer",
+                "native": "item.index"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2/health": {
+                "kind": "scalar",
+                "name": "health",
+                "type": "Float",
+                "native": "item.health"
+              },
+              "/results/~2/rows/~2/health/body_parts/rows/~2/max_health": {
+                "kind": "scalar",
+                "name": "max_health",
+                "type": "Float",
+                "native": "item.max_health"
+              },
+              "/results/~2/rows/~2/health/body_parts/fields_complete": {
+                "kind": "scalar",
+                "name": "fields_complete",
+                "type": "Boolean",
+                "native": "body_parts.fields_complete"
+              },
+              "/results/~2/rows/~2/health/body_parts/scope": {
+                "kind": "object",
+                "name": "scope",
+                "type": "Object",
+                "native": "body_parts.scope"
+              },
+              "/results/~2/rows/~2/health/body_parts/scope/relation": {
+                "kind": "scalar",
+                "name": "relation",
+                "type": "String",
+                "native": "scope.relation"
+              },
+              "/results/~2/rows/~2/health/body_parts/scope/args": {
+                "kind": "object",
+                "name": "args",
+                "type": "Object",
+                "native": "scope.args"
+              },
+              "/results/~2/rows/~2/health/body_parts/scope/where": {
+                "kind": "object",
+                "name": "where",
+                "type": "Object",
+                "native": "scope.where"
+              },
+              "/results/~2/rows/~2/health/capacities": {
+                "kind": "object",
+                "name": "capacities",
+                "type": "Object",
+                "native": "health.capacities"
+              },
+              "/results/~2/rows/~2/health/capacities/scan_complete": {
+                "kind": "scalar",
+                "name": "scan_complete",
+                "type": "Boolean",
+                "native": "capacities.scan_complete"
+              },
+              "/results/~2/rows/~2/health/capacities/matched_count": {
+                "kind": "scalar",
+                "name": "matched_count",
+                "type": "Integer",
+                "native": "capacities.matched_count"
+              },
+              "/results/~2/rows/~2/health/capacities/known_matches": {
+                "kind": "scalar",
+                "name": "known_matches",
+                "type": "Integer",
+                "native": "capacities.known_matches"
+              },
+              "/results/~2/rows/~2/health/capacities/page": {
+                "kind": "object",
+                "name": "page",
+                "type": "Object",
+                "native": "capacities.page"
+              },
+              "/results/~2/rows/~2/health/capacities/page/offset": {
+                "kind": "scalar",
+                "name": "offset",
+                "type": "Integer",
+                "native": "page.offset"
+              },
+              "/results/~2/rows/~2/health/capacities/page/returned": {
+                "kind": "scalar",
+                "name": "returned",
+                "type": "Integer",
+                "native": "page.returned"
+              },
+              "/results/~2/rows/~2/health/capacities/page/has_more": {
+                "kind": "scalar",
+                "name": "has_more",
+                "type": "Boolean",
+                "native": "page.has_more"
+              },
+              "/results/~2/rows/~2/health/capacities/page/next_offset": {
+                "kind": "scalar",
+                "name": "next_offset",
+                "type": "Null",
+                "native": "page.next_offset"
+              },
+              "/results/~2/rows/~2/health/capacities/page/consistency": {
+                "kind": "scalar",
+                "name": "consistency",
+                "type": "String",
+                "native": "page.consistency"
+              },
+              "/results/~2/rows/~2/health/capacities/rows": {
+                "kind": "collection",
+                "name": "rows",
+                "type": "Array",
+                "native": "capacities.rows"
+              },
+              "/results/~2/rows/~2/health/capacities/rows/~2": {
+                "kind": "object",
+                "name": "item",
+                "type": "Object",
+                "native": "capacities.rows"
+              },
+              "/results/~2/rows/~2/health/capacities/rows/~2/def_name": {
+                "kind": "scalar",
+                "name": "def_name",
+                "type": "String",
+                "native": "item.def_name"
+              },
+              "/results/~2/rows/~2/health/capacities/rows/~2/label": {
+                "kind": "scalar",
+                "name": "label",
+                "type": "String",
+                "native": "item.label"
+              },
+              "/results/~2/rows/~2/health/capacities/rows/~2/level": {
+                "kind": "scalar",
+                "name": "level",
+                "type": "Float",
+                "native": "item.level"
+              },
+              "/results/~2/rows/~2/health/capacities/fields_complete": {
+                "kind": "scalar",
+                "name": "fields_complete",
+                "type": "Boolean",
+                "native": "capacities.fields_complete"
+              },
+              "/results/~2/rows/~2/health/capacities/scope": {
+                "kind": "object",
+                "name": "scope",
+                "type": "Object",
+                "native": "capacities.scope"
+              },
+              "/results/~2/rows/~2/health/capacities/scope/relation": {
+                "kind": "scalar",
+                "name": "relation",
+                "type": "String",
+                "native": "scope.relation"
+              },
+              "/results/~2/rows/~2/health/capacities/scope/args": {
+                "kind": "object",
+                "name": "args",
+                "type": "Object",
+                "native": "scope.args"
+              },
+              "/results/~2/rows/~2/health/capacities/scope/where": {
+                "kind": "object",
+                "name": "where",
+                "type": "Object",
+                "native": "scope.where"
+              },
+              "/results/~2/fields_complete": {
+                "kind": "scalar",
+                "name": "fields_complete",
+                "type": "Boolean",
+                "native": "item.fields_complete"
+              },
+              "/results/~2/from": {
+                "kind": "scalar",
+                "name": "from",
+                "type": "String",
+                "native": "item.from"
+              },
+              "/results/~2/scope": {
+                "kind": "object",
+                "name": "scope",
+                "type": "Object",
+                "native": "item.scope"
+              },
+              "/results/~2/scope/args": {
+                "kind": "object",
+                "name": "args",
+                "type": "Object",
+                "native": "scope.args"
+              },
+              "/results/~2/scope/args/id": {
+                "kind": "scalar",
+                "name": "id",
+                "type": "String",
+                "native": "args.id"
+              },
+              "/results/~2/scope/description": {
+                "kind": "scalar",
+                "name": "description",
+                "type": "String",
+                "native": "scope.description"
+              },
+              "/results/~2/scope/argument_semantics": {
+                "kind": "object",
+                "name": "argument_semantics",
+                "type": "Object",
+                "native": "scope.argument_semantics"
+              },
+              "/results/~2/scope/argument_semantics/id": {
+                "kind": "scalar",
+                "name": "id",
+                "type": "String",
+                "native": "argument_semantics.id"
+              },
+              "/results/~2/scope/where": {
+                "kind": "object",
+                "name": "where",
+                "type": "Object",
+                "native": "scope.where"
+              },
+              "/relation_semantics": {
+                "kind": "object",
+                "name": "relation_semantics",
+                "type": "Object",
+                "native": "Query.relation_semantics"
+              },
+              "/sample": {
+                "kind": "object",
+                "name": "sample",
+                "type": "Object",
+                "native": "Query.sample"
+              },
+              "/sample/load_epoch": {
+                "kind": "scalar",
+                "name": "load_epoch",
+                "type": "String",
+                "native": "sample.load_epoch"
+              },
+              "/sample/game_tick": {
+                "kind": "scalar",
+                "name": "game_tick",
+                "type": "Integer",
+                "native": "sample.game_tick"
+              },
+              "/sample/sequence": {
+                "kind": "scalar",
+                "name": "sequence",
+                "type": "Integer",
+                "native": "sample.sequence"
+              }
+            },
+            "contexts": {},
+            "subjects": {
+              "/results/0": {
+                "from": "pawn",
+                "selection": {
+                  "id": "Thing_Human39662"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+]
