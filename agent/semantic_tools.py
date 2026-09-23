@@ -160,6 +160,8 @@ class SemanticInteraction:
         prompt = build(preferred_cycles, references_supported=self.references_supported) + "\n\n" + TOOL_GUIDE
         if not self.finalizing and "wiki" in self.original:
             prompt += "\n\n" + WIKI_GUIDANCE
+        if not self.finalizing and self.setup.directory.get("world_observation", {}).get("version") == "world_observation.v2.2":
+            prompt += "\nUse survey_space for a neighborhood/region, inspect_route for a path AND its environment, and inspect_state for object state/occupancy/reservations. Resolve names directly; no preliminary look is required. user is the intended user/recipient, actor performs interaction/travel. All checks are current and read-only. Distinguish target position from stopping cell, building type from settings, and existing reservations from physical occupancy. Safety conclusions require returned environmental coverage; native Danger is not comprehensive safety. Unsupported facets and hidden cells are unknown.\n"
         return prompt
 
     def submission(self) -> Any:
@@ -180,6 +182,17 @@ class SemanticInteraction:
         if self.spatial_supported:
             semantic_specs.append(spatial_tool_schema(self.setup.directory))
             handlers["inspect_space"] = self.inspect_space
+        world = self.setup.directory.get("world_observation", {})
+        if world.get("version") == "world_observation.v2.2":
+            for spec in world.get("tools", []):
+                name = spec["name"]
+                if name not in self.original:
+                    continue
+                async def observe(args, operation=name):
+                    native = await self.execute_native(args, tool_name=operation)
+                    return native["data"]
+                handlers[name] = observe
+                semantic_specs.append(spec)
         for tool in semantic_specs:
             handler = handlers[tool["name"]]
 

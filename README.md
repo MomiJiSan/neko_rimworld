@@ -682,3 +682,15 @@ but does not guarantee that a model will paraphrase it correctly.
 
 These are data/contract repairs, not a guarantee of correct model prose. No
 region/safety/rescue-action tool or task-specific scoring rule was added.
+
+## V2.2 world observation
+
+When the connected Mod advertises `world_observation.v2.2`, the Agent also gets
+`survey_space`, `inspect_route`, and `inspect_state`. The existing tools remain
+unchanged. Use a region to discover objects/counts/environment, actor+target to
+read a path and its environment in one call, or a target list to read applicable
+state facets. State context distinguishes `user` (recipient) and `actor`
+(traveller/interactor). Results retain original observations, sampling interval,
+coverage and unsupported facets; no universal usable/safe verdict or game
+mutation is provided. Cursor pages retain detached facts from the original
+observation, not fresh state. Older Mods do not advertise these tools.

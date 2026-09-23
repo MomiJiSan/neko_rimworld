@@ -244,6 +244,21 @@ def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHa
         async def spatial(arguments):
             return await query({"operation": "spatial_query", "arguments": copy.deepcopy(arguments)})
         spatial_tools = (ToolSpec("spatial_query", capability.get("description", "Native reachability"), copy.deepcopy(capability["parameters"]), spatial),)
+    world_tools = []
+    world = catalog.get("world_observation")
+    if isinstance(world, dict) and world.get("version") == "world_observation.v2.2":
+        allowed = {"survey_space", "inspect_route", "inspect_state"}
+        specs = world.get("tools", [])
+        if not isinstance(specs, list) or len(specs) != 3 or {s.get("name") for s in specs if isinstance(s, dict)} != allowed:
+            raise ToolExecutionError("invalid_catalog", "Invalid world observation tool set")
+        for spec in specs:
+            name = spec["name"]
+            if spec.get("operation") != name or not isinstance(spec.get("parameters"), dict):
+                raise ToolExecutionError("invalid_catalog", "Invalid world observation operation")
+            async def observe(arguments, operation=name):
+                return await query({"operation": operation, "arguments": copy.deepcopy(arguments)})
+            world_tools.append(ToolSpec(name, spec["description"], copy.deepcopy(spec["parameters"]), observe))
+        directory["world_observation"] = copy.deepcopy(world)
     context_blocks = (
         ("catalog", "Game query directory (" + catalog["schema_id"] + "):\n" + json.dumps(directory, ensure_ascii=False, separators=(",", ":"))),
         ("reminder_completion", "\nAnswer once the requested facts are known; read more only for an unresolved fact."),
@@ -257,7 +272,7 @@ def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHa
                 "type": "object", "properties": {"types": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8}},
                 "required": ["types"], "additionalProperties": False,
             }, describe),
-        ) + spatial_tools,
+        ) + spatial_tools + tuple(world_tools),
         context="".join(text for _,text in context_blocks),
         # Capability-driven, but opt-in: the Mod must advertise a per-surface result
         # description AND the run must explicitly select the candidate arm. See

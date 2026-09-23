@@ -466,6 +466,8 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
             "snapshot_sequence": sequence,
             "labels": labels,
             "subject": subject,
+            "observed_rows": rows,
+            "native_state_complete": node.get("_native_state_complete") is True,
         })
 
     def walk(node: Any, subject: str | None, depth: int,
@@ -480,6 +482,36 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
         if not isinstance(node, Mapping):
             return
         budget[0] -= 1
+        # Native world-state rows bind facets to target identity. Normalize only
+        # observed native collections into the same evidence representation as look;
+        # this is an index view, not a mutation or a synthetic game observation.
+        target = node.get("target")
+        facets = node.get("facets")
+        if isinstance(target, Mapping) and isinstance(facets, Mapping) and isinstance(target.get("id"), str):
+            pawn = facets.get("pawn")
+            if isinstance(pawn, Mapping) and pawn.get("status") == "observed":
+                normalized = {"id": target["id"], "name": target.get("name"), "health": {}, "profile": {}}
+                for field, parent, relation, options in (
+                    ("capacities", "health", "Health.capacities", {}),
+                    ("conditions", "health", "Health.conditions", {"visible_only": True}),
+                    ("skills", "profile", "Profile.skills", {}),
+                    ("traits", "profile", "Profile.traits", {}),
+                ):
+                    values = pawn.get(field)
+                    if not isinstance(values, list):
+                        continue
+                    normalized[parent][field] = {
+                        "rows": [{("def_name" if key == "definition" else key): value for key, value in row.items()}
+                                 for row in values if isinstance(row, Mapping)],
+                        "matched_count": len(values), "scan_complete": True, "fields_complete": True,
+                        "page": {"offset": 0, "has_more": False},
+                        "scope": {"relation": relation, "args": options, "where": {}},
+                        "_native_state_complete": field == "capacities",
+                    }
+                row_sample = sample
+                if sample is not None and type(node.get("sample_tick")) is int:
+                    row_sample = (*sample[:3], node["sample_tick"], sample[-1])
+                walk(normalized, None, depth + 1, (), row_sample, ())
         local = subject
         for key in _SUBJECT_KEYS:
             value = node.get(key)
@@ -550,6 +582,22 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
         elif (not item["complete"] and key in later_complete
               and later_complete[key] >= item["snapshot_sequence"]):
             item["superseded"] = True
+    # A full native state read remains evidence after a narrower projection of
+    # the same capacities in the same tick ONLY when all overlapping identities
+    # and values still agree. Later contradictory data never inherits that proof.
+    completed_state = [c for c in index["collections"] if c.get("native_state_complete") and c.get("refresh_complete")]
+    for partial in index["collections"]:
+        if partial["complete"] or partial.get("superseded") or not partial.get("refresh_key"):
+            continue
+        for complete in completed_state:
+            if complete.get("refresh_key") != partial["refresh_key"] or complete["snapshot_sequence"] > partial["snapshot_sequence"]:
+                continue
+            known = {row.get("def_name"): row.get("level") for row in complete.get("observed_rows", []) if isinstance(row, Mapping)}
+            observed = partial.get("observed_rows", [])
+            if known and observed and all(isinstance(row, Mapping) and row.get("def_name") in known
+                                          and "level" in row and row["level"] == known[row["def_name"]] for row in observed):
+                partial["superseded"] = True
+                break
     # 聚合完整性与明细完整性可能来自**不同的结果节点**（先查聚合，再查明细页）。
     # 返回契约按“同一总体”判定，所以把同一 from/args/where 的完整聚合关联到
     # 该总体的所有集合条目上。不同 def/范围 → 不同签名 → 不会互相授权。
