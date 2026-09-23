@@ -14,6 +14,8 @@ _unavailable/provenance 这类代号，也不把 unknown 落成 0/null。
 """
 from __future__ import annotations
 
+from .prompt import PLAIN_FINISH_GUIDANCE
+
 import copy
 from dataclasses import dataclass, field
 
@@ -198,9 +200,7 @@ SEMANTIC_REMINDERS = (
 
 INTRO = TOOL_GUIDE + '\n' + SEMANTIC_REMINDERS + '\nFinish with submit_response. Do not invent facts the tools did not return.'
 
-FINISH = ('Finish with submit_response: answer is one concise text string covering each explicit question; detail holds full findings. '
-          'Answer is at most 180 tokens, combined text at most 12000 characters. Preserve scope and unknowns; '
-          'fix only rejected fields.')
+FINISH = PLAIN_FINISH_GUIDANCE
 
 
 # --- schema -------------------------------------------------------------------

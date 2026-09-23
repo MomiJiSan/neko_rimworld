@@ -694,3 +694,21 @@ state facets. State context distinguishes `user` (recipient) and `actor`
 coverage and unsupported facets; no universal usable/safe verdict or game
 mutation is provided. Cursor pages retain detached facts from the original
 observation, not fresh state. Older Mods do not advertise these tools.
+
+
+### V2.2.1 redo
+
+The earlier summary-pruning/prompt candidates remain experiment artifacts.
+Production tools keep their names, inputs, full Pawn evidence and existing
+summary/details behavior. The Mod now attaches object-selection scope,
+reservation direction and resolved context to observations, and formats roof
+support identity/location references before paging. Inspect object state when
+full containment/component metadata is needed; support references are not a
+second full state listing.
+
+Plain-text submission wording is maintained in agent/prompt.py and imported by
+the submission schema and finish reminder. This is a maintenance refactor:
+system/finalization prompts and the model-visible submission schema were checked
+byte-for-byte against c59fa5e. The new wording trial was not promoted. Existing
+180-token/12000-character limits, soft cycle guidance, name-direct resolution and
+semantic validators are unchanged.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .prompt import PLAIN_ANSWER_GUIDANCE, PLAIN_DETAIL_GUIDANCE, PLAIN_SUBMISSION_GUIDANCE
+
 import copy
 import json
 import re
@@ -598,16 +600,12 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
     if not references_supported:
         spec.parameters["properties"]["answer"] = {
             "type": "string", "minLength": 1,
-            "description": "Short answer delivered to the caller: answer every explicit question with a conclusion or unknown. Aim for <=120 tokens; hard maximum 180 tokens. Put full tables in detail; keep the core interpretations here before optional metadata."
+            "description": PLAIN_ANSWER_GUIDANCE
         }
-        spec.parameters["properties"]["detail"]["description"] = (
-            "Complete factual report: put requested lists, tables, per-person findings and scope explanations here "
-            "when they do not fit the concise conclusion. Answer and detail together must cover the question. "
-            "May expand facts summarized in answer. Omit only if answer suffices; null clears saved detail."
-        )
+        spec.parameters["properties"]["detail"]["description"] = PLAIN_DETAIL_GUIDANCE
         return ToolSpec(
             name=spec.name,
-            description="Finish with answer as one concise text string covering each explicit question (aim <=120 tokens, maximum 180) and detail for the complete requested factual report (answer plus detail <=12000 characters). Include detail whenever answer alone cannot cover the question. Both must agree; the conclusion may summarize facts expanded in detail. Submit after reading the evidence. Changing answer requires resubmitting matching saved detail or explicitly clearing it; preserve detail needed for task coverage.",
+            description=PLAIN_SUBMISSION_GUIDANCE,
             parameters=spec.parameters,
             handler=submit,
             terminal=True,

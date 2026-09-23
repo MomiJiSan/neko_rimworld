@@ -92,3 +92,10 @@ def build_runtime_advisory(
 
 __all__ = ["build_runtime_advisory", "build_system_prompt", "build_finalization_prompt",
            "system_sections", "finalization_sections"]
+
+
+# Existing plain-text policy wording lives here; preserve each surface verbatim.
+PLAIN_ANSWER_GUIDANCE = 'Short answer delivered to the caller: answer every explicit question with a conclusion or unknown. Aim for <=120 tokens; hard maximum 180 tokens. Put full tables in detail; keep the core interpretations here before optional metadata.'
+PLAIN_DETAIL_GUIDANCE = 'Complete factual report: put requested lists, tables, per-person findings and scope explanations here when they do not fit the concise conclusion. Answer and detail together must cover the question. May expand facts summarized in answer. Omit only if answer suffices; null clears saved detail.'
+PLAIN_SUBMISSION_GUIDANCE = 'Finish with answer as one concise text string covering each explicit question (aim <=120 tokens, maximum 180) and detail for the complete requested factual report (answer plus detail <=12000 characters). Include detail whenever answer alone cannot cover the question. Both must agree; the conclusion may summarize facts expanded in detail. Submit after reading the evidence. Changing answer requires resubmitting matching saved detail or explicitly clearing it; preserve detail needed for task coverage.'
+PLAIN_FINISH_GUIDANCE = 'Finish with submit_response: answer is one concise text string covering each explicit question; detail holds full findings. Answer is at most 180 tokens, combined text at most 12000 characters. Preserve scope and unknowns; fix only rejected fields.'

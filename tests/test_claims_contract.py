@@ -180,3 +180,19 @@ def test_another_results_complete_aggregate_cannot_license_this_one(entry):
 ])
 def test_last_page_is_not_full_detail_but_aggregate_can_be_complete(entry, text, code):
     assert_contract(entry, text, observations(steel_result(offset=19, has_more=False)), code)
+
+
+@pytest.mark.parametrize("status", ["ok", "partial"])
+def test_world_scope_flags_license_held_but_not_fog_claim(entry, status):
+    reading = {"response": {"payload": {"status": status, "data": {
+        "objects_summary": {"records": 2, "scan_complete": status == "ok", "scope": {
+            "selection": {"capabilities": ["medicine"]},
+            "include_held": True, "visible_only": True,
+            "counts_apply_to": "matching_objects_in_observed_footprint",
+        }}, "objects": [],
+    }}}}
+    assert_contract(entry, "本次范围包含被持有物。", [reading])
+    assert_contract(entry, "本次包含迷雾。", [reading], "fog_inclusive_claim")
+    reading["response"]["payload"] = {"status": "error", "data": None}
+    reading["request"] = {"arguments": {"include_held": True}}
+    assert_contract(entry, "本次范围包含被持有物。", [reading], "held_inclusive_claim")
