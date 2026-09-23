@@ -44,7 +44,7 @@ GROUPINGS = ('definition', 'category', 'holder', 'map')
 OBJECT_SELECTORS = {
     'game': (),
     'maps': ('ids', 'names'),
-    'map': ('ids', 'names'),
+    'map': ('ids', 'names', 'map'),
     'colony': (),
     'pawn': ('ids', 'names', 'map'),
     'pawns': ('ids', 'names', 'map'),
@@ -198,7 +198,7 @@ SEMANTIC_REMINDERS = (
 
 INTRO = TOOL_GUIDE + '\n' + SEMANTIC_REMINDERS + '\nFinish with submit_response. Do not invent facts the tools did not return.'
 
-FINISH = ('Finish with submit_response: answer:[{text:brief conclusion}], detail for required full findings. '
+FINISH = ('Finish with submit_response: answer is one concise text string covering each explicit question; detail holds full findings. '
           'Answer is at most 180 tokens, combined text at most 12000 characters. Preserve scope and unknowns; '
           'fix only rejected fields.')
 
@@ -217,7 +217,7 @@ def _object_schema():
             'ids': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Exact native object IDs.'},
             'definition': {'type': 'string', 'description': 'Exact def_name or localized definition label.'},
             'category': {'type': 'string', 'description': 'Definition category, e.g. Building.'},
-            'map': {'type': 'string', 'default': 'current'},
+            'map': {'type': 'string', 'default': 'current', 'description': 'Loaded map ID or current. For kind map this selects the map itself (alias for id); for Pawn/Thing populations it restricts their map scope.'},
             'include_held': {'type': 'boolean', 'default': True,
                              'description': 'true = also count/count things inside holders (inventory, containers, equipment). '
                                             'false = only things spawned on the map. The question "including what people carry" '
@@ -320,9 +320,15 @@ def spatial_tool_schema(directory=None):
                    'Ambiguous names return candidates. No work eligibility, reservation, '
                    'blocking-cause diagnosis or future-action guarantee. ')
     if route_supported:
+        target = parameters['properties']['to']
+        parameters['properties']['to'] = {'oneOf': [target, {'type':'array','items':copy.deepcopy(target),'minItems':1,'maxItems':8}],
+            'description':'One target, or up to eight targets for the same actor. Use a list for comparisons.'}
+        parameters['properties']['order_by'] = {'type':'string','enum':['path_length','steps','native_cost'],
+            'description':'For a target list, request routes and program-sort ascending by this metric. Equal values share rank. Unknown routes remain unranked. Do not manually reorder the returned ranks.'}
+        description += 'For comparisons use a target list with order_by; the program calculates ranks and ties. '
         description += ('Use detail="route" to also get a native path summary in this call; '
                         'do not call reachability first. Default summary computes no path. '
-                        'Steps, geometric grid distance and native weighted cost are different; '
+                        'Steps, length summed along the returned path and native weighted cost are different; '
                         'none is ETA, and the returned path is not guaranteed shortest.')
     else:
         description += 'This connection provides reachability only; no route or distance tool is available.'
@@ -388,6 +394,8 @@ def normalize_object(raw):
             if type(raw[key]) is not bool:
                 raise SurfaceError(key + ' must be a boolean')
             obj[key] = raw[key]
+    if kind == 'map' and 'map' in obj and ('ids' in obj or 'names' in obj):
+        raise SurfaceError('map reads one map: use map, id/ids, or name/names, not competing selectors')
     if 'definition' in obj and 'category' in obj:
         raise SurfaceError('use either definition or category, not both')
     if kind in ('colonists', 'things', 'pawns'):
@@ -467,7 +475,7 @@ def route_object(obj):
             args['ids'] = list(obj['ids'])
         return ROOTS[kind], args, where
     if kind == 'map':
-        args['id'] = obj['ids'][0] if 'ids' in obj else 'current'
+        args['id'] = obj['ids'][0] if 'ids' in obj else obj.get('map', 'current')
         return ROOTS[kind], args, where
     if kind in ('pawn', 'pawns'):
         if kind == 'pawn' and 'ids' in obj and len(obj['ids']) == 1 and 'map' not in obj:

@@ -23,6 +23,8 @@ plus `finalizing` and `supports_finalization`.
 
 from __future__ import annotations
 
+import copy
+
 import os
 from typing import Any
 
@@ -270,8 +272,14 @@ class SemanticInteraction:
         return render(plan, native, resolution)
 
     async def inspect_space(self, args: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(args, dict) or not isinstance(args.get("from"), dict) or not isinstance(args.get("to"), dict):
+        if not isinstance(args, dict) or not isinstance(args.get("from"), dict):
             raise SurfaceError("inspect_space requires from and to references")
+        if isinstance(args.get("to"), list):
+            return await self._inspect_many(args)
+        if "order_by" in args:
+            raise SurfaceError("order_by requires a target list; wrap to in an array")
+        if not isinstance(args.get("to"), dict):
+            raise SurfaceError("to must be a reference or a bounded target list")
         detail = args.get("detail", "summary")
         if detail not in ("summary", "route"):
             raise SurfaceError('detail must be summary or route')
@@ -309,8 +317,44 @@ class SemanticInteraction:
             "issues": native.get("issues", []),
         }
         if "route" in data:
-            rendered["route"] = data["route"]
+            route = copy.deepcopy(data["route"])
+            # Keep the wire alias for older consumers, but expose one unambiguous
+            # quantity to the model. Never turn a route's length into endpoint distance.
+            if "path_length" not in route and "grid_distance" in route:
+                route["path_length"] = route["grid_distance"]
+            route.pop("grid_distance", None)
+            if isinstance(route.get("path_length"), dict):
+                route["path_length"]["meaning"] = "Sum of segment lengths along this returned path; not straight-line distance between its endpoints."
+            route["optimality"] = {'status':'not_evaluated', 'meaning':'Neither shortest nor non-shortest has been established. No shortest-path proof was performed.'}
+            rendered["route"] = route
         return rendered
+
+    async def _inspect_many(self, args: dict[str, Any]) -> dict[str, Any]:
+        from .spatial_ranking import rank_paths
+        targets = args["to"]
+        if not 1 <= len(targets) <= 8 or not all(isinstance(t, dict) for t in targets):
+            raise SurfaceError("to requires 1..8 target references")
+        capability = self.setup.directory.get("spatial_query", {})
+        if capability.get("route_summary") != "native_path_summary.v1":
+            raise SurfaceError("This connection does not support route comparisons")
+        by = args.get("order_by")
+        if by is not None and by not in ("path_length", "steps", "native_cost"):
+            raise SurfaceError("order_by must be path_length, steps or native_cost")
+        detail = args.get("detail", "route" if by else "summary")
+        if detail not in ("summary", "route") or by and detail != "route":
+            raise SurfaceError("Ordering needs routes; omit detail or use route")
+        self._validate_space_ref(args["from"], "from", {"pawn"})
+        for i, target in enumerate(targets):
+            self._validate_space_ref(target, f"to[{i}]", {"thing", "cell"})
+        rows = []
+        for i, target in enumerate(targets):
+            try:
+                value = await self.inspect_space({"from":args["from"], "to":target, "detail":detail})
+            except ToolExecutionError as error:
+                if not error.recoverable: raise
+                value = {"answer":"unknown", "error":{"code":error.code,"message":str(error)}}
+            rows.append({"input_index":i,"requested_target":copy.deepcopy(target),"result":value})
+        return rank_paths(rows, by)
 
     @staticmethod
     def _validate_space_ref(value: dict[str, Any], path: str, kinds: set[str]) -> None:

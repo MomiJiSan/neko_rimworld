@@ -489,6 +489,15 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
     from .tools import ToolExecutionError, ToolSpec
 
     async def submit(arguments):
+        arguments = dict(arguments)
+        if not references_supported:
+            answer = arguments.get("answer")
+            if isinstance(answer, str):
+                arguments["answer"] = [{"text": answer}]
+            elif isinstance(answer, dict) and set(answer) == {"text"}:
+                # Unambiguous legacy shape, lossless normalization only. Token,
+                # content and evidence checks still run through the same draft.
+                arguments["answer"] = [answer]
         parts = arguments.get("answer")
         if (
             not references_supported
@@ -496,16 +505,27 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
             and any(isinstance(part, dict) and "observation_id" in part for part in parts)
         ):
             raise ToolExecutionError(
-                "unsupported_reference", "This Mod lacks result descriptions; submit text answer parts."
+                "unsupported_reference", "This Mod lacks result descriptions; submit answer as a plain text string."
             )
         try:
             result = draft.apply(arguments, observations=observations,
                                  references_supported=references_supported,
                                  claims_supported=claims_supported)
         except SubmissionPatchError as error:
+            message = str(error)
+            details = error.details
+            if not references_supported:
+                import copy
+                def text_feedback(value):
+                    return value.replace("Submit answer parts, optional detail and language.", "Submit answer as text, optional detail and language.").replace("answer.text", "answer").replace("answer requires 1..16 ordered parts matching the submission schema.", "answer must be a nonempty text string.").replace("Provide answer parts for the short handoff; detail cannot replace them.", "Provide the short answer text; detail cannot replace it.")
+                message = text_feedback(message)
+                details = copy.deepcopy(details)
+                for field_error in details.get("field_errors", {}).values():
+                    if isinstance(field_error.get("message"), str):
+                        field_error["message"] = text_feedback(field_error["message"])
             if on_update is not None:
-                on_update(draft.snapshot(), "submission_patch_rejected", error.details)
-            raise ToolExecutionError(error.code, str(error), details=error.details) from None
+                on_update(draft.snapshot(), "submission_patch_rejected", details)
+            raise ToolExecutionError(error.code, message, details=details) from None
         if on_update is not None:
             on_update(
                 draft.snapshot(),
@@ -576,22 +596,18 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
         terminal=True,
     )
     if not references_supported:
-        spec.parameters["properties"]["answer"]["description"] = (
-            "Concise conclusion passed to the caller, at most 180 tokens across all parts. "
-            "Leave room below the limit; preserve scope and unknowns that affect its meaning. "
-            "It need not repeat every fact or row from detail."
-        )
+        spec.parameters["properties"]["answer"] = {
+            "type": "string", "minLength": 1,
+            "description": "Short answer delivered to the caller: answer every explicit question with a conclusion or unknown. Aim for <=120 tokens; hard maximum 180 tokens. Put full tables in detail; keep the core interpretations here before optional metadata."
+        }
         spec.parameters["properties"]["detail"]["description"] = (
             "Complete factual report: put requested lists, tables, per-person findings and scope explanations here "
             "when they do not fit the concise conclusion. Answer and detail together must cover the question. "
             "May expand facts summarized in answer. Omit only if answer suffices; null clears saved detail."
         )
-        spec.parameters["properties"]["answer"]["items"]["oneOf"] = spec.parameters["properties"]["answer"]["items"][
-            "oneOf"
-        ][:1]
         return ToolSpec(
             name=spec.name,
-            description="Finish with text answer parts for the concise conclusion (180 tokens total) and detail for the complete requested factual report (answer plus detail <=12000 characters). Include detail whenever answer alone cannot cover the question. Both must agree; the conclusion may summarize facts expanded in detail. Submit after reading the evidence. Changing answer requires resubmitting matching saved detail or explicitly clearing it; preserve detail needed for task coverage.",
+            description="Finish with answer as one concise text string covering each explicit question (aim <=120 tokens, maximum 180) and detail for the complete requested factual report (answer plus detail <=12000 characters). Include detail whenever answer alone cannot cover the question. Both must agree; the conclusion may summarize facts expanded in detail. Submit after reading the evidence. Changing answer requires resubmitting matching saved detail or explicitly clearing it; preserve detail needed for task coverage.",
             parameters=spec.parameters,
             handler=submit,
             terminal=True,

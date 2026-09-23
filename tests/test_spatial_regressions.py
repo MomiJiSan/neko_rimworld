@@ -101,3 +101,51 @@ def test_old_spatial_mod_does_not_advertise_or_dispatch_route():
     from plugin.plugins.neko_rimworld.agent.tools import ToolExecutionError
     with pytest.raises(ToolExecutionError):
         asyncio.run(spec.handler({'from':{'kind':'pawn','id':'p'},'to':{'kind':'thing','id':'t'},'detail':'route'}))
+
+
+def test_map_alias_routes_to_map_identity_without_scope_conflict():
+    obj=surface.normalize_object({'kind':'map','map':'Map_0'})
+    assert surface.route_object(obj)==('map',{'id':'Map_0'},None)
+    assert surface.route_object(surface.normalize_object({'kind':'map','id':'Map_0'}))==surface.route_object(obj)
+    with pytest.raises(surface.SurfaceError):
+        surface.normalize_object({'kind':'map','map':'Map_0','id':'Map_1'})
+
+
+def test_route_adapter_displays_along_path_length_without_mutating_observation():
+    import asyncio
+    from .test_semantic_tools import setup_for, Session, _update
+    from plugin.plugins.neko_rimworld.agent.semantic_tools import semantic_interaction_factory
+    adapter=semantic_interaction_factory(setup_for(spatial=True),Session(),_update)
+    data={'answer':'reachable','route':{'status':'found','grid_distance':{'value':238.9066,'unit':'map_cell_widths'},'steps':195}}
+    saved=copy.deepcopy(data)
+    async def native(*args,**kwargs): return {'data':data,'issues':[]}
+    adapter.execute_native=native
+    output=asyncio.run(adapter.inspect_space({'from':{'kind':'pawn','id':'p'},'to':{'kind':'thing','id':'t'}}))
+    assert output['route']['path_length']['value']==238.9066
+    assert 'not straight-line' in output['route']['path_length']['meaning']
+    assert 'grid_distance' not in output['route']
+    assert data==saved
+
+
+def test_map_alias_through_real_look_handler():
+    import asyncio
+    from .test_semantic_tools import public_source, Session, _update
+    from plugin.plugins.neko_rimworld.query_tools import make_game_tools
+    from plugin.plugins.neko_rimworld.agent.semantic_tools import semantic_interaction_factory
+    from plugin.plugins.neko_rimworld.observation import Observation
+    from plugin.plugins.neko_rimworld.protocol import QUERY_RESULT, Payload, SessionDescriptor, make_envelope
+    source=public_source();p=source['public_query']
+    p['roots'].append({'from':'map','type':'Map','description':'One map'})
+    p['field_index']['Map']={'id':'String','name':'String'}
+    p['parameters']['properties']['requests']['items']['allOf'][0]['oneOf'].append({'properties':{'from':{'const':'map'},'args':{'type':'object','properties':{'id':{'type':'string'}}}}})
+    calls=[]
+    async def backend(request):
+        calls.append(request)
+        data={'results':[{'from':'map','scan_complete':True,'fields_complete':True,'matched_count':1,'known_matches':1,'rows':[{'id':'Map_0','name':'Home'}],'page':{'offset':0,'returned':1,'has_more':False},'scope':{'args':{'id':'Map_0'}}}]}
+        env=make_envelope(QUERY_RESULT,'1'*32,1,payload=Payload(status='ok',data=data,issues=[]),session=SessionDescriptor('2'*32,'3'*32,1,1),request_id='4'*32)
+        return Observation.from_response(request['operation'],request['arguments'],env)
+    adapter=semantic_interaction_factory(make_game_tools(source,backend),Session(),_update)
+    result=asyncio.run(adapter.look({'object':{'kind':'map','map':'Map_0'},'aspects':['identity']}))
+    assert len(calls)==1 and calls[0]['arguments']['from']=='map'
+    assert calls[0]['arguments']['args']=={'id':'Map_0'}
+    assert result['facts'][0]['object']['id']=='Map_0'

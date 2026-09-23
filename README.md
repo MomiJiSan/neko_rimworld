@@ -617,3 +617,37 @@ completed valid summary that exceeds the cooperative 12ms target is preserved
 with `route_budget_overrun` and `read_budget_exceeded`, not discarded or retried.
 Node reduction remains bounded. This is not a hard frame-time or travel-time
 guarantee, nor a diagnosis of which obstacle caused a negative reachability result.
+
+## Interaction contract refinement
+
+`look` accepts `object={kind:"map",map:"Map_0"}` as an alias for the map ID.
+Competing id/name/map selectors are rejected before any read.
+
+Agent-facing route results call the length `path_length`: the sum along every
+segment of the returned path, not straight-line endpoint distance. The native
+wire retains `grid_distance` for older consumers; raw observations are unchanged
+by the Agent projection, which exposes only one length field.
+
+When observation references are disabled, `submit_response.answer` is now one
+plain string. Ordered text parts and an unambiguous `{text:...}` object remain
+accepted for compatibility, then pass through the same draft/evidence/token
+validation. Unknown nested fields are not discarded. Reference-enabled tools
+retain their parts schema. The 180-token answer, 200-token host transport and
+12000-character report limits are unchanged. Guidance aims below the maximum
+and puts every explicit question's conclusion/unknown in the short handoff,
+with tables and supporting facts in detail. This is not an automatic semantic
+coverage checker or a guarantee against model omissions.
+
+For route-capable connections, `inspect_space.to` also accepts a bounded list of
+1–8 targets. Comparisons can set `order_by` to `path_length`, `steps`, or
+`native_cost`; this requests route detail and sorts valid returned values in
+code. Equal values share rank, zero remains valid, and unknown or unsupported
+paths remain unranked. Every row retains its original target index, identity,
+and sample. Reads are sequential, not an atomic snapshot; a world change aborts
+the call and different resolved actors prevent ranking. The single-target
+contract is unchanged and no game action is executed.
+
+The route projection explicitly returns `optimality.status="not_evaluated"`:
+neither shortest nor non-shortest has been established. This prevents the
+contract from conflating an absent shortest-path proof with a non-shortest path,
+but does not guarantee that a model will paraphrase it correctly.

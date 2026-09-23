@@ -197,3 +197,48 @@ def test_text_fallback_applies_same_capability_and_token_feedback():
         draft.apply({"answer": [{"text": "结论", "language": "zh"}]}, references_supported=False)
     assert "observation_id" not in str(rejected.value)
     assert draft.detail == "保留完整报告"
+
+
+@pytest.mark.asyncio
+async def test_text_submission_string_and_legacy_shapes_share_validation():
+    from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft, make_submission_tool
+    from plugin.plugins.neko_rimworld.agent.tools import ToolExecutionError
+    conclusion='可达，150步；终点是可触及位置，并非站入目标格。'
+    outputs=[]
+    for value in (conclusion, {'text':conclusion}, [{'text':conclusion}]):
+        draft=SubmissionDraft();tool=make_submission_tool(draft,[],references_supported=False)
+        assert tool.parameters['properties']['answer']['type']=='string'
+        await tool.handler({'answer':value,'detail':'完整路径及范围。'})
+        outputs.append((draft.agent_text,draft.full_text))
+    assert outputs[0]==outputs[1]==outputs[2]
+    assert outputs[0][0]==conclusion
+    with pytest.raises(ToolExecutionError) as error:
+        await make_submission_tool(SubmissionDraft(),[],references_supported=False).handler({'answer':'这是很长的结论。'*300})
+    assert error.value.code=='handoff_over_budget'
+
+
+def test_handoff_guidance_prioritizes_each_explicit_question_without_new_gate():
+    from plugin.plugins.neko_rimworld.agent.prompt import build_system_prompt,build_finalization_prompt
+    for prompt in (build_system_prompt(4,references_supported=False),build_finalization_prompt(4,references_supported=False)):
+        assert 'each explicit question' in prompt
+        assert 'one concise text string' in prompt
+        assert '120 tokens' in prompt and '180' in prompt
+
+
+@pytest.mark.asyncio
+async def test_invalid_text_submission_feedback_matches_public_string_schema():
+    from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft, make_submission_tool
+    from plugin.plugins.neko_rimworld.agent.tools import ToolExecutionError
+    tool=make_submission_tool(SubmissionDraft(),[],references_supported=False)
+    with pytest.raises(ToolExecutionError) as error:
+        await tool.handler({'answer':42})
+    assert 'nonempty text string' in str(error.value)
+    assert 'ordered parts' not in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_legacy_single_object_does_not_drop_extra_fields():
+    from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft, make_submission_tool
+    from plugin.plugins.neko_rimworld.agent.tools import ToolExecutionError
+    with pytest.raises(ToolExecutionError):
+        await make_submission_tool(SubmissionDraft(),[],references_supported=False).handler({'answer':{'text':'结论','language':'zh'}})
