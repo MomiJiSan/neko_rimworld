@@ -51,6 +51,7 @@ from .semantic_surface import (
 )
 from .tools import ToolExecutionError, ToolSpec
 from .wiki_tools import WIKI_GUIDANCE
+from .world_order import order_world_fields
 
 # Only this explicitly approved non-observation tool survives the adapter.
 PASSTHROUGH_TOOLS = frozenset({"wiki"})
@@ -190,7 +191,7 @@ class SemanticInteraction:
                     continue
                 async def observe(args, operation=name):
                     native = await self.execute_native(args, tool_name=operation)
-                    return native["data"]
+                    return order_world_fields(native["data"])
                 handlers[name] = observe
                 semantic_specs.append(spec)
         for tool in semantic_specs:

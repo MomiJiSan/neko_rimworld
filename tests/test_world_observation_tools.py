@@ -17,7 +17,7 @@ def test_capability_registration_dispatch_and_raw_evidence():
     source=catalog();before=copy.deepcopy(source);requests=[]
     async def backend(request):
         requests.append(copy.deepcopy(request))
-        payload={'status':'partial','objects':[{'target':{'id':'x'},'facets':{'bed':{'status':'unavailable'}}}],'sample':{'started_tick':10,'finished_tick':11},'coverage':{'complete':False}}
+        payload={'status':'partial','objects':[{'target':{'id':'x'},'facets':{'bed':{'status':'unavailable'},'condition':{'hit_points':None},'pawn':{'health_summary_fraction':1.0,'conditions':[{'definition':'Cataract'}],'status':'observed'},'stats':{'status':'unavailable'}}}],'sample':{'started_tick':10,'finished_tick':11},'coverage':{'complete':False}}
         env=make_envelope(QUERY_RESULT,'1'*32,len(requests),payload=Payload(status='partial',data=payload,issues=[{'code':'unavailable','message':'facet missing','path':[]}]),session=SessionDescriptor('2'*32,'3'*32,11,len(requests)),request_id='4'*32)
         return Observation.from_response(request['operation'],request['arguments'],env)
     session=Session();adapter=semantic_interaction_factory(make_game_tools(source,backend),session,_update)
@@ -26,6 +26,12 @@ def test_capability_registration_dispatch_and_raw_evidence():
     for name in NAMES:
         result=asyncio.run(specs[name].handler({'targets':[{'id':'x'}]}))
         assert result['coverage']['complete'] is False
+        facets=result['objects'][0]['facets']
+        assert list(facets)[:2]==['pawn','stats']
+        raw=session.observations[-1]['response']['payload']['data']['objects'][0]['facets']
+        assert facets==raw and list(raw)==['bed','condition','pawn','stats']
+        facets['pawn']['conditions'].clear()
+        assert len(raw['pawn']['conditions'])==1
     assert [r['operation']for r in requests]==list(NAMES)
     assert len(session.observations)==3 and source==before
     assert 'inspect_route' in adapter.prompt(4)

@@ -712,3 +712,17 @@ system/finalization prompts and the model-visible submission schema were checked
 byte-for-byte against c59fa5e. The new wording trial was not promoted. Existing
 180-token/12000-character limits, soft cycle guidance, name-direct resolution and
 semantic validators are unchanged.
+
+### V2.2.2 display ordering
+
+The three world-observation tools present Pawn injuries/capacities before the
+native overall-health summary, with state/stat/work facets nearer the front.
+This changes dictionary order only: every fact, path, array order, unknown,
+coverage flag and scope remains. The original native evidence is not mutated.
+Legacy look/count, tool inputs, prompts, budgets and validators are unchanged.
+
+Routing and completion-guidance candidates were evaluated separately and
+reverted. Local injury-recognition results support the display adjustment, but
+paired native regression does not demonstrate an overall accuracy or efficiency
+improvement; complex rescue remains unreliable. See the bench V222-RESULTS report
+for negative results and accounting limits. No new native Mod build is required.
