@@ -52,7 +52,7 @@ OBJECT_SELECTORS = {
     'pawns': ('ids', 'names', 'map'),
     'colonists': ('ids', 'names', 'map'),
     'thing': ('ids', 'names', 'map'),
-    'things': ('ids', 'names', 'definition', 'category', 'map', 'include_held', 'include_fogged'),
+    'things': ('ids', 'names', 'definition', 'category', 'map', 'include_held', 'include_fogged', 'capabilities'),
     'thing_def': ('definition',),
     'thing_defs': ('definition', 'category'),
 }
@@ -205,11 +205,24 @@ FINISH = PLAIN_FINISH_GUIDANCE
 
 # --- schema -------------------------------------------------------------------
 
+def capability_values(directory):
+    if not isinstance(directory, dict):
+        return ()
+    root = next((r for r in directory.get('roots', []) if r['from'] == 'things'), {})
+    if not any(a.get('name') == 'capabilities' for a in root.get('args', [])) or 'capabilities' not in directory.get('field_index', {}).get(root.get('type'), {}):
+        return ()
+    for tool in directory.get('world_observation', {}).get('tools', []):
+        if tool.get('name') == 'survey_space':
+            return tuple(tool.get('parameters', {}).get('properties', {}).get('select', {}).get('properties', {}).get('capabilities', {}).get('items', {}).get('enum', []))
+    return ()
+
+
 def _object_schema(directory=None):
+    capability_names = capability_values(directory)
     schema = {
         'type': 'object',
         'description': 'Closed object selector. Supported selectors by kind: ' + '; '.join(
-            kind + ': ' + (', '.join(selectors) if selectors else 'none')
+            kind + ': ' + (', '.join(s for s in selectors if s != 'capabilities' or capability_names) if selectors else 'none')
             for kind, selectors in OBJECT_SELECTORS.items()) + '. id aliases one ids entry; name aliases one names entry. No field names, paths or native argument keys.',
         'properties': {
             'kind': {'type': 'string', 'enum': list(KINDS)},
@@ -232,6 +245,14 @@ def _object_schema(directory=None):
         'required': ['kind'],
         'additionalProperties': False,
     }
+
+    values = capability_values(directory)
+    if values:
+        schema['properties']['capabilities'] = {
+            'type': 'array', 'minItems': 1, 'maxItems': len(values),
+            'items': {'type': 'string', 'enum': list(values)},
+            'description': 'For kind things: match any listed native capability, intersected with other selectors. Same membership as survey_space, without reading environment.',
+        }
 
     # Preserve the existing content-category selector on thing_defs. Only the
     # physical things predicate uses the native ThingCategory enum.
@@ -384,7 +405,7 @@ def normalize_object(raw):
             raise SurfaceError('use id or ids, not both')
         raw['ids'] = [_text(raw.pop('id'), 'id')]
     unknown = sorted(set(raw) - {'kind', 'name', 'names', 'ids', 'definition', 'category',
-                                 'map', 'include_held', 'include_fogged'})
+                                 'map', 'include_held', 'include_fogged', 'capabilities'})
     if unknown:
         raise SurfaceError('object does not accept: ' + ', '.join(unknown))
     kind = raw.get('kind')
@@ -395,7 +416,7 @@ def normalize_object(raw):
     if 'ids' in raw and ('name' in raw or 'names' in raw):
         raise SurfaceError('use exact ids or an exact display name, not both')
     allowed = OBJECT_SELECTORS[kind]
-    for key in ('name', 'names', 'ids', 'definition', 'category', 'map', 'include_held', 'include_fogged'):
+    for key in ('name', 'names', 'ids', 'definition', 'category', 'map', 'include_held', 'include_fogged', 'capabilities'):
         if key in raw and key not in allowed and not (key == 'name' and 'names' in allowed):
             raise SurfaceError('kind ' + kind + ' does not accept ' + key)
     obj = {'kind': kind}
@@ -407,6 +428,8 @@ def normalize_object(raw):
         obj['ids'] = _texts(raw['ids'], 'ids')
     if 'definition' in raw:
         obj['definition'] = _text(raw['definition'], 'definition')
+    if 'capabilities' in raw:
+        obj['capabilities'] = list(dict.fromkeys(_texts(raw['capabilities'], 'capabilities')))
     if 'category' in raw:
         obj['category'] = _text(raw['category'], 'category')
     if 'map' in raw:
@@ -534,6 +557,8 @@ def route_object(obj):
             args['def_names'] = [obj['definition']]
         elif 'category' in obj:
             where = {'definition.category': {'eq': obj['category']}}
+        if 'capabilities' in obj:
+            args['capabilities'] = list(obj['capabilities'])
         return 'things', args, where
     if kind == 'thing_def':
         args['def_name'] = obj['definition']
@@ -833,6 +858,8 @@ def lookup_spec(surface, obj):
         if args:
             block['args'] = args
         block['where'] = {field: {'in': names}}
+        if obj.get('capabilities'):
+            block.setdefault('args', {})['capabilities'] = list(obj['capabilities'])
         block['limit'] = 100
         return {'kind': 'names', 'field': field, 'names': names, 'match_fields': (field,),
                 'case_insensitive': False,

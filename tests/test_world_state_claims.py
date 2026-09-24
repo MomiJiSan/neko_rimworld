@@ -42,3 +42,15 @@ def test_intermediate_changed_capacity_is_not_hidden_by_later_matching_partial()
     readings[2]['response']['snapshot_sequence']=3
     capacities(readings[1])['rows'][0]['level']=-123
     assert check_claims(TEXT,observations=readings)
+
+
+def test_bounded_native_capacity_rows_do_not_license_full_comparison():
+    reading=native_state()
+    pawn=reading['response']['payload']['data']['objects'][0]['facets']['pawn']
+    pawn['capacities_total']=len(pawn['capacities'])
+    pawn['capacities']=pawn['capacities'][:1]
+    pawn['capacities_complete']=False
+    index=__import__('plugin.plugins.neko_rimworld.agent.claims',fromlist=['build_read_index']).build_read_index([reading])
+    native_collections=[row for row in index['collections']if row.get('native_state_complete')]
+    assert native_collections==[]
+    assert any(row['complete']is False for row in index['collections'])

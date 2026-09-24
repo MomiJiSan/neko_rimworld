@@ -196,3 +196,13 @@ def test_world_scope_flags_license_held_but_not_fog_claim(entry, status):
     reading["response"]["payload"] = {"status": "error", "data": None}
     reading["request"] = {"arguments": {"include_held": True}}
     assert_contract(entry, "本次范围包含被持有物。", [reading], "held_inclusive_claim")
+
+
+def test_partial_attribute_label_is_not_an_alias_for_its_owner(entry):
+    data = {"objects":[{"target":{"id":"Thing_Doctor","name":"Doctor"},"facets":{"pawn":{
+        "status":"observed","skills":[{"definition":"Medicine","label":"医疗","level":16}],
+        "skills_total":12,"skills_complete":False,
+    }}}]}
+    readings=[{"response":{"payload":{"status":"ok","data":data}}}]
+    assert_contract(entry, "3张床全部医疗标记。441格全部混凝土。", readings)
+    assert_contract(entry, "Doctor的全部12项技能已读取。", readings, "incomplete_quantifier_claim")

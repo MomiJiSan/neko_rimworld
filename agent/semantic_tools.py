@@ -33,6 +33,7 @@ from .prompt import build_finalization_prompt, build_system_prompt
 from .query_surface import Surface, SurfaceError
 from .semantic_surface import (
     TOOL_GUIDE,
+    capability_values,
     apply_lookup,
     interpret_lookup,
     lookup_spec,
@@ -52,6 +53,7 @@ from .semantic_surface import (
 from .tools import ToolExecutionError, ToolSpec
 from .wiki_tools import WIKI_GUIDANCE
 from .world_order import order_world_fields
+from .object_tools import ObjectReader, state_contract, extend_look_schema, OBJECT_GUIDE
 
 # Only this explicitly approved non-observation tool survives the adapter.
 PASSTHROUGH_TOOLS = frozenset({"wiki"})
@@ -146,6 +148,8 @@ class SemanticInteraction:
         self.surface.add_query_schema(self.original["query"].parameters)
         self.sample_identity: tuple[Any, Any] | None = None
         directory = setup.directory if isinstance(getattr(setup, "directory", None), dict) else {}
+        self.object_contract = state_contract(directory)
+        self.object_reader = ObjectReader(self) if self.object_contract else None
         self.spatial_supported = (directory.get("spatial_query", {}).get("version") == "spatial_query.v1" and "spatial_query" in self.original)
 
     # -- runtime contract -------------------------------------------------
@@ -158,10 +162,11 @@ class SemanticInteraction:
         the model may use instead.
         """
         build = build_finalization_prompt if self.finalizing else build_system_prompt
-        prompt = build(preferred_cycles, references_supported=self.references_supported) + "\n\n" + TOOL_GUIDE
+        guide = OBJECT_GUIDE if self.object_reader else TOOL_GUIDE
+        prompt = build(preferred_cycles, references_supported=self.references_supported) + "\n\n" + guide
         if not self.finalizing and "wiki" in self.original:
             prompt += "\n\n" + WIKI_GUIDANCE
-        if not self.finalizing and self.setup.directory.get("world_observation", {}).get("version") == "world_observation.v2.2":
+        if not self.object_reader and not self.finalizing and self.setup.directory.get("world_observation", {}).get("version") == "world_observation.v2.2":
             prompt += "\nUse survey_space for a neighborhood/region, inspect_route for a path AND its environment, and inspect_state for object state/occupancy/reservations. Resolve names directly; no preliminary look is required. user is the intended user/recipient, actor performs interaction/travel. All checks are current and read-only. Distinguish target position from stopping cell, building type from settings, and existing reservations from physical occupancy. Safety conclusions require returned environmental coverage; native Danger is not comprehensive safety. Unsupported facets and hidden cells are unknown.\n"
         return prompt
 
@@ -180,6 +185,8 @@ class SemanticInteraction:
         handlers = {"look": self.look, "count": self.count}
         specs = []
         semantic_specs = tool_schemas(self.setup.directory)
+        if self.object_contract:
+            semantic_specs = [extend_look_schema(spec, self.object_contract) if spec["name"] == "look" else spec for spec in semantic_specs]
         if self.spatial_supported:
             semantic_specs.append(spatial_tool_schema(self.setup.directory))
             handlers["inspect_space"] = self.inspect_space
@@ -187,6 +194,8 @@ class SemanticInteraction:
         if world.get("version") == "world_observation.v2.2":
             for spec in world.get("tools", []):
                 name = spec["name"]
+                if name == "inspect_state" and self.object_reader:
+                    continue
                 if name not in self.original:
                     continue
                 async def observe(args, operation=name):
@@ -262,6 +271,7 @@ class SemanticInteraction:
             status=payload["status"],
             data=pack(payload.get("data"), payload.get("issues", [])),
             issues=payload.get("issues", []),
+            pages=[copy.deepcopy(row.get("page")) for row in (payload.get("data") or {}).get("results", []) if isinstance(row, dict)],
         )
 
     async def _resolve(self, obj: dict[str, Any]):
@@ -280,22 +290,45 @@ class SemanticInteraction:
     # -- tools ------------------------------------------------------------
 
     async def look(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.object_reader:
+            return await self.object_reader.look(args)
+        if any(key in args for key in ("stats", "actor", "user")):
+            raise SurfaceError("This connection does not support unified state options")
+        return await self._look_legacy(args)
+
+    def _validate_capabilities(self, obj):
+        if "capabilities" in obj:
+            allowed = capability_values(self.setup.directory)
+            if not allowed or any(value not in allowed for value in obj["capabilities"]):
+                raise SurfaceError("Unsupported capability selection on this connection")
+
+    async def _look_legacy(self, args: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(args, dict) or "object" not in args or "aspects" not in args:
             raise SurfaceError("look requires object and aspects")
         original = normalize_object(args["object"])
+        self._validate_capabilities(original)
         aspects = validate_aspects(original["kind"], args["aspects"])
         detail = validate_detail(args.get("detail", 0))
         obj, resolution, lookup_native = await self._resolve(original)
         if obj is None:
             return render_blocked("look", original, resolution, lookup_native)
         plan = plan_look(self.surface, obj, aspects, detail)
+        if self.object_reader:
+            offset = args.get("offset", 0)
+            if type(offset) is not int or not 0 <= offset <= 8192:
+                raise SurfaceError("offset must be 0..8192")
+            plan.request["offset"] = offset
         native = await self.execute_native(plan.request)
-        return _with_field_semantics(render(plan, native, resolution))
+        result = _with_field_semantics(render(plan, native, resolution))
+        if self.object_reader:
+            result["page"] = copy.deepcopy((native.get("pages") or [None])[0] or {})
+        return result
 
     async def count(self, args: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(args, dict) or "object" not in args or "metric" not in args:
             raise SurfaceError("count requires object and metric")
         original = normalize_object(args["object"])
+        self._validate_capabilities(original)
         metric = validate_metric(original["kind"], args["metric"])
         by = validate_by(original["kind"], args.get("by"))
         detail = validate_detail(args.get("detail", 0))

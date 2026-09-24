@@ -686,8 +686,8 @@ region/safety/rescue-action tool or task-specific scoring rule was added.
 ## V2.2 world observation
 
 When the connected Mod advertises `world_observation.v2.2`, the Agent also gets
-`survey_space`, `inspect_route`, and `inspect_state`. The existing tools remain
-unchanged. Use a region to discover objects/counts/environment, actor+target to
+`survey_space` and `inspect_route`. Older V2.2 contracts also expose `inspect_state`;
+V2.3-capable connections consolidate that entry into `look` as described below. Use a region to discover objects/counts/environment, actor+target to
 read a path and its environment in one call, or a target list to read applicable
 state facets. State context distinguishes `user` (recipient) and `actor`
 (traveller/interactor). Results retain original observations, sampling interval,
@@ -726,3 +726,33 @@ reverted. Local injury-recognition results support the display adjustment, but
 paired native regression does not demonstrate an overall accuracy or efficiency
 improvement; complex rescue remains unreliable. See the bench V222-RESULTS report
 for negative results and accounting limits. No new native Mod build is required.
+
+### V2.3 consolidated object reader
+
+On a Mod advertising the extended state contract, `look(object, aspects?, detail?,
+stats?, actor?, user?, offset?)` owns object facts. `inspect_state` remains a native
+compatibility operation, but is removed from the Agent tool list. Older connections
+keep their previous tools. Physical objects and cells default to `state`; request
+`identity`, `health`, `skills`, `gear` or `work` for smaller reads. Mood, biography,
+resources and definitions retain their established readers. Explicit `stats` uses
+native StatDefs; `actor` is the interactor/carrier and `user` the recipient, each
+specified by one ID or exact name.
+
+`look` and `count` accept `object.capabilities` for things, using the Mod's advertised
+capabilities and intersecting other selectors. Discovering medicine or sleeping
+places no longer requires an environment survey. Use `survey_space` for nearby or
+regional environment, `inspect_route` for route environment, and `inspect_space`
+for lightweight reachability and ranking. No universal usability/safety verdict is
+provided.
+
+Known single objects with native aspects resolve and read in one native operation.
+Population selection batches state internally; every original sample and partial
+result remains recorded. `page.next_offset` continues object rows using a fresh
+read, and size bounds remove whole rows rather than silently pruning facts. Nested
+list totals and completeness remain explicit. `detail` bounds Pawn/work lists;
+other facets retain their own limits. Large single-object results can still require
+fewer aspects. Existing held/fogged/map defaults and exact name ambiguity remain.
+
+The sealed 12-episode regression supports simpler discovery and object access,
+not a general reasoning-quality claim. Complex rescue still failed; see the bench
+`planning/V23-RESULTS.md` for the full result and post-run deterministic repairs.

@@ -354,6 +354,7 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
     index: dict[str, Any] = {
         "global": _new_subject(),
         "subjects": {},
+        "subject_names": {},
         "labels": {},
         "collections": [],
         # 这一轮读过哪些 root。用于 `identity_claim`：把“殖民者”当作**人口名词**
@@ -428,6 +429,7 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
                 "snapshot_sequence": sequence,
                 "labels": set(),
                 "subject": subject,
+                "owner_required": isinstance(node.get("scope"), Mapping) and bool(node["scope"].get("relation")),
             })
             return
         page = node.get("page") if isinstance(node.get("page"), Mapping) else {}
@@ -466,6 +468,7 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
             "snapshot_sequence": sequence,
             "labels": labels,
             "subject": subject,
+            "owner_required": isinstance(node.get("scope"), Mapping) and bool(node["scope"].get("relation")),
             "observed_rows": rows,
             "native_state_complete": node.get("_native_state_complete") is True,
         })
@@ -503,10 +506,10 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
                     normalized[parent][field] = {
                         "rows": [{("def_name" if key == "definition" else key): value for key, value in row.items()}
                                  for row in values if isinstance(row, Mapping)],
-                        "matched_count": len(values), "scan_complete": True, "fields_complete": True,
-                        "page": {"offset": 0, "has_more": False},
+                        "matched_count": pawn.get(field + "_total", len(values)), "scan_complete": True, "fields_complete": True,
+                        "page": {"offset": 0, "has_more": pawn.get(field + "_complete") is False},
                         "scope": {"relation": relation, "args": options, "where": {}},
-                        "_native_state_complete": field == "capacities",
+                        "_native_state_complete": field == "capacities" and pawn.get(field + "_complete") is not False,
                     }
                 row_sample = sample
                 if sample is not None and type(node.get("sample_tick")) is int:
@@ -518,6 +521,10 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
             if isinstance(value, str) and len(value) >= 3:
                 local = value
                 entry(value)
+                # Only names on the identity-bearing node identify its owner.
+                # Nested skill/condition labels are not aliases for that Pawn.
+                names = index["subject_names"].setdefault(value, set())
+                names.update(node[k] for k in _LABEL_KEYS if isinstance(node.get(k), str) and len(node[k]) >= 2)
                 break
         # Once a stable row identity is known, its child relations no longer
         # depend on how that row was selected (pawn by ID vs pawns filtered by ID).
@@ -776,6 +783,12 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
                 return item
         return None
 
+    def owner_is_bound(item, clause):
+        owner = item.get("subject")
+        if owner is None or not item.get("owner_required"):
+            return True
+        return owner in clause or any(name in clause for name in index.get("subject_names", {}).get(owner, ()))
+
     for pattern in QUANTIFIER_TOTAL_PATTERNS:
         for hit in re.finditer(pattern, text):
             if _hit_is_negated(text, hit):
@@ -784,7 +797,7 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
             clause = text[start:end]
             # 只看量词附近的数字：远处出现同一个数字不算数这个集合。
             local = _cited_numbers(hit.group(0))
-            item = next((c for c in partial if isinstance(c["total"], int) and c["total"] in local), None)
+            item = next((c for c in partial if isinstance(c["total"], int) and c["total"] in local and owner_is_bound(c, clause)), None)
             if item is None:
                 continue
             if _licenses_aggregate_narration(clause, item, require_noun=False):
@@ -797,7 +810,7 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
                 continue
             start, end = _clause_span(text, hit.start())
             clause = text[start:end]
-            item = next((c for c in partial if any(label in clause for label in c["labels"])), None)
+            item = next((c for c in partial if owner_is_bound(c, clause) and any(label in clause for label in c["labels"])), None)
             if item is None:
                 continue
             if _licenses_aggregate_narration(clause, item):
