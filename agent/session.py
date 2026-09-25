@@ -26,6 +26,9 @@ class AgentRunSession:
     interaction: Any = None  # Optional per-run adapter; never shared by the catalog cache.
     finalization_started: bool = False
     invalidated_error: str | None = None
+    review: dict[str, Any] = field(default_factory=dict)
+    review_initial_draft: SubmissionDraft | None = None
+    review_initial_delivery: dict[str, Any] | None = None
 
     @property
     def fallback_answer(self) -> str:
@@ -52,8 +55,8 @@ class AgentRunSession:
 
     def request_messages(self, advisory: str) -> list[dict[str, Any]]:
         return [
-            {"role": "system", "content": f"{self.messages[0]['content']}\n\n{advisory}"},
-            *self.messages[1:],
+            *self.messages,
+            {"role": "system", "content": advisory},
         ]
 
     def append_assistant(self, turn: AssistantTurn) -> None:

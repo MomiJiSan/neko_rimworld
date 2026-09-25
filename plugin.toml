@@ -46,6 +46,7 @@ finalization_reserve_seconds = 15.0
 stream_include_usage = true
 run_budget_seconds = 90.0
 preferred_cycles = 4
+review_before_delivery = false
 max_output_tokens = 32768
 temperature = 0.2
 

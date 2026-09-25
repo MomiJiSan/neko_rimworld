@@ -56,6 +56,7 @@ class AgentModelSettings:
     stream_idle_timeout_seconds: float = 20.0
     finalization_reserve_seconds: float = 15.0
     stream_include_usage: bool = True
+    review_before_delivery: bool = False
 
     @property
     def configured(self) -> bool:
@@ -87,6 +88,7 @@ class AgentModelSettings:
             "stream_idle_timeout_seconds": self.stream_idle_timeout_seconds,
             "finalization_reserve_seconds": self.finalization_reserve_seconds,
             "stream_include_usage": self.stream_include_usage,
+            "review_before_delivery": self.review_before_delivery,
         }
 
 
@@ -125,6 +127,7 @@ def build_agent_model_settings(
     stream_idle_timeout_seconds: object = 20.0,
     finalization_reserve_seconds: object = 15.0,
     stream_include_usage: object = True,
+    review_before_delivery: object = False,
 ) -> AgentModelSettings:
     if not isinstance(api_key, str):
         raise AgentConfigurationError("Agent API key must be text.")
@@ -178,6 +181,8 @@ def build_agent_model_settings(
         extra[name] = float(value)
     if not isinstance(stream_include_usage, bool):
         raise AgentConfigurationError("stream_include_usage must be a boolean.")
+    if not isinstance(review_before_delivery, bool):
+        raise AgentConfigurationError("review_before_delivery must be a boolean.")
 
     return AgentModelSettings(
         base_url=normalized_base,
@@ -189,6 +194,7 @@ def build_agent_model_settings(
         max_output_tokens=max_output_tokens,
         temperature=normalized_temperature,
         stream_include_usage=stream_include_usage,
+        review_before_delivery=review_before_delivery,
         **extra,
     )
 
@@ -222,6 +228,7 @@ def parse_agent_model_settings(config: object) -> tuple[AgentModelSettings, list
                 stream_idle_timeout_seconds=agent.get("stream_idle_timeout_seconds", 20.0),
                 finalization_reserve_seconds=agent.get("finalization_reserve_seconds", 15.0),
                 stream_include_usage=agent.get("stream_include_usage", True),
+                review_before_delivery=agent.get("review_before_delivery", False),
             ),
             [],
         )

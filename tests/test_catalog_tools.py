@@ -282,7 +282,7 @@ async def test_object_sections_batch_is_one_tool_call_with_schema_in_model_conte
                         ),
                     ),
                 )
-            payload = json.loads(messages[-1]["content"])["data"]["response"]["payload"]
+            payload = json.loads(next(m['content'] for m in reversed(messages) if m['role'] == 'tool'))["data"]["response"]["payload"]
             pawn = payload["data"][payload["execution"]["bindings"][1]["root"]]
             assert pawn["id"] == "pawn1"
             assert {"status", "mood", "health", "equipment", "profile"}.issubset(pawn)

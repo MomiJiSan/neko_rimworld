@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping
@@ -20,6 +21,7 @@ from .handoff import (
 from .model_client import AgentModelSettings, ModelClient, ModelClientError, OpenAICompatibleModelClient
 from .prompt import build_finalization_prompt, build_runtime_advisory, build_system_prompt
 from .session import AgentRunSession
+from . import stage_review
 from .tools import ToolExecutionError, ToolRegistry, ToolSetup, ToolSpec
 
 
@@ -86,6 +88,7 @@ class AgentRuntime:
         interaction_factory: Callable[..., Any] | None = None,
         prepared_calls: tuple[ToolCall, ...] = (),
         allow_text_completion: bool = False,
+        review_model_factory: ModelFactory | None = None,
     ) -> None:
         self._observation_tools = tuple(observation_tools)
         self._tools_provider = tools_provider
@@ -96,6 +99,7 @@ class AgentRuntime:
         self._audit_registry = audit_registry
         self._logger = logger
         self._model_factory = model_factory or OpenAICompatibleModelClient
+        self._review_model_factory = review_model_factory or self._model_factory
         self._active_tasks: dict[str, asyncio.Task[Any]] = {}
 
     async def run(
@@ -176,6 +180,23 @@ class AgentRuntime:
                     observations=session.observations,
                     fallback_answer=session.fallback_answer,
                 )
+            if session.review:
+                attempted = session.review.get('author_revision_attempted', False)
+                session.review["author_revision_attempted"] = attempted
+                if (result.get('status') != 'ok' and session.review_initial_draft is not None
+                        and not session.review.get('valid_resubmitted') and not session.invalidated_error):
+                    session.review['failed_revision_errors'] = copy.deepcopy(session.submission.errors)
+                    session.submission = copy.deepcopy(session.review_initial_draft)
+                    session.review['fallback'] = 'pre_review_draft'
+                    result['answer'] = session.submission.full_text
+                    result['agent_text'] = session.submission.agent_text
+                    if session.review_initial_delivery is not None:
+                        result['delivery'] = copy.deepcopy(session.review_initial_delivery)
+                    result.setdefault('caveats', []).append('Post-review revision did not complete. Showing the pre-review draft; review concerns remain unresolved.')
+                result["review"] = dict(session.review)
+                result["review"]["final_rechecked"] = False
+                if session.review.get('status') in {'unavailable', 'skipped_budget', 'skipped_context_limit'}:
+                    result.setdefault('caveats', []).append('The requested review did not complete; the original draft is retained, not a reviewed approval.')
             result["draft"] = session.submission.snapshot()
             result = self._attach_handoff(result, session)
             ledger.record("handoff_built", result.get("delivery"))
@@ -295,6 +316,7 @@ class AgentRuntime:
             "draft_errors": session.submission.snapshot()["errors"],
             "provenance": session.submission.provenance,
             "submission": session.submission.snapshot(),
+            "review": dict(session.review),
             "observations": session.observations,
             "knowledge": session.knowledge,
             "knowledge_omitted": session.knowledge_omitted,
@@ -602,6 +624,8 @@ class AgentRuntime:
                 submitted_response: Mapping[str, Any] | None = None
                 isolated_batch = len(turn.tool_calls) > 1 and any(tools.is_exclusive(c.name) for c in turn.tool_calls)
                 for call in turn.tool_calls:
+                    if call.name == 'submit_response' and session.review.get('status') == 'issues_raised':
+                        session.review['author_revision_attempted'] = True
                     session.tool_calls += 1
                     ledger.record(
                         "tool_call_requested",
@@ -682,6 +706,11 @@ class AgentRuntime:
                     {"count": len(tool_messages)},
                 )
                 if submitted_response is not None:
+                    if settings.review_before_delivery and not session.review:
+                        if await self._review_draft(question, settings, ledger, session, submitted_response.get('delivery')):
+                            continue
+                    elif session.review.get('status') == 'issues_raised':
+                        session.review['valid_resubmitted'] = True
                     return self._finish_success(
                         ledger,
                         answer=str(submitted_response["full_text"]),
@@ -741,6 +770,60 @@ class AgentRuntime:
             )
             session.append_recovery(recovery)
             ledger.record("recovery_prompt_appended", {"message": recovery})
+
+    async def _review_draft(self, question, settings, ledger, session, delivery=None) -> bool:
+        """One budgeted checkpoint. Return True only when the author must respond."""
+        session.review = {"status": "started", "draft_revision": session.submission.revision, "valid_resubmitted": False}
+        remaining = settings.run_budget_seconds - ledger.elapsed_seconds
+        reserve = max(3.0, settings.finalization_reserve_seconds)
+        timeout = min(settings.request_timeout_seconds, remaining - reserve)
+        if timeout < 3:
+            session.review["status"] = "skipped_budget"
+            ledger.record("stage_review_finished", dict(session.review))
+            return False
+        try:
+            messages, evidence = stage_review.request_messages(question, {
+                "answer": session.submission.agent_text, "full_report": session.submission.full_text,
+            }, session.messages)
+        except ValueError:
+            session.review["status"] = "skipped_context_limit"
+            ledger.record("stage_review_finished", dict(session.review))
+            return False
+        reviewer = self._review_model_factory(settings)
+        schemas = [stage_review.REVIEW_TOOL]
+        session.model_calls += 1
+        ledger.record("model_request_started", {"stage": "review", "messages": messages, "tools": schemas,
+            "request_sha256": _canonical_hash({"messages": messages, "tools": schemas}), "attempt": 1, "max_attempts": 1,
+            "request_timeout_seconds": timeout})
+        turn = None
+        try:
+            async with asyncio.timeout(timeout):
+                turn = await reviewer.complete(messages, schemas, timeout=timeout)
+            ledger.record("model_response_received", {**turn.as_audit_value(), "stage": "review"})
+            issues = stage_review.parse_review(turn, len(evidence))
+            session.review.update(status="issues_raised" if issues else "no_issues_reported", issues=issues)
+        except asyncio.CancelledError:
+            session.review["status"] = "cancelled"
+            ledger.record("model_request_cancelled", {"stage": "review", "usage": getattr(reviewer, "last_usage", {}),
+                "diagnostics": getattr(reviewer, "last_diagnostics", {})})
+            raise
+        except (ModelClientError, TimeoutError, ValueError, TypeError) as error:
+            session.review.update(status="unavailable", error_code=getattr(error, "code", "invalid_or_incomplete_review"))
+            if turn is None:
+                ledger.record("model_request_attempt_failed", {"stage": "review", "will_retry": False,
+                    "error_code": session.review["error_code"],
+                    "usage": getattr(error, "usage", None) or getattr(reviewer, "last_usage", {}),
+                    "diagnostics": getattr(error, "diagnostics", None) or getattr(reviewer, "last_diagnostics", {})})
+            ledger.record("stage_review_failed", dict(session.review))
+            return False
+        finally:
+            ledger.record("stage_review_finished", dict(session.review))
+        if issues:
+            session.review_initial_draft = copy.deepcopy(session.submission)
+            session.review_initial_delivery = copy.deepcopy(delivery)
+            session.append_recovery(stage_review.author_feedback(issues, evidence))
+            return True
+        return False
 
     def _finish_success(
         self,

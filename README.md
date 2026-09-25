@@ -756,3 +756,26 @@ fewer aspects. Existing held/fogged/map defaults and exact name ambiguity remain
 The sealed 12-episode regression supports simpler discovery and object access,
 not a general reasoning-quality claim. Complex rescue still failed; see the bench
 `planning/V23-RESULTS.md` for the full result and post-run deterministic repairs.
+# Context efficiency and optional stage review
+
+Runtime timing advice is sent after the stable conversation prefix. It is not
+inserted into the first system message on every request. Public observations and
+provider-required private continuation remain intact; private reasoning is never
+copied into review input or persisted as plaintext.
+
+With a Mod advertising `spatial_object_state.v1`, `survey_space` and
+`inspect_route` return spatial condition, passage and hazard facets for nearby
+objects. They do not imply that Pawn health/work/gear, bed suitability,
+reservations, storage or production were inspected. Use the existing `look`
+object/state interface for those facts; environmental coverage remains explicit.
+
+`[neko_rimworld.agent] review_before_delivery = true` enables one advisory check
+after a valid explicit submission, within the **same** run budget. Default is
+`false`: the efficiency implementation is verified, but complex-rescue quality
+has not passed acceptance. No game-query tools are given to the reviewer.
+No reported issue means the original answer is reused. Otherwise the original
+author continues with its existing evidence and private continuation; it can
+reject unsupported objections. There is no second review. Failures/skips are
+reported, not treated as approval. A failed revision remains degraded and is
+explicitly labelled if the pre-review draft is shown. The 180-token handoff
+limit is unchanged.
