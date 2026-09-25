@@ -54,6 +54,7 @@ def review_evidence(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     calls = {}
     evidence = []
+    read_calls = {}
     for message in messages:
         if message.get('role') == 'assistant':
             for call in message.get('tool_calls', []):
@@ -70,6 +71,17 @@ def review_evidence(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             payload = content
         if isinstance(payload, dict) and isinstance(payload.get('data'), dict):
             payload['data'] = deduplicate_program_result(payload['data'])
+        # Bind each native record directly to its business call. Keep the execution
+        # receipt (errors, omissions and derivations) separately; no evidence selection.
+        if call.get('name') == 'execute_python' and isinstance(payload, dict) and isinstance(payload.get('data'), dict):
+            data = payload['data']
+            read_calls.update({r['index']: r for r in data.get('reads', [])})
+            for record in data.pop('full_results', []):
+                source = read_calls.get(record['index'], {})
+                evidence.append({'evidence_id': len(evidence), 'tool_call_id': message.get('tool_call_id'),
+                    'native_result_index': record['index'],
+                    'call': {'name': source.get('tool', 'read_result'), 'arguments': source.get('arguments', {'index': record['index']})},
+                    'result': record['value']})
         evidence.append({'evidence_id': len(evidence), 'tool_call_id': message.get('tool_call_id'),
                          'call': copy.deepcopy(call), 'result': payload})
     return evidence

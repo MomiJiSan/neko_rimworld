@@ -43,3 +43,20 @@ def test_review_gets_visible_failures_and_derivations_not_private_reasoning():
     view = review_evidence(messages)
     assert len(view) == 1 and view[0]['result']['ok'] is False
     assert 'PRIVATE' not in json.dumps(view)
+
+
+def test_review_recovered_record_retains_original_route_binding():
+    value = {'ok': True, 'data': {'route': {'cost': 7}}}
+    args = {'actor': {'name': 'A'}, 'start': {'name': 'B'}, 'to': {'name': 'C'}}
+    messages = []
+    for i, data in enumerate([
+        {'reads': [{'index': 0, 'tool': 'inspect_route', 'arguments': args}], 'full_results': []},
+        {'reads': [], 'full_results': [{'index': 0, 'value': value}], 'execution_error': None},
+    ]):
+        messages += [{'role': 'assistant', 'tool_calls': [{'id': str(i), 'function': {'name': 'execute_python', 'arguments': '{}'}}]},
+                     {'role': 'tool', 'tool_call_id': str(i), 'content': json.dumps({'data': data})}]
+    result = review_evidence(messages)
+    restored = next(r for r in result if 'native_result_index' in r)
+    assert restored['call'] == {'name': 'inspect_route', 'arguments': args}
+    assert restored['result'] == value
+    assert result[-1]['result']['data']['execution_error'] is None

@@ -216,6 +216,10 @@ class SemanticInteraction:
         passthrough = tuple(self.original[name] for name in sorted(PASSTHROUGH_TOOLS) if name in self.original)
         return (*specs, *passthrough, submit)
 
+    def review_contract(self):
+        from .stage_review import tool_contract
+        return tool_contract(self.tools())
+
     def request_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return messages
 

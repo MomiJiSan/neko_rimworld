@@ -779,3 +779,31 @@ reject unsupported objections. There is no second review. Failures/skips are
 reported, not treated as approval. A failed revision remains degraded and is
 explicitly labelled if the pre-review draft is shown. The 180-token handoff
 limit is unchanged.
+
+
+### Contract and review validation (2026-09-25)
+
+`look` publishes the same per-kind state vocabulary and context constraints as its
+reader. Legacy quantity/distribution combinations remain compatible; prefer
+`count` for aggregates. `count` publishes valid population/metric/grouping
+combinations, including Pawn populations grouped only by map.
+
+With the matching Mod, `detail` bounds long Pawn/work lists while skills,
+capacities and work-type assignments retain all observed definitions. Existing
+partial/unavailable flags remain authoritative. `inspect_space` starts at the
+actor's current position; `inspect_route(actor, start, to)` permits a hypothetical
+origin while retaining the actor's traversal rules. Neither predicts a carry Job
+or an ETA.
+
+Optional `review_before_delivery` still defaults to false. A single critic now
+checks essential claims and cites visible evidence with read-only tool meanings.
+Its coverage and supported verdicts are self-reported assessments, not approval.
+Unresolvable citations are retained as explicitly unverified advice, never guessed
+or silently accepted; they require author verification. Review errors retain the
+existing degraded/unreviewed behavior. There is no second critic or automatic
+format-repair call. The short-answer limit remains 180 tokens.
+
+The corresponding fixed-evidence and native experiments did **not** establish
+improved rescue correctness. See the bench report `planning/CONTRACT-REVIEW-RESULTS-20260925.md`
+for preserved failures, request costs and the distinction between live results
+and final offline citation-parser repairs.

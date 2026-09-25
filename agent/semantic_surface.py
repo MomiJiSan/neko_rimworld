@@ -334,6 +334,15 @@ def tool_schemas(directory=None):
          'then': {'properties': {'aspects': {'items': {'enum': list(supported_aspects(kind))}}}}}
         for kind in KINDS
     ]
+    count = specs[1]['parameters']
+    count['properties']['by']['description'] = 'Allowed by kind: ' + '; '.join(
+        kind + ': ' + (', '.join(BY_KINDS[kind]) or 'no grouping') for kind in POPULATIONS)
+    count['allOf'] = [{'properties': {'object': {'properties': {'kind': {'enum': list(POPULATIONS)}}}}}, *[
+        {'if': {'properties': {'object': {'properties': {'kind': {'const': kind}}, 'required': ['kind']}}, 'required': ['object']},
+         'then': {'properties': {'metric': {'enum': ['records', 'units'] if kind == 'things' else ['records']},
+                                 'by': {'enum': list(BY_KINDS[kind])} if BY_KINDS[kind] else False}}}
+        for kind in POPULATIONS
+    ]]
     return specs
 
 
@@ -362,10 +371,13 @@ def spatial_tool_schema(directory=None):
             kind_schema.pop('const')
             kind_schema['enum'] = ['thing', 'pawn']
     route_supported = isinstance(capability, dict) and capability.get('route_summary') == 'native_path_summary.v1'
-    description = ('Check whether one Pawn can currently reach one Thing or map cell. '
+    description = ('Check reachability from the specified Pawn current position to a Thing or cell. '
                    'Use names or IDs directly; do not call look first just to resolve them. '
                    'Ambiguous names return candidates. No work eligibility, reservation, '
                    'blocking-cause diagnosis or future-action guarantee. ')
+    world_tools = (directory or {}).get('world_observation', {}).get('tools', [])
+    if any(t.get('name') == 'inspect_route' for t in world_tools):
+        description += 'For a different origin or subsequent journey leg use inspect_route(actor=traveller, start=origin, to=destination); from here cannot override origin. '
     if route_supported:
         target = parameters['properties']['to']
         parameters['properties']['to'] = {'oneOf': [target, {'type':'array','items':copy.deepcopy(target),'minItems':1,'maxItems':8}],
@@ -1205,7 +1217,7 @@ def _not_read(plan, surface, result, issues=()):
         items.append('aspects not requested: ' + ', '.join(missing))
     # 身份现在属于“寻址”的一部分（见 _identity_fields），所以这里要查 **主语字段**
     # 而不是条目覆盖；否则会在已经读到 faction 时仍然声称身份未读。
-    if root_type == 'Pawn' and not any(f.startswith('faction.') for f in plan.subject):
+    if root_type == 'Pawn' and plan.kind != 'colonists' and not any(f.startswith('faction.') for f in plan.subject):
         items.append('faction/colonist-status (not read; the schema exposes no faction field; '
                      'identity is never inferred from kind, name or container)')
     for entry in plan.structure:

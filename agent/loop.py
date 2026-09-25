@@ -784,7 +784,8 @@ class AgentRuntime:
         try:
             messages, evidence = stage_review.request_messages(question, {
                 "answer": session.submission.agent_text, "full_report": session.submission.full_text,
-            }, session.messages)
+            }, session.messages, session.interaction.review_contract() if session.interaction is not None
+                and hasattr(session.interaction, "review_contract") else stage_review.tool_contract(self._observation_tools))
         except ValueError:
             session.review["status"] = "skipped_context_limit"
             ledger.record("stage_review_finished", dict(session.review))
@@ -800,8 +801,10 @@ class AgentRuntime:
             async with asyncio.timeout(timeout):
                 turn = await reviewer.complete(messages, schemas, timeout=timeout)
             ledger.record("model_response_received", {**turn.as_audit_value(), "stage": "review"})
-            issues = stage_review.parse_review(turn, len(evidence))
-            session.review.update(status="issues_raised" if issues else "no_issues_reported", issues=issues)
+            assessment = stage_review.parse_review(turn, evidence)
+            issues = stage_review.review_issues(assessment)
+            session.review.update(status="issues_raised" if issues else "no_issues_reported", issues=issues,
+                assessment=assessment, meaning="Advisory claim checks; not independently verified approval")
         except asyncio.CancelledError:
             session.review["status"] = "cancelled"
             ledger.record("model_request_cancelled", {"stage": "review", "usage": getattr(reviewer, "last_usage", {}),

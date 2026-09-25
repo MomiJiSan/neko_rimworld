@@ -6,7 +6,7 @@ import json
 import re
 
 from .query_surface import SurfaceError
-from .semantic_surface import PAWN_KINDS, THING_KINDS, ASPECTS, normalize_object, validate_aspects, validate_detail
+from .semantic_surface import PAWN_KINDS, THING_KINDS, ASPECTS, KINDS, supported_aspects, normalize_object, validate_aspects, validate_detail
 from .world_order import order_world_fields
 from .tools import MAX_TOOL_RESULT_CHARS
 
@@ -70,8 +70,8 @@ def extend_look_schema(spec, contract):
                            'z': {'type':'integer','minimum':-2147483648,'maximum':2147483647}}}
     props['offset'] = {'type':'integer','minimum':0,'maximum':8192,'default':0,'description':'Continue object rows using returned page.next_offset. Each page is a fresh observation, not a frozen snapshot.'}
     props['object'] = {'oneOf': [props['object'], cell]}
-    props['aspects']['items']['enum'] = [a for a in ASPECTS if a not in ('quantity','distribution')] + ['state']
-    props['detail']['description'] = 'Positive values bound Pawn/work detail rows; 0 uses reader defaults. Other state facets report their own list bounds. Does not change selection or explicitly requested stats.'
+    props['aspects']['items']['enum'] = list(ASPECTS) + ['state']
+    props['detail']['description'] = 'Bounds long Pawn/work detail lists (conditions, body parts, gear, queued jobs); 0 uses reader defaults. Skills, capacities and work-type assignments remain complete when observed, including mod-added definitions. Other facets report their own bounds. Does not change selection or requested stats.'
     props['aspects']['description'] = 'Omitted: current state for physical objects/cells, identity otherwise. Select only needed aspects for smaller reads. state already contains native health, skills, gear, work and device facets; mood/biography are separate.'
     for key in ('stats','actor','user'):
         props[key] = copy.deepcopy(contract['parameters']['properties'][key])
@@ -79,6 +79,24 @@ def extend_look_schema(spec, contract):
             props[key] = {'type':'object','additionalProperties':False,'description':'Pawn context: provide exactly one of id or name, not both. Optional map defaults to current.',
                           'properties':{**{name:copy.deepcopy(props[key]['properties'][name]) for name in ('id','name','map')}, 'kind':{'type':'string','const':'pawn'}},
                           'oneOf':[{'required':['id'],'not':{'required':['name']}},{'required':['name'],'not':{'required':['id']}}]}
+    # Replace legacy per-kind constraints as well as the top-level vocabulary.
+    spec['parameters']['allOf'] = [
+        {'if': {'properties': {'object': {'properties': {'kind': {'const': kind}}, 'required': ['kind']}}, 'required': ['object']},
+         'then': {'properties': {'aspects': {'items': {'enum':
+             list(supported_aspects(kind)) + (['state'] if kind in PHYSICAL else [])}}}}}
+        for kind in KINDS
+    ] + [
+        {'if': {'properties': {'object': {'properties': {'kind': {'const': 'cell'}}, 'required': ['kind']}}},
+         'then': {'properties': {'aspects': {'items': {'enum': ['identity', 'state']}}, 'offset': {'const': 0}}, 'not': {'required': ['stats']}}},
+        {'not': {'properties': {'aspects': {'allOf': [
+            {'contains': {'enum': list(STATE_ASPECTS)}}, {'contains': {'const': 'distribution'}}]}}, 'required': ['aspects']}},
+    ]
+    spec['parameters']['allOf'].extend([
+        {'if': {'properties': {'object': {'properties': {'kind': {'not': {'enum': [*PHYSICAL, 'cell']}}}, 'required': ['kind']}}},
+         'then': {'not': {'anyOf': [{'required': [key]} for key in ('stats', 'actor', 'user')]}}},
+        {'if': {'anyOf': [{'required': ['actor']}, {'required': ['user']}]},
+         'then': {'properties': {'aspects': {'contains': {'enum': list(STATE_ASPECTS)}}}}},
+    ])
     spec['parameters']['required'] = ['object']
     return spec
 

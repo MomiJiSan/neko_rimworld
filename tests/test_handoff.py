@@ -217,9 +217,9 @@ async def test_text_submission_string_and_legacy_shapes_share_validation():
 def test_handoff_guidance_separates_main_conclusion_and_complete_report():
     from plugin.plugins.neko_rimworld.agent.prompt import build_system_prompt,build_finalization_prompt
     for prompt in (build_system_prompt(4,references_supported=False),build_finalization_prompt(4,references_supported=False)):
-        assert 'every explicit question' in prompt and 'main conclusion' in prompt
+        assert 'cover the question' in prompt and 'standalone conclusion' in prompt
         assert 'one concise text string' in prompt
-        assert '120 tokens' in prompt and '180' in prompt
+        assert '180 tokens' in prompt and '12000 characters' in prompt
 
 
 @pytest.mark.asyncio
