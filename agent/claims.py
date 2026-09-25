@@ -180,7 +180,7 @@ def _licenses_aggregate_narration(clause: str, item: Mapping[str, Any], *, requi
 # ---------------------------------------------------------------------------
 
 # 宽窗口标记：出现在**同一子句**内的触发词之前，说明这句说的是"没有/不能断定"。
-NEGATION = ("不能", "无法", "不足以", "并不", "并非", "不等于", "未读", "没读", "没有读",
+NEGATION = ("不能", "不可断言", "不可认定", "无法", "不足以", "并不", "并非", "不等于", "未读", "没读", "没有读",
             "不能据此", "不足以说明", "未确认", "无法确认", "无从", "不能直接", "未取", "未获得",
             # 实测（离线复演 v1.3 真实答案）：模型写的是“**也不代表**只有两件实物”，
             # 是一句正确的否定，却被量词检查误判成断言。这类“不代表/不意味着/而非”
@@ -262,6 +262,9 @@ def _hit_is_negated(text: str, hit: re.Match[str]) -> bool:
         return True
     start, _ = _clause_span(text, hit.start())
     before = text[start:hit.start()]
+    # “不可否认” is affirmative, not the question marker “可否”. Preserve an
+    # enclosing genuine negation/question while neutralizing this substring.
+    before = before.replace("不可否认", "承认")
     if any(marker in before for marker in NEGATION):
         return True
     if any(marker in before[-8:] for marker in IMMEDIATE_NEGATION):

@@ -35,6 +35,7 @@ class ToolSpec:
     handler: ToolHandler
     terminal: bool = False
     exclusive: bool = False
+    max_result_chars: int = MAX_TOOL_RESULT_CHARS
 
     def schema(self) -> dict[str, Any]:
         return {
@@ -61,6 +62,8 @@ class ToolRegistry:
         self._tools: dict[str, ToolSpec] = {}
 
     def register(self, spec: ToolSpec) -> None:
+        if type(spec.max_result_chars) is not int or not 1 <= spec.max_result_chars <= 32 * MAX_TOOL_RESULT_CHARS:
+            raise ValueError("invalid private tool result limit")
         if not spec.name or spec.name in self._tools:
             raise ValueError(f"invalid or duplicate private tool name: {spec.name!r}")
         self._tools[spec.name] = spec
@@ -176,7 +179,7 @@ class ToolRegistry:
             )
 
         encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
-        if len(encoded) > MAX_TOOL_RESULT_CHARS:
+        if len(encoded) > spec.max_result_chars:
             return ToolResult(
                 call_id=prepared.call.call_id,
                 name=prepared.call.name,

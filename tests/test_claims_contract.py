@@ -206,3 +206,21 @@ def test_partial_attribute_label_is_not_an_alias_for_its_owner(entry):
     readings=[{"response":{"payload":{"status":"ok","data":data}}}]
     assert_contract(entry, "3张床全部医疗标记。441格全部混凝土。", readings)
     assert_contract(entry, "Doctor的全部12项技能已读取。", readings, "incomplete_quantifier_claim")
+
+
+@pytest.mark.parametrize('text',[
+    '不可断言完全健康。',
+    '不可认定 Doctor 完全健康。',
+    '可见伤情为空，未含隐藏伤情，不能据此认定完全健康；不可断言完全健康。',
+])
+def test_epistemic_negation_is_not_a_health_assertion(entry,text):
+    assert_contract(entry,text,observations())
+
+
+@pytest.mark.parametrize('text',[
+    '不可否认 Doctor 完全健康。',
+    '不可断言 Near 完全健康，但 Doctor 完全健康。',
+    '不可认定 Near 完全健康。Doctor 完全健康。',
+])
+def test_epistemic_negation_does_not_license_an_affirmative_other_claim(entry,text):
+    assert_contract(entry,text,observations(),'health_completeness_claim')
