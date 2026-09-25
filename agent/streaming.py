@@ -96,6 +96,8 @@ class StreamAssembler:
         self.reasoning_chars = 0
         self.reasoning_hash = hashlib.sha256()
         self.reasoning_field = ""
+        self.reasoning_content: list[str] = []
+        self.has_reasoning_content = False
 
     def feed(self, record: str) -> bool:
         if self.done:
@@ -133,6 +135,11 @@ class StreamAssembler:
                 raise StreamProtocolError("model_invalid_stream", "Invalid streamed delta.")
             for key in ("reasoning_content", "reasoning", "reasoning_details"):
                 if delta.get(key) is not None:
+                    if key == "reasoning_content":
+                        if not isinstance(delta[key], str):
+                            raise StreamProtocolError("model_invalid_stream", "Provider continuation content must be text.")
+                        self.has_reasoning_content = True
+                        self.reasoning_content.append(delta[key])
                     encoded = json.dumps(delta[key], ensure_ascii=False).encode("utf-8")
                     self.reasoning_chars += len(encoded.decode("utf-8"))
                     self.reasoning_hash.update(encoded)
@@ -219,7 +226,10 @@ class StreamAssembler:
             "model": self.model,
             "usage": self.usage,
             "choices": [
-                {"finish_reason": self.finish_reason, "message": {"content": "".join(self.text), "tool_calls": tools}}
+                {"finish_reason": self.finish_reason, "message": {
+                    "content": "".join(self.text), "tool_calls": tools,
+                    **({"reasoning_content": "".join(self.reasoning_content)} if self.has_reasoning_content else {}),
+                }}
             ],
         }
 

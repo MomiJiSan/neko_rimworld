@@ -102,6 +102,7 @@ async def test_arbitrary_tool_and_multiple_observations_survive_model_and_audit(
             return AssistantTurn("r", "m", "stop", "The requested observation is available.")
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # Explicit legacy natural-text completion fixture.
         observation_tools=[ToolSpec("future_reader", "test", {"type": "object"}, handler)],
         audit_registry=registry,
         logger=FakeLogger(),

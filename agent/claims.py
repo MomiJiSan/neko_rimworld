@@ -185,7 +185,7 @@ NEGATION = ("不能", "不可断言", "不可认定", "无法", "不足以", "�
             # 实测（离线复演 v1.3 真实答案）：模型写的是“**也不代表**只有两件实物”，
             # 是一句正确的否定，却被量词检查误判成断言。这类“不代表/不意味着/而非”
             # 的否定形式必须认。
-            "不代表", "不意味着", "不构成", "而非", "不是", "不能说明", "不应当", "不在",
+            "不代表", "不意味着", "不构成", "不等同", "而非", "不是", "不能说明", "不应当", "不在",
             # 疑问语境不是断言：实测标题“## 能否直接算作“我们的物资””曾被误拒。
             "能否", "是否", "可否", "是不是", "算不算", "有没有",
             "cannot", "can not", "can't", "not ", "no evidence", "does not", "doesn't", "insufficient",
@@ -237,21 +237,36 @@ def _inside_quotes(text: str, start: int, end: int) -> bool:
 
 
 def _clause_span(text: str, position: int) -> tuple[int, int]:
-    """包含 position 的子句范围（句末标点、转折词、分号、逗号都算边界）。"""
-    start = 0
-    for index in range(position - 1, -1, -1):
-        if text[index] in CLAUSE_BREAK or text[index] in CONTRAST:
-            start = index + 1
-            break
-    end = len(text)
-    for index in range(position, len(text)):
-        if text[index] in CLAUSE_BREAK or text[index] in CONTRAST:
-            end = index
-            break
+    """A local clause, retaining parenthetical subject/ID annotations.
+
+    Punctuation inside balanced parentheses does not detach a predicate from
+    the identity it annotates. Contrast words outside them still start a new
+    clause, so a negated statement cannot license a later affirmative one.
+    """
+    pairs = {"(": ")", "（": "）", "[": "]", "【": "】"}
+    stack: list[str] = []
+    boundaries: list[tuple[int, int]] = []
+    offset = 0
+    while offset < len(text):
+        character = text[offset]
+        if character in pairs:
+            stack.append(pairs[character])
+        elif stack and character == stack[-1]:
+            stack.pop()
+        elif not stack:
+            contrast = next((word for word in CONTRAST if text.startswith(word, offset)), None)
+            if character in CLAUSE_BREAK or contrast:
+                length = len(contrast) if contrast else 1
+                boundaries.append((offset, offset + length))
+                offset += length
+                continue
+        offset += 1
+    start = max((end for _, end in boundaries if end <= position), default=0)
+    end = min((begin for begin, _ in boundaries if begin > position), default=len(text))
     return start, end
 
 
-def _hit_is_negated(text: str, hit: re.Match[str]) -> bool:
+def _hit_is_negated(text: str, hit: re.Match[str], index: Mapping[str, Any] | None = None) -> bool:
     """**这一处**命中是否处在否定/引号语境里。
 
     必须逐处判定。旧版对整个模式判定（`_all_negated`），于是同一模式在一篇里出现
@@ -265,6 +280,15 @@ def _hit_is_negated(text: str, hit: re.Match[str]) -> bool:
     # “不可否认” is affirmative, not the question marker “可否”. Preserve an
     # enclosing genuine negation/question while neutralizing this substring.
     before = before.replace("不可否认", "承认")
+    # A conditional premise is not an assertion about the observed world.
+    # Delimiters/contrast keep this from licensing its consequent or next clause.
+    premise = before.lstrip()
+    conditional = re.match(r"(?:如果|假如|倘若|只要|若(?!干)|if\b|provided that\b)", premise, re.IGNORECASE)
+    if conditional:
+        # An observed name such as 若风 is an identity, not a conditional word.
+        names = (name for values in (index or {}).get("subject_names", {}).values() for name in values)
+        if not any(len(name) > conditional.end() and premise.startswith(name) for name in names):
+            return True
     if any(marker in before for marker in NEGATION):
         return True
     if any(marker in before[-8:] for marker in IMMEDIATE_NEGATION):
@@ -337,6 +361,43 @@ def _population_signature(node: Mapping[str, Any], total: int | None) -> str | N
         return None
 
 
+def _completed_legacy_state_scope(observation: Mapping[str, Any]) -> dict[str, bool]:
+    """Compatibility for old native inspect_state replies without scope metadata.
+
+    Only a fully completed, identity-matched native reply can attest that its
+    paired parameters were executed. New response.scope is authoritative, even
+    when it contradicts the request. An attempted/partial/empty read licenses
+    nothing through this compatibility path.
+    """
+    request = observation.get("request")
+    response = observation.get("response")
+    if not isinstance(request, Mapping) or request.get("operation") != "inspect_state" or not isinstance(response, Mapping):
+        return {}
+    payload = response.get("payload")
+    if not isinstance(payload, Mapping) or payload.get("status") != "ok":
+        return {}
+    data = payload.get("data")
+    args = request.get("arguments")
+    if not isinstance(data, Mapping) or data.get("status") != "ok" or not isinstance(args, Mapping):
+        return {}
+    if isinstance(data.get("scope"), Mapping):
+        return {}
+    rows, targets = data.get("objects"), args.get("targets")
+    if not isinstance(rows, list) or not rows or not isinstance(targets, list) or len(rows) != len(targets):
+        return {}
+    for row, target in zip(rows, targets):
+        if not isinstance(row, Mapping) or not isinstance(target, Mapping):
+            return {}
+        identity, facets, coverage = row.get("target"), row.get("facets"), row.get("coverage")
+        if (not isinstance(identity, Mapping) or not isinstance(identity.get("id"), str)
+                or not isinstance(facets, Mapping) or not facets
+                or not isinstance(coverage, Mapping) or coverage.get("registered_facets_read_successfully") is not True
+                or row.get("status") in ("unavailable", "unsupported")
+                or target.get("id") is not None and target["id"] != identity["id"]):
+            return {}
+    return {"include_fogged_true": True} if args.get("include_fogged") is True else {}
+
+
 def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     """把这一轮的观察压成**按主语绑定**的证据索引。
 
@@ -351,7 +412,8 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
         }
 
     只认真正出现在工具结果里的事实：读取失败/`unavailable` 的字段不计入。
-    `request` 子树被**整体跳过**——旧版会遍历 `request.arguments`，于是一个失败的
+    `request` 子树不作为普通证据遍历；仅旧inspect_state的完整成功、逐对象匹配返回
+    可核对同份已执行的fog参数（新返回scope优先）。旧版会遍历 `request.arguments`，于是一个失败的
     请求只要写了 `include_held: true` 就能为"含被持有"授权（实测漏过）。
     """
     index: dict[str, Any] = {
@@ -366,6 +428,10 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
         "roots": set(),
         "flags": {"include_held_true": False, "include_fogged_true": False},
     }
+    observations = tuple(observations)
+    for observation in observations:
+        if isinstance(observation, Mapping):
+            index["flags"].update(_completed_legacy_state_scope(observation))
     budget = [_MAX_NODES]
 
     def entry(subject: str | None) -> dict[str, Any]:
@@ -488,6 +554,13 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
         if not isinstance(node, Mapping):
             return
         budget[0] -= 1
+        if node.get("status") in ("error", "failed", "unavailable", "not_read", "unsupported"):
+            return
+        # A population root licenses membership only for its observed rows.
+        if node.get("from") in ("spawned_free_colonists", "colonists", "colonist"):
+            for row in node.get("rows", ()) or ():
+                if isinstance(row, Mapping) and isinstance(row.get("id"), str):
+                    entry(row["id"])["fields"].add("colonists_root")
         # Native world-state rows bind facets to target identity. Normalize only
         # observed native collections into the same evidence representation as look;
         # this is an index view, not a mutation or a synthetic game observation.
@@ -692,8 +765,8 @@ def _mentioned_subjects(text: str, index: Mapping[str, Any]) -> set[str]:
     for key in index["subjects"]:
         if len(key) >= 3 and key in text:
             mentioned.add(key)
-    for label, key in index["labels"].items():
-        if label in text:
+    for key, names in index.get("subject_names", {}).items():
+        if any(name in text for name in names):
             mentioned.add(key)
     return mentioned
 
@@ -713,18 +786,97 @@ def _evidence_present(index: Mapping[str, Any], evidence: Sequence[str], text: s
     """
     if not evidence:
         return False
-    for name in evidence:
-        if index["flags"].get(name):
-            return True
-    # 范围标志与 root 名称是整轮的，不绑定主语。
+    if any(name in ("include_held_true", "include_fogged_true") and index["flags"].get(name) for name in evidence):
+        return True
     mentioned = _mentioned_subjects(text, index)
     if mentioned:
-        for name in evidence:
-            hits = _subjects_for(index, name)
-            if any(subject in hits for subject in mentioned):
-                return True
-        return False
+        return all(any(subject in _subjects_for(index, name) for name in evidence)
+                   for subject in mentioned)
     return any(None in _subjects_for(index, name) for name in evidence)
+
+
+def _identity_evidence(index: Mapping[str, Any], evidence: Sequence[str],
+                       text: str, hit: re.Match[str]) -> bool | None:
+    """Bind only simple identity predicates; None means grammar is ambiguous.
+
+    Subject grammar: an exact observed name/ID, an ASCII name/ID (including
+    unread ones), or a pronoun, optionally joined by a conjunction. We do not
+    treat every name mentioned in a relative clause as its subject. Unparsed
+    relational prose is left to semantic review, never hard-rejected here.
+    This intentionally is not a general Chinese name/relative-clause parser.
+    """
+    start, _ = _clause_span(text, hit.start())
+    prefix = text[start:hit.start()].strip()
+    # A quantified unnamed population is an explicit group, not a relative
+    # clause. One named pawn's evidence cannot establish this population.
+    if re.fullmatch(r"(?:这|那)?\s*\d+\s*(?:名|位|个)(?:殖民者)?(?:全部|都|均)?", prefix):
+        return any(None in _subjects_for(index, label) for label in evidence)
+    # Separate repeated explicit identity predicates even without punctuation.
+    # Only an already completed predicate can introduce this boundary.
+    prefix = re.split(r"(?:殖民者|(?:派系|阵营)(?:成员)?)\s*(?:而|并且|且)\s*", prefix)[-1]
+
+    # Parenthetical IDs annotate the outer subject; their contents are not
+    # additional subjects. An open annotation is allowed when the identity
+    # predicate itself occurs inside it (the observed ID-annotation case).
+    pairs = {"(": ")", "（": "）", "[": "]", "【": "】"}
+    stack: list[str] = []
+    outer = []
+    annotation_start = 0
+    for offset, character in enumerate(prefix):
+        if character in pairs:
+            if not stack:
+                annotation_start = offset + 1
+            stack.append(pairs[character])
+        elif stack and character == stack[-1]:
+            stack.pop()
+        elif not stack:
+            outer.append(character)
+    if stack and re.match(r"\s*ID\b", prefix[annotation_start:], re.IGNORECASE) is None:
+        return None  # an arbitrary parenthetical clause may have its own subject
+    prefix = "".join(outer).strip()
+    if not stack:
+        if hit.group(0) == "殖民者" or hit.group(0).startswith(("我方", "我们的")):
+            copula = re.search(r"(?:都是|同为|属于|是|为|算)(?:我们的)?\s*$", prefix)
+            if copula is None:
+                return None
+            prefix = prefix[:copula.start()].strip()
+
+    aliases: dict[str, set[str]] = {}
+    for key in index["subjects"]:
+        aliases.setdefault(key, set()).add(key)
+    for key, names in index.get("subject_names", {}).items():
+        for name in names:
+            aliases.setdefault(name, set()).add(key)
+    # Pronouns require unbound/global evidence; guessing their referent from
+    # another observed entity would reinstate cross-subject authorization.
+    pronouns = {"他", "她", "它", "他们", "她们", "它们", "该对象"}
+    atoms = sorted(set(aliases) | pronouns, key=len, reverse=True)
+    atom = "(?:" + "|".join(re.escape(name) for name in atoms) + r"|[A-Za-z_][A-Za-z0-9_-]*)"
+    separator = r"\s*(?:和|与|以及|及|&|\band\b)\s*"
+    if not prefix or re.fullmatch(atom + "(?:" + separator + atom + ")*", prefix) is None:
+        return None
+    # Tokenize using the same exact grammar, so a name like AliceClone cannot
+    # borrow Alice's evidence and a conjunction inside an observed name stays
+    # part of that name.
+    subjects = []
+    remaining = prefix
+    while remaining:
+        match = re.match(atom + "(?=" + separator + r"|$)", remaining)
+        if match is None:
+            return None
+        name = match.group(0)
+        keys = aliases.get(name, set())
+        if len(keys) > 1:
+            return None  # duplicate labels do not identify a unique subject
+        subjects.append(next(iter(keys)) if keys else (None if name in pronouns else ""))
+        remaining = remaining[match.end():]
+        if remaining:
+            join = re.match(separator, remaining)
+            if join is None:
+                return None
+            remaining = remaining[join.end():]
+    return all(any(subject in _subjects_for(index, label) for label in evidence)
+               for subject in subjects)
 
 
 def _cited_numbers(clause: str) -> set[int]:
@@ -772,7 +924,8 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
         rejected.append(dict(
             code="incomplete_quantifier_claim",
             label="对不完整集合使用全称/排他量词",
-            quote=hit.group(0),
+            quote=hit.group(0), start=hit.start(), end=hit.end(),
+            clause=text[start:end], clause_start=start, clause_end=end,
             hint=(f"本轮有一次读取只返回了部分结果（{shape}，listing partial）：{reason}。"
                   f"请先读完，或把措辞改成“已返回的 {item['returned']} 项中……”并说明总数未完整列举。"),
         ))
@@ -794,7 +947,7 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
 
     for pattern in QUANTIFIER_TOTAL_PATTERNS:
         for hit in re.finditer(pattern, text):
-            if _hit_is_negated(text, hit):
+            if _hit_is_negated(text, hit, index):
                 continue
             start, end = _clause_span(text, hit.start())
             clause = text[start:end]
@@ -809,7 +962,7 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
 
     for pattern in QUANTIFIER_LABEL_PATTERNS:
         for hit in re.finditer(pattern, text):
-            if _hit_is_negated(text, hit):
+            if _hit_is_negated(text, hit, index):
                 continue
             start, end = _clause_span(text, hit.start())
             clause = text[start:end]
@@ -824,36 +977,43 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
 
 def check_claims(answer, detail=None, *, observations=(),
                  index: Mapping[str, Any] | None = None) -> list[dict]:
-    """返回被拒绝的断言列表；空列表表示通过。
+    """Check every affirmative occurrence, with evidence bound to each subject.
 
-    只在**证据确实缺失**时拒绝；证据存在时一律放行（不做语义判断）。
+    Offsets are Unicode character offsets in the named answer/detail field
+    (or answer item text). They are feedback locations, not an assertion that
+    this bounded deterministic checker understands every natural-language claim.
     """
-    text = _text(answer, detail)
-    if not text.strip():
-        return []
+    fields: list[tuple[str, str, str]] = []
+    if isinstance(answer, str):
+        fields.append(("answer", "answer", answer))
+    else:
+        for position, part in enumerate(answer or ()):
+            if isinstance(part, Mapping) and isinstance(part.get("text"), str):
+                fields.append(("answer", f"answer[{position}].text", part["text"]))
+    if isinstance(detail, str):
+        fields.append(("detail", "detail", detail))
     idx = dict(index) if index is not None else build_read_index(observations)
-    rejected = _quantifier_rejections(text, idx)
-    for claim in CLAIM_CLASSES:
-        hit = None
-        for pattern in claim["patterns"]:
-            # 必须找**第一处未被否定的**出现。旧版只在“全部出现都被否定”时才跳过，
-            # 然后用 `re.search` 报出**第一处**（可能正是被否定的那处）。实测真实答案
-            # “两者都不是殖民者范围内匹配到的对象” + 另一处未否定的“殖民者”
-            # 因此被误拒。
-            hit = next((h for h in re.finditer(pattern, text) if not _hit_is_negated(text, h)), None)
-            if hit is not None:
-                break
-        if hit is None:
-            continue
-        # 证据必须绑定到**命中所在的子句**，不是整篇。用整篇算“被提及的主体”时，
-        # 只要同篇里提过某个已读对象（或者只是列了一堆行 id），就能为另一句里
-        # 另一个对象的断言授权——实测跨主体串证：`Alice 的身份已读取。Bob 是殖民者。`
-        # 被放行。反向也会误伤：建筑题的明细里到处都是 Thing_* 行 id，
-        # 而“按阵营筛选属于玩家阵营的实例为 0”的子句里并没有对象名。
-        start, end = _clause_span(text, hit.start())
-        if not claim.get("always_reject") and _evidence_present(idx, claim["evidence"] or (), text[start:end]):
-            continue
-        rejected.append(dict(code=claim["code"], label=claim["label"], quote=hit.group(0), hint=claim["hint"]))
+    rejected: list[dict] = []
+    for field, path, text in fields:
+        current = _quantifier_rejections(text, idx)
+        for claim in CLAIM_CLASSES:
+            hits = {(hit.start(), hit.end()): hit
+                    for pattern in claim["patterns"] for hit in re.finditer(pattern, text)}
+            for _, hit in sorted(hits.items()):
+                if _hit_is_negated(text, hit, idx):
+                    continue
+                start, end = _clause_span(text, hit.start())
+                if claim["code"] == "identity_claim":
+                    supported = _identity_evidence(idx, claim["evidence"], text, hit)
+                    if supported is not False:
+                        continue  # unsupported grammar is not proof of missing evidence
+                elif not claim.get("always_reject") and _evidence_present(idx, claim["evidence"] or (), text[start:end]):
+                    continue
+                current.append(dict(code=claim["code"], label=claim["label"],
+                                    quote=hit.group(0), hint=claim["hint"],
+                                    start=hit.start(), end=hit.end(), clause=text[start:end],
+                                    clause_start=start, clause_end=end))
+        rejected.extend({**item, "field": field, "path": path} for item in current)
     return rejected
 
 
@@ -871,7 +1031,8 @@ def describe(rejected: Iterable[Mapping[str, Any]]) -> str:
     """把拒绝原因写成模型可一次修正的说明。"""
     lines = []
     for item in rejected:
-        lines.append(f"{item['label']}（“{item['quote']}”）缺少本轮证据。{item['hint']}")
+        location = f"{item.get('path', item.get('field', 'answer'))}[{item.get('start', 0)}:{item.get('end', 0)}]"
+        lines.append(f"{location} {item['label']}（“{item['quote']}”）缺少本轮证据。{item['hint']}")
     return " ".join(lines)
 
 

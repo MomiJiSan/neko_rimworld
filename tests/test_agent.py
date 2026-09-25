@@ -140,6 +140,7 @@ async def test_agent_can_answer_without_calling_a_tool() -> None:
         raise AssertionError("digest should not be called")
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -177,6 +178,7 @@ async def test_agent_tool_call_round_trip_is_auditable() -> None:
         return digest_view()
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -214,6 +216,7 @@ async def test_agent_reuses_summary_and_appends_detail() -> None:
         raise AssertionError("digest should not be called")
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -248,6 +251,7 @@ async def test_over_budget_submission_is_returned_to_the_model_for_revision() ->
         raise AssertionError("digest should not be called")
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),
@@ -277,6 +281,7 @@ async def test_long_plain_text_gets_prompt_feedback_instead_of_code_summarizatio
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -303,6 +308,7 @@ async def test_prompt_cycle_target_is_soft_not_a_hard_step_limit() -> None:
         return digest_view()
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),
@@ -329,6 +335,7 @@ async def test_unknown_tool_is_returned_to_model_instead_of_blocking_the_loop() 
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -352,6 +359,7 @@ async def test_empty_model_turn_gets_auditable_recovery_prompt() -> None:
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -391,6 +399,7 @@ async def test_model_failure_returns_degraded_result_without_stopping_runtime() 
     registry = AgentAuditRegistry()
     logger = FakeLogger()
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=logger,
@@ -432,6 +441,7 @@ async def test_transient_provider_failure_is_retried_before_any_useful_delta() -
         raise AssertionError("no game tool should run")
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -468,6 +478,7 @@ async def test_transient_failure_after_useful_delta_is_not_retried() -> None:
         raise AssertionError("no game tool should run")
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -494,6 +505,7 @@ async def test_non_retryable_http_failure_is_not_retried() -> None:
         raise AssertionError("no game tool should run")
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -532,6 +544,7 @@ async def test_transient_retries_are_bounded_and_usage_is_accumulated(monkeypatc
         raise AssertionError("no game tool should run")
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -577,6 +590,7 @@ async def test_wall_time_fuse_returns_collected_evidence_instead_of_a_hard_failu
         return digest_view()
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),
@@ -613,6 +627,7 @@ async def test_concurrent_runs_have_independent_message_sessions() -> None:
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -645,6 +660,7 @@ async def test_cancellation_is_recorded_and_does_not_leave_an_active_run() -> No
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -723,6 +739,7 @@ async def test_runtime_audit_capacity_retains_observations_draft_and_result(monk
         return store.save(record)
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(read)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -889,6 +906,7 @@ async def test_http_model_tool_loop_end_to_end() -> None:
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -917,6 +935,7 @@ async def test_audit_limit_on_tool_completion_keeps_just_read_observation(monkey
         return digest_view()
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(read)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -941,6 +960,7 @@ async def test_cancellation_at_audit_limit_still_propagates(monkeypatch):
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
+        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[], audit_registry=registry, logger=FakeLogger(), model_factory=lambda _: Model()
     )
     task = asyncio.create_task(runtime.run("Cancel", settings()))

@@ -25,6 +25,7 @@ class AgentRunSession:
     submission: SubmissionDraft = field(default_factory=SubmissionDraft)
     interaction: Any = None  # Optional per-run adapter; never shared by the catalog cache.
     finalization_started: bool = False
+    invalidated_error: str | None = None
 
     @property
     def fallback_answer(self) -> str:

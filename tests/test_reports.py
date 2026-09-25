@@ -24,16 +24,13 @@ def record(index=1, **extra):
     }
 
 
-def test_patch_keeps_detail_and_retries_summary_with_explicit_confirmation():
+def test_length_patch_keeps_detail_without_retransmission():
     draft = SubmissionDraft()
     with pytest.raises(SubmissionPatchError) as caught:
         draft.apply({"detail": "Detailed original", "answer": [{"text": "超限内容。" * 300}]})
     assert caught.value.details["saved_fields"] == ["answer", "detail"]
     assert caught.value.details["required_fields"] == ["answer"]
-    with pytest.raises(SubmissionPatchError) as confirmation:
-        draft.apply({"answer": [{"text": "Brief"}]})
-    assert confirmation.value.details["required_fields"] == ["detail"]
-    result = draft.apply({"detail": "Detailed original"})
+    result = draft.apply({"answer": [{"text": "Brief"}]})
     assert result["full_text"] == "Brief\n\nDetailed original"
     assert draft.snapshot()["complete"]
 
@@ -91,6 +88,7 @@ def runtime_for(model, store):
         return store.save(value)
 
     return AgentRuntime(
+        allow_text_completion=True,  # Explicit legacy natural-text completion fixture.
         observation_tools=[query_tool(unused)],
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),
@@ -205,6 +203,7 @@ async def test_report_storage_failure_keeps_complete_result():
 
     model = ScriptedModel([turn("Complete answer")])
     runtime = AgentRuntime(
+        allow_text_completion=True,  # Explicit legacy natural-text completion fixture.
         observation_tools=[query_tool(unused)],
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),

@@ -522,6 +522,7 @@ class OpenAICompatibleModelClient:
             tool_calls=tuple(tool_calls),
             usage=usage,
             reasoning_metadata=reasoning_metadata,
+            reasoning_content=message.get("reasoning_content") if isinstance(message.get("reasoning_content"), str) else None,
         )
 
     @staticmethod

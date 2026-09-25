@@ -85,12 +85,14 @@ class AgentRuntime:
         report_sink: Callable[[Mapping[str, Any]], Awaitable[Mapping[str, Any]]] | None = None,
         interaction_factory: Callable[..., Any] | None = None,
         prepared_calls: tuple[ToolCall, ...] = (),
+        allow_text_completion: bool = False,
     ) -> None:
         self._observation_tools = tuple(observation_tools)
         self._tools_provider = tools_provider
         self._report_sink = report_sink
         self._interaction_factory = interaction_factory
         self._prepared_calls = prepared_calls
+        self._allow_text_completion = allow_text_completion
         self._audit_registry = audit_registry
         self._logger = logger
         self._model_factory = model_factory or OpenAICompatibleModelClient
@@ -658,6 +660,15 @@ class AgentRuntime:
                                 "result": result.value,
                             },
                         )
+                    if not result.ok and result.value.get("error", {}).get("code") == "world_changed":
+                        session.invalidated_error = "world_changed"
+                    if session.invalidated_error:
+                        ledger.record("world_observations_invalidated", {"error_code": session.invalidated_error})
+                        return self._finish_degraded(
+                            ledger, reason="The loaded world changed. Start a new consultation for current state.",
+                            error_code=session.invalidated_error, observations=session.observations,
+                            fallback_answer="The loaded world changed; earlier observations are stale. Start a new consultation.",
+                        )
                     tool_messages.append(result.as_message())
                     if result.terminal and result.ok:
                         data_value = result.value.get("data")
@@ -693,6 +704,10 @@ class AgentRuntime:
                         return self._finish_success(ledger, answer=final["full_text"],
                             agent_text=final.get("agent_text", ""), submission_mode="natural",
                             observations=session.observations)
+                if not self._allow_text_completion:
+                    session.append_recovery("The consultation is not submitted. Continue any necessary research, then finish through submit_response. Ordinary assistant text does not complete this request.")
+                    ledger.record("explicit_submission_required", {"finish_reason": turn.finish_reason})
+                    continue
                 has_full = session.submission.full_text is not None
                 patch = (
                     {"answer": [{"text": turn.content}]}

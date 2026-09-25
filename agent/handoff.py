@@ -366,6 +366,8 @@ class SubmissionDraft:
                 {"saved_fields": self.snapshot()["saved_fields"]},
             )
         previous_answer = self.answer
+        length_only_repair = (set(self.errors) == {"delivery"}
+                              and self.errors["delivery"].get("code") in {"handoff_over_budget", "handoff_transport_over_budget"})
         changed = set()
         for key in ("language", "answer", "detail"):
             if key not in patch:
@@ -386,11 +388,14 @@ class SubmissionDraft:
                 self.errors.pop(key, None)
             except (HandoffValidationError, EvidenceError, TypeError) as error:
                 self.errors[key] = {"code": getattr(error, "code", "invalid_evidence"), "message": str(error)}
-        if "answer" in changed and previous_answer and self.detail is not None and "detail" not in patch:
-            self.errors["detail"] = {
-                "code": "submission_requires_confirmation",
-                "message": "Answer changed; resubmit matching detail or explicitly clear it with null.",
-            }
+        # An overlength conclusion may be shortened without re-sending its saved
+        # report. Changing referenced evidence must still reconfirm the analysis.
+        same_references = ([p for p in previous_answer if "text" not in p]
+                           == [p for p in self.answer if "text" not in p])
+        if ("answer" in changed and previous_answer and self.detail is not None and "detail" not in patch
+                and not (length_only_repair and same_references)):
+            self.errors["detail"] = {"code": "submission_requires_confirmation",
+                                     "message": "Report conclusions or evidence changed; update or reconfirm the matching detail. Length-only repairs retain it automatically."}
         if changed:
             self.revision += 1
         self.errors.pop("delivery", None)
@@ -410,7 +415,7 @@ class SubmissionDraft:
                     "Unsupported claim needs evidence from this run: " + describe(rejected),
                     {"saved_fields": self.snapshot()["saved_fields"],
                      "rejected_claims": rejected,
-                     "required_fields": ["answer"]},
+                     "required_fields": list(dict.fromkeys(item.get("field", "answer") for item in rejected))},
                 )
         self.full_text = self.agent_text = None
         fact_tokens = 0
@@ -468,7 +473,7 @@ class SubmissionDraft:
                 )
             if "answer" in required and self.detail is not None:
                 repair += (
-                    " If answer changes, resubmit matching saved detail or clear it with null;"
+                    " Omitted detail remains saved; update it only when the report changes;"
                     " do not clear detail that is needed to answer the question."
                 )
             raise SubmissionPatchError(
@@ -546,7 +551,7 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
             "and the complete short handoff must fit the host's 200-token transport limit. "
             "Full report plus detail must fit 12000 characters. "
             "Use actual data-relative paths, with or without a leading slash: do not prefix /payload/data or /response/payload/data; array positions are integers, never metadata ~2 templates. "
-            "Value/status paths bound to the same reading are rendered once. Valid inputs survive rejection. Changed answer requires reconfirming or clearing prior detail. Submit alone after reading query results."
+            "Value/status paths bound to the same reading are rendered once. Valid inputs survive rejection. Omitted detail is retained; update it when changing the report's conclusions, or clear it explicitly with null only if unnecessary. Submit alone after reading query results."
         ),
         parameters={
             "type": "object",

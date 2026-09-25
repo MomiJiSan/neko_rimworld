@@ -247,12 +247,15 @@ class SemanticInteraction:
         are not the same colony state, so the run must restart instead of
         answering with a mixture.
         """
+        if getattr(self.session, "invalidated_error", None):
+            raise ToolExecutionError("world_changed", "The loaded world changed; start a new consultation.", recoverable=False)
         observation = await self.original[tool_name].handler(request)
         value = observation.to_dict()
         response = value["response"]
         payload = response["payload"]
         identity = (response["colony_id"], response["load_epoch"])
         if self.sample_identity is not None and identity != self.sample_identity:
+            self.session.invalidated_error = "world_changed"
             raise ToolExecutionError(
                 "world_changed",
                 "The loaded world changed; start a new consultation. Do not combine the old facts.",

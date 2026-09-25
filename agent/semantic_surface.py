@@ -14,6 +14,8 @@ _unavailable/provenance 这类代号，也不把 unknown 落成 0/null。
 """
 from __future__ import annotations
 
+import json
+
 from .prompt import PLAIN_FINISH_GUIDANCE
 
 import copy
@@ -251,7 +253,7 @@ def _object_schema(directory=None):
         schema['properties']['capabilities'] = {
             'type': 'array', 'minItems': 1, 'maxItems': len(values),
             'items': {'type': 'string', 'enum': list(values)},
-            'description': 'For kind things: match any listed native capability, intersected with other selectors. Same membership as survey_space, without reading environment.',
+            'description': 'For kind things: match any listed native capability, intersected with other selectors. Same membership as survey_space, without reading environment. ' + json.dumps(directory.get('world_observation', {}).get('capability_meanings', {}), ensure_ascii=False, separators=(',', ':')),
         }
 
     # Preserve the existing content-category selector on thing_defs. Only the
@@ -869,6 +871,12 @@ def lookup_spec(surface, obj):
         block = {'at': '', 'fields': ['def_name', 'label'], 'limit': 100,
                  'where': {'any': [{'def_name': {'eq': text, 'case_sensitive': False}},
                                    {'label': {'eq': text, 'case_sensitive': False}}]}}
+        # Negotiated native candidate narrowing preserves the same union of
+        # canonical names and localized labels, including ambiguity. Older
+        # directories keep the existing complete-scan path.
+        arguments = surface.argument_schemas.get('thing_defs', {}).get('properties', {})
+        if 'exact_names' in arguments:
+            block['args'] = {'exact_names': [text]}
         return {'kind': 'definition', 'field': 'def_name', 'names': [text],
                 'match_fields': ('def_name', 'label'), 'case_insensitive': True,
                 'request': surface.compile({'source': 'thing_defs', 'blocks': [block]})}

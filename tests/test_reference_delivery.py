@@ -93,7 +93,7 @@ async def test_accepted_reference_survives_runtime_and_host_projection(host_tran
     async def setup():
         return ToolSetup((query_tool(read),), references_supported=True)
 
-    runtime = AgentRuntime(observation_tools=[], tools_provider=setup,
+    runtime = AgentRuntime(allow_text_completion=True, observation_tools=[], tools_provider=setup,
                            audit_registry=AgentAuditRegistry(), logger=FakeLogger(),
                            model_factory=lambda _: model)
     result = await runtime.run("报告读数及其限制。", settings())
@@ -155,7 +155,7 @@ async def test_oversized_reference_is_repaired_before_host_delivery():
     async def setup():
         return ToolSetup((query_tool(read),), references_supported=True)
 
-    runtime = AgentRuntime(observation_tools=[], tools_provider=setup,
+    runtime = AgentRuntime(allow_text_completion=True, observation_tools=[], tools_provider=setup,
                            audit_registry=AgentAuditRegistry(), logger=FakeLogger(),
                            model_factory=lambda _: model)
     result = await runtime.run("报告读数及其限制，无需背景字段。", settings())
@@ -222,7 +222,7 @@ async def test_plain_text_detail_repair_preserves_saved_reference_share():
     async def setup():
         return ToolSetup((query_tool(read),), references_supported=True)
 
-    runtime = AgentRuntime(observation_tools=[], tools_provider=setup,
+    runtime = AgentRuntime(allow_text_completion=True, observation_tools=[], tools_provider=setup,
                            audit_registry=AgentAuditRegistry(), logger=FakeLogger(),
                            model_factory=lambda _: model)
     result = await runtime.run("报告读数及其限制。", settings())

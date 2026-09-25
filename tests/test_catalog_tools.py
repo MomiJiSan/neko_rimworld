@@ -294,6 +294,7 @@ async def test_object_sections_batch_is_one_tool_call_with_schema_in_model_conte
         return setup
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # Explicit legacy natural-text completion fixture.
         observation_tools=[],
         tools_provider=provider,
         audit_registry=AgentAuditRegistry(),
@@ -333,6 +334,7 @@ async def test_terminal_batch_cannot_submit_before_observation_is_seen():
             return AssistantTurn("r", "m", "tool_calls", "", (submission_call("Observed", "Observed"),))
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # Explicit legacy natural-text completion fixture.
         observation_tools=list(setup.tools),
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),
@@ -387,6 +389,7 @@ async def test_schema_discovery_is_cached_metadata_and_never_fresh_evidence():
         return setup
 
     runtime = AgentRuntime(
+        allow_text_completion=True,  # Explicit legacy natural-text completion fixture.
         observation_tools=[],
         tools_provider=provider,
         audit_registry=AgentAuditRegistry(),

@@ -115,7 +115,7 @@ def test_counter_reports_a_safe_budget_metric() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("references_supported", [False, True])
-async def test_text_length_repair_preserves_report_and_requires_reconfirmation(references_supported):
+async def test_text_length_repair_preserves_report_without_retransmission(references_supported):
     from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft, make_submission_tool
     from plugin.plugins.neko_rimworld.agent.tools import ToolExecutionError
 
@@ -127,15 +127,12 @@ async def test_text_length_repair_preserves_report_and_requires_reconfirmation(r
         await tool.handler({"answer": long_answer, "detail": detail})
     assert rejected.value.code == "handoff_over_budget"
     assert "Reference parts" not in str(rejected.value)
-    assert "resubmit matching saved detail" in str(rejected.value)
+    assert "Omitted detail remains saved" in str(rejected.value)
     assert draft.detail == detail and draft.answer == long_answer
     assert detail in draft.full_text and draft.agent_text is None
 
     answer = [{"text": "地面钢铁200单位；背包未知，精确合计未知。"}]
-    with pytest.raises(ToolExecutionError) as unconfirmed:
-        await tool.handler({"answer": answer})
-    assert unconfirmed.value.code == "submission_requires_confirmation"
-    result = await tool.handler({"detail": detail})
+    result = await tool.handler({"answer": answer})
     assert draft.snapshot()["complete"] is True
     assert result["full_text"] == answer[0]["text"] + "\n\n" + detail
     assert result["agent_text"] == answer[0]["text"]
@@ -217,10 +214,10 @@ async def test_text_submission_string_and_legacy_shapes_share_validation():
     assert error.value.code=='handoff_over_budget'
 
 
-def test_handoff_guidance_prioritizes_each_explicit_question_without_new_gate():
+def test_handoff_guidance_separates_main_conclusion_and_complete_report():
     from plugin.plugins.neko_rimworld.agent.prompt import build_system_prompt,build_finalization_prompt
     for prompt in (build_system_prompt(4,references_supported=False),build_finalization_prompt(4,references_supported=False)):
-        assert 'each explicit question' in prompt
+        assert 'every explicit question' in prompt and 'main conclusion' in prompt
         assert 'one concise text string' in prompt
         assert '120 tokens' in prompt and '180' in prompt
 

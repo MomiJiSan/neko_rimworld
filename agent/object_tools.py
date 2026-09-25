@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 
 from .query_surface import SurfaceError
 from .semantic_surface import PAWN_KINDS, THING_KINDS, ASPECTS, normalize_object, validate_aspects, validate_detail
@@ -15,9 +16,12 @@ OBJECT_GUIDE = (
     'look accepts the same object selectors; capabilities on things matches any listed native capability, '
     'intersected with other selectors. Identity discovery does not scan environment. '
     'look defaults to current state for physical objects/cells; request selected aspects for small reads, '
-    'and stats for exact game-computed attributes. actor interacts/travels, user receives/uses. '
-    'Resolve names directly; no preliminary ID lookup call. '
+    'and stats for exact game-computed attributes. An unknown StatDef may return native discovery matches; these are names, not computed values or automatic replacements. '
+    'actor interacts/travels, user receives/uses. Use health.capacities for Pawn capacities, not guessed StatDef names. '
+    'Resolve names directly; stable IDs belong in id/ids, never name/names. No preliminary ID lookup is required. '
     'include_held/include_fogged retain their inclusive polarity and scope defaults. '
+    'object.location.position is the canonical own-position cell; held_position is separate. A null location is not proof that the object is absent; retain its applicability and coverage. '
+    'Use wiki for definition names/types when available; definition knowledge is not a current actor value. '
     'survey_space reads region and environment; inspect_route reads path and environment; '
     'inspect_space remains the lightweight reachability/path-ranking tool. '
     'Read per-observation scope, coverage and unknowns. Neither occupancy nor reservation '
@@ -54,7 +58,10 @@ def extend_look_schema(spec, contract):
         'Other aspects retain biography, mood, resources and definition facts. '
         'Use stats for exact game-computed StatDefs. actor performs interaction/travel; user is '
         'the intended recipient; omitted actor defaults to user. Context checks are observations, not action eligibility guarantees. '
-        'Resolve names directly; do not look up IDs first. Scope, coverage and unavailable facts are explicit.'
+        'Resolve names directly; stable IDs belong in id/ids, not name/names. Do not look up IDs first. '
+        'object.location gives canonical position and held_position cells without removing legacy fields. '
+        'Unknown StatDefs may provide discovery.matches and matching_definition_kind; names are not computed values. '
+        'Scope, coverage and unavailable facts are explicit.'
     )
     props = spec['parameters']['properties']
     cell = {'type': 'object', 'additionalProperties': False, 'required': ['kind','x','z'],
@@ -126,7 +133,7 @@ class ObjectReader:
         if any(k in args for k in ('actor','user')) and not state:
             raise SurfaceError('actor/user context requires a state aspect')
         if not cell and not state and stats is None and not any(k in args for k in ('actor','user')):
-            return await self.interaction._look_legacy({**args,'aspects':aspects})
+            return self._fit_page(self._normalize_identities(await self.interaction._look_legacy({**args,'aspects':aspects})))
         direct = (kind in ('pawn','thing') and offset == 0
                   and not set(obj) - {'kind','ids','names','map','include_fogged'}
                   and len(obj.get('ids',obj.get('names',[]))) == 1
@@ -187,6 +194,11 @@ class ObjectReader:
                 item['state_sample'] = {'tick':row.get('sample_tick'),'observation_id':native['observation_id']}
                 if row.get('status') in ('unavailable','unsupported') or 'facets' not in row and not cell:
                     item['state'] = copy.deepcopy(row)
+                    if direct and obj.get('names') and re.fullmatch(r'Thing_[A-Za-z0-9_]+\d+', obj['names'][0]):
+                        base.setdefault('input_hints', []).append({
+                            'code':'possible_id_in_name', 'field':'object.name' if 'name' in args['object'] else 'object.names',
+                            'value':obj['names'][0], 'suggested_field':'object.id',
+                            'message':'This unresolved exact display name resembles a stable Thing ID. If you intended an ID, retry with object.id; names are never silently coerced.'})
                     base['status'] = 'partial'
                     continue
                 if cell:
@@ -227,7 +239,53 @@ class ObjectReader:
         if base['coverage']['state_facets_read_successfully'] is False:
             base['status'] = 'partial'
         base['not_read'].append('Omitted aspects are not evidence of absence. stats are computed only when requested; contextual predicates require the relevant actor/user.')
-        return self._fit_page(base)
+        return self._fit_page(self._normalize_identities(base))
+
+    @staticmethod
+    def _canonical_identity(value):
+        """Add one stable location shape while retaining every legacy field.
+
+        A held position never substitutes for an unavailable own position.
+        The enclosing map can complete an own-position cell only when the
+        returned identity explicitly says the Thing is spawned.
+        """
+        identity = copy.deepcopy(value)
+        if not isinstance(identity, dict) or not identity.get('id'):
+            return identity
+        status = identity.get('status') if isinstance(identity.get('status'), dict) else {}
+        raw = status.get('position') if isinstance(status.get('position'), dict) else identity.get('position')
+        def cell(position, *, own=False):
+            if not isinstance(position, dict) or any(type(position.get(k)) is not int for k in ('x','z')):
+                return None
+            map_id = position.get('map', position.get('map_id'))
+            if not map_id and own and identity.get('spawned') is True:
+                map_id = identity.get('map_id') or (identity.get('map_held') or {}).get('id') or identity.get('map')
+            if not isinstance(map_id, str) or not map_id:
+                return None
+            return {'kind':'cell', 'map':map_id, 'x':position['x'], 'z':position['z']}
+        own = cell(raw, own=True)
+        if identity.get('spawned') is False:
+            own = None
+        held = cell(identity.get('held_position'))
+        identity['location'] = {'position':own, 'held_position':held}
+        # Keep both map spellings for clients already using either path.
+        if own is not None:
+            if isinstance(identity.get('position'), dict):
+                identity['position'] = {**identity['position'], **own, 'map_id':own['map']}
+            if isinstance(status.get('position'), dict):
+                identity['status'] = {**status, 'position':{**status['position'], **own, 'map_id':own['map']}}
+        return identity
+
+    @classmethod
+    def _normalize_identities(cls, result):
+        result = copy.deepcopy(result)
+        for row in result.get('facts', []):
+            if isinstance(row.get('object'), dict):
+                row['object'] = cls._canonical_identity(row['object'])
+            identity = row.get('facts', {}).get('identity')
+            if isinstance(identity, dict) and isinstance(identity.get('object'), dict):
+                identity['object'] = cls._canonical_identity(identity['object'])
+        return result
 
     @staticmethod
     def _fit_page(base):

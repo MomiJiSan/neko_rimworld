@@ -135,3 +135,77 @@ async def test_direct_ambiguous_reference_keeps_candidates_without_inventing_ide
     assert result['status']=='partial'
     assert result['facts'][0]['state']['resolution']['candidates']==[{'id':'a'},{'id':'b'}]
     assert 'id'not in result['facts'][0]['object'] and not result['facts'][0]['facts']
+
+
+@pytest.mark.asyncio
+async def test_canonical_location_unifies_direct_and_population_without_mutating_native():
+    native={'status':'ok','observation_id':'native','data':{'objects':[{
+        'target':{'id':'Thing_Human7','name':'Alex','kind':'pawn','definition':'Human','map':'Map_0',
+                  'position':{'kind':'cell','map':'Map_0','x':10,'z':20},
+                  'held_position':{'kind':'cell','map':'Map_0','x':10,'z':20},'spawned':True},
+        'facets':{'pawn':{'status':'observed','conditions':[]}},
+        'coverage':{'registered_facets_read_successfully':True}}]}}
+    original=copy.deepcopy(native)
+    legacy={'id':'Thing_Human7','name':'Alex','map_id':'Map_0',
+            'status':{'position':{'map_id':'Map_0','x':10,'z':20}}}
+    reader=Reader([legacy],native)
+    direct=await ObjectReader(reader).look({'object':{'kind':'pawn','id':'Thing_Human7'},'aspects':['health']})
+    grouped=await ObjectReader(reader).look({'object':{'kind':'pawns','ids':['Thing_Human7']},'aspects':['health']})
+    identity=await ObjectReader(reader).look({'object':{'kind':'pawn','id':'Thing_Human7'},'aspects':['identity']})
+    expected={'kind':'cell','map':'Map_0','x':10,'z':20}
+    for result in [direct,grouped,identity]:
+        obj=result['facts'][0]['object']
+        assert obj['location']['position']==expected
+        assert obj['status']['position']['map']=='Map_0'
+        assert obj['status']['position']['map_id']=='Map_0'
+    assert native==original
+    assert grouped['facts'][0]['object']['location']['held_position']is None  # never invented
+
+
+def test_canonical_location_never_substitutes_holder_position_for_own():
+    raw={'id':'Thing_Item1','spawned':False,'position':{'x':-1000,'z':-1000},
+         'map_held':{'id':'Map_0'},'held_position':{'map':'Map_0','x':3,'z':4}}
+    result=ObjectReader._canonical_identity(raw)
+    assert result['location']['position']is None
+    assert result['location']['held_position']=={'kind':'cell','map':'Map_0','x':3,'z':4}
+    assert result['position']==raw['position']
+
+
+@pytest.mark.asyncio
+async def test_id_like_unresolved_name_gets_hint_without_coercion():
+    reply={'status':'partial','observation_id':'miss','data':{'objects':[{
+        'status':'unavailable','reason':'object_unavailable','requested_target':{'name':'Thing_Bed7'}}]}}
+    reader=Reader([],reply)
+    result=await ObjectReader(reader).look({'object':{'kind':'thing','name':'Thing_Bed7'}})
+    assert reader.calls[0][1]['targets']==[{'kind':'thing','name':'Thing_Bed7','map':'current'}]
+    assert result['input_hints'][0]['code']=='possible_id_in_name'
+    assert result['input_hints'][0]['suggested_field']=='object.id'
+    assert not result['facts'][0]['facts']
+    assert 'id'not in result['facts'][0]['object']
+
+
+@pytest.mark.asyncio
+async def test_id_like_real_display_name_keeps_its_resolved_identity():
+    reply={'status':'ok','observation_id':'match','data':{'objects':[{
+        'target':{'id':'Thing_Actual9','name':'Thing_Bed7','definition':'Bed','map':'Map_0'},
+        'facets':{'bed':{'status':'observed'}},'coverage':{'registered_facets_read_successfully':True}}]}}
+    result=await ObjectReader(Reader([],reply)).look({'object':{'kind':'thing','name':'Thing_Bed7'}})
+    assert result['facts'][0]['object']['id']=='Thing_Actual9'
+    assert not result.get('input_hints')
+
+
+@pytest.mark.asyncio
+async def test_unknown_stat_discovery_and_observed_sibling_are_preserved():
+    stats={'status':'partial','complete':False,'values':[
+        {'definition':'MoveSpeed','value':4.4,'status':'observed'},
+        {'definition':'Moving','status':'unknown_definition','discovery':{
+            'definition_kind':'StatDef','matches':[], 'truncated':False,
+            'matching_definition_kind':'PawnCapacityDef','matching_definition':'Moving',
+            'read_from':'health.capacities'}}]}
+    reply={'status':'partial','observation_id':'stats','data':{'objects':[{
+        'target':{'id':'p','name':'Alex','definition':'Human','map':'Map_0'},
+        'facets':{'stats':stats},'coverage':{'registered_facets_read_successfully':False}}]}}
+    result=await ObjectReader(Reader([],reply)).look({'object':{'kind':'pawn','id':'p'},'stats':['MoveSpeed','Moving']})
+    assert result['facts'][0]['facts']['stats']==stats
+    assert result['status']=='partial'
+    assert 'stats'not in result['facts'][0]['facts']['state']['facets']  # one canonical stats location

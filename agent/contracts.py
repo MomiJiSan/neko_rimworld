@@ -33,6 +33,8 @@ class AssistantTurn:
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_metadata: dict[str, Any] = field(default_factory=dict)
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    # Provider continuation data stays in this session, never in audit/UI output.
+    reasoning_content: str | None = field(default=None, repr=False)
 
     def as_message(self) -> dict[str, Any]:
         message: dict[str, Any] = {
@@ -41,6 +43,8 @@ class AssistantTurn:
         }
         if self.tool_calls:
             message["tool_calls"] = [call.as_message_value() for call in self.tool_calls]
+        if self.reasoning_content is not None:
+            message["reasoning_content"] = self.reasoning_content
         return message
 
     def as_audit_value(self) -> dict[str, Any]:
