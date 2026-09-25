@@ -706,19 +706,12 @@ class AgentRuntime:
                     {"count": len(tool_messages)},
                 )
                 if submitted_response is not None:
-                    if settings.review_before_delivery and not session.review:
-                        if await self._review_draft(question, settings, ledger, session, submitted_response.get('delivery')):
-                            continue
-                    elif session.review.get('status') == 'issues_raised':
-                        session.review['valid_resubmitted'] = True
-                    return self._finish_success(
-                        ledger,
-                        answer=str(submitted_response["full_text"]),
-                        agent_text=str(submitted_response["agent_text"]),
+                    completed = await self._complete_submission(
+                        question, settings, ledger, session, submitted_response,
                         submission_mode=str(submitted_response.get("submission_mode", "submit_response")),
-                        observations=session.observations,
-                        delivery=submitted_response.get("delivery"),
                     )
+                    if completed is not None:
+                        return completed
                 continue
 
             if turn.content:
@@ -726,13 +719,17 @@ class AgentRuntime:
                     try:
                         final = session.interaction.accept_text(turn.content, turn.finish_reason)
                     except HandoffValidationError as exception:
+                        if session.review.get('status') == 'issues_raised':
+                            session.review['author_revision_attempted'] = True
                         session.append_recovery(str(exception))
                         ledger.record("final_text_rejected", {"error_code": exception.code, "message": str(exception)})
                         continue
                     if final is not None:
-                        return self._finish_success(ledger, answer=final["full_text"],
-                            agent_text=final.get("agent_text", ""), submission_mode="natural",
-                            observations=session.observations)
+                        completed = await self._complete_submission(
+                            question, settings, ledger, session, final, submission_mode="natural")
+                        if completed is not None:
+                            return completed
+                        continue
                 if not self._allow_text_completion:
                     session.append_recovery("The consultation is not submitted. Continue any necessary research, then finish through submit_response. Ordinary assistant text does not complete this request.")
                     ledger.record("explicit_submission_required", {"finish_reason": turn.finish_reason})
@@ -743,6 +740,8 @@ class AgentRuntime:
                     if count_handoff_tokens(turn.content)[0] <= 180
                     else {"detail": turn.content}
                 )
+                if session.review.get('status') == 'issues_raised':
+                    session.review['author_revision_attempted'] = True
                 try:
                     validated = session.submission.apply(patch, observations=session.observations, references_supported=setup.references_supported)
                     ledger.set_draft(session.submission.snapshot())
@@ -755,14 +754,13 @@ class AgentRuntime:
                     )
                     ledger.record("final_text_rejected", {"error_code": exception.code, "message": str(exception)})
                     continue
-                return self._finish_success(
-                    ledger,
-                    answer=str(validated["full_text"]),
-                    agent_text=str(validated["agent_text"]),
+                completed = await self._complete_submission(
+                    question, settings, ledger, session, validated,
                     submission_mode="text_repair" if has_full else "text_fallback",
-                    observations=session.observations,
-                    delivery=validated.get("delivery"),
                 )
+                if completed is not None:
+                    return completed
+                continue
 
             recovery = (
                 "Your previous response contained neither final text nor a valid tool call. "
@@ -770,6 +768,22 @@ class AgentRuntime:
             )
             session.append_recovery(recovery)
             ledger.record("recovery_prompt_appended", {"message": recovery})
+
+    async def _complete_submission(self, question, settings, ledger, session, submission, *, submission_mode):
+        """All accepted outputs share one checkpoint; None resumes the author."""
+        # An adapter may return its accepted text separately from its draft fields.
+        # Review and failure fallback must refer to the text actually being delivered.
+        session.submission.full_text = str(submission["full_text"])
+        session.submission.agent_text = str(submission.get("agent_text", ""))
+        if settings.review_before_delivery and not session.review:
+            if await self._review_draft(question, settings, ledger, session, submission.get("delivery")):
+                return None
+        elif session.review.get('status') == 'issues_raised':
+            session.review.update(author_revision_attempted=True, valid_resubmitted=True)
+        return self._finish_success(
+            ledger, answer=session.submission.full_text, agent_text=session.submission.agent_text,
+            submission_mode=submission_mode, observations=session.observations, delivery=submission.get("delivery"),
+        )
 
     async def _review_draft(self, question, settings, ledger, session, delivery=None) -> bool:
         """One budgeted checkpoint. Return True only when the author must respond."""
@@ -786,10 +800,16 @@ class AgentRuntime:
                 "answer": session.submission.agent_text, "full_report": session.submission.full_text,
             }, session.messages, session.interaction.review_contract() if session.interaction is not None
                 and hasattr(session.interaction, "review_contract") else stage_review.tool_contract(self._observation_tools))
-        except ValueError:
-            session.review["status"] = "skipped_context_limit"
+        except stage_review.ReviewContextLimit as error:
+            session.review.update(status="skipped_context_limit", error_code="review_context_limit",
+                                  input_chars=error.input_chars, input_limit_chars=error.limit_chars)
             ledger.record("stage_review_finished", dict(session.review))
             return False
+        except ValueError:
+            session.review.update(status="unavailable", error_code="invalid_review_context")
+            ledger.record("stage_review_finished", dict(session.review))
+            return False
+        session.review.update(input_chars=len(messages[1]['content']), input_limit_chars=stage_review.MAX_REVIEW_CHARS)
         reviewer = self._review_model_factory(settings)
         schemas = [stage_review.REVIEW_TOOL]
         session.model_calls += 1

@@ -41,18 +41,90 @@ def submit(text):
     return reply('submit_response', {'answer': text, 'detail': text})
 
 
-async def run_review(review_turn, revisions=None):
+async def run_review(review_turn, revisions=None, *, initial=None, allow_text_completion=False,
+                     interaction_factory=None):
     async def query(args): return {'value': 7}
-    author = Model([reply('query_game', {}), submit('数量为8。'), *(revisions if revisions is not None else [submit('数量为7。')])])
+    author = Model([reply('query_game', {}), initial or submit('数量为8。'), *(revisions if revisions is not None else [submit('数量为7。')])])
     critic = Model([review_turn])
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(observation_tools=[ToolSpec('query_game', 'Read value', {'type': 'object', 'properties': {}}, query)],
         audit_registry=registry, logger=Logger(), model_factory=lambda settings: author,
-        review_model_factory=lambda settings: critic)
+        review_model_factory=lambda settings: critic, allow_text_completion=allow_text_completion,
+        interaction_factory=interaction_factory)
     settings = build_agent_model_settings(base_url='http://127.0.0.1:1234', model='test',
         review_before_delivery=True, run_budget_seconds=90)
     result = await runtime.run('数量是多少？', settings)
     return result, author, critic, registry
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('verdict', ['supported', 'contradiction'])
+async def test_natural_completion_obeys_review_switch_and_revision_tracking(verdict):
+    first = AssistantTurn('r', 'test', 'stop', '数量为8。')
+    revised = AssistantTurn('r', 'test', 'stop', '数量为7。')
+    result, author, critic, _ = await run_review(reply('record_review', assessment(verdict)),
+        initial=first, revisions=[revised], allow_text_completion=True)
+
+    assert len(critic.requests) == 1
+    assert result['status'] == 'ok'
+    if verdict == 'contradiction':
+        assert result['agent_text'] == '数量为7。' and len(author.requests) == 3
+        assert result['review']['author_revision_attempted'] is True
+        assert result['review']['valid_resubmitted'] is True
+    else:
+        assert result['agent_text'] == '数量为8。' and len(author.requests) == 2
+        assert result['review']['status'] == 'no_issues_reported'
+    assert result['review']['final_rechecked'] is False
+
+
+class NaturalInteraction:
+    """An adapter whose accepted output is returned independently of saved draft fields."""
+    def __init__(self, setup, session, update):
+        self.setup, self.session, self.update = setup, session, update
+
+    def prompt(self, cycles): return 'Read the value and answer.'
+    def request_messages(self, messages): return messages
+    def snapshot(self): return {}
+    def tools(self):
+        from plugin.plugins.neko_rimworld.agent.handoff import make_submission_tool
+        return (*self.setup.tools, make_submission_tool(self.session.submission, self.session.observations, self.update))
+    def accept_text(self, text, finish_reason):
+        from plugin.plugins.neko_rimworld.agent.handoff import HandoffValidationError
+        if finish_reason != 'stop':
+            raise HandoffValidationError('incomplete_answer', 'Incomplete text')
+        return validate_submission(text, text)
+    def attach_result(self, result):
+        from plugin.plugins.neko_rimworld.agent.handoff import attach_agent_handoff
+        return attach_agent_handoff(result)
+    async def aclose(self): pass
+
+
+@pytest.mark.asyncio
+async def test_adapter_text_is_reviewed_using_its_actual_accepted_output():
+    first = AssistantTurn('r', 'test', 'stop', '数量为8。')
+    revised = AssistantTurn('r', 'test', 'stop', '数量为7。')
+    result, author, critic, _ = await run_review(reply('record_review', assessment()),
+        initial=first, revisions=[revised], interaction_factory=NaturalInteraction)
+    assert len(critic.requests) == 1 and len(author.requests) == 3
+    payload = json.loads(critic.requests[0][1]['content'])
+    assert payload['draft'] == {'answer': '数量为8。', 'full_report': '数量为8。'}
+    assert result['agent_text'] == '数量为7。'
+    assert result['review']['valid_resubmitted'] is True
+    assert result['draft']['full_text'] == '数量为7。'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('adapter', [False, True])
+async def test_failed_natural_revision_restores_the_reviewed_candidate(adapter):
+    result, _, critic, _ = await run_review(reply('record_review', assessment()),
+        initial=AssistantTurn('r', 'test', 'stop', '数量为8。'),
+        revisions=[AssistantTurn('r', 'test', 'stop', '7' * 13000), ModelClientError('invalid_request', 'stop')],
+        allow_text_completion=not adapter, interaction_factory=NaturalInteraction if adapter else None)
+    assert len(critic.requests) == 1
+    assert result['status'] == 'degraded' and result['agent_text'] == '数量为8。'
+    assert result['review']['author_revision_attempted'] is True
+    assert result['review']['valid_resubmitted'] is False
+    assert result['review']['fallback'] == 'pre_review_draft'
 
 
 @pytest.mark.asyncio
@@ -86,6 +158,19 @@ async def test_review_failure_keeps_valid_draft_and_reports_unreviewed_state():
     snapshot = registry.snapshot()
     assert snapshot['latest_run']['usage']['total_tokens'] == 25
     assert snapshot['latest_run']['usage']['complete']
+
+
+@pytest.mark.asyncio
+async def test_oversize_review_is_explicit_and_never_sends_truncated_evidence(monkeypatch):
+    from plugin.plugins.neko_rimworld.agent import stage_review
+    monkeypatch.setattr(stage_review, 'MAX_REVIEW_CHARS', 100)
+    result, author, critic, _ = await run_review(reply('record_review', assessment('supported')))
+    assert len(critic.requests) == 0 and len(author.requests) == 2
+    assert result['agent_text'] == '数量为8。'
+    assert result['review']['status'] == 'skipped_context_limit'
+    assert result['review']['input_chars'] > result['review']['input_limit_chars'] == 100
+    assert result['review']['valid_resubmitted'] is False
+    assert any('not a reviewed approval' in c for c in result['caveats'])
 
 
 @pytest.mark.asyncio
@@ -150,6 +235,23 @@ def test_bad_citations_are_retained_as_unverified_advice_not_silent_approval():
         issues = review_issues(result)
         assert any(i['kind'] == 'citation_unverified' for i in issues)
         assert '数量为8' in issues[-1]['reason']
+
+
+def test_bad_path_keeps_valid_evidence_identity_in_author_feedback():
+    from plugin.plugins.neko_rimworld.agent.stage_review import author_feedback, review_issues
+
+    evidence = [{'evidence_id': 0, 'tool_call_id': 'route-batch', 'native_result_index': 7,
+                 'call': {'name': 'inspect_route'}, 'result': {'data': {'value': 7}}}]
+    data = assessment('supported', path='/wrong_path')
+    data['checks'].append(assessment('supported', index=8)['checks'][0])
+    review = parse_review(reply('record_review', data), evidence)
+    feedback = json.loads(author_feedback(review_issues(review), evidence).split('\n')[-1])
+
+    assert feedback['evidence_bindings'] == [
+        {'evidence_id': 0, 'tool_call_id': 'route-batch', 'tool': 'inspect_route', 'native_result_index': 7}]
+    assert len(review['citation_errors']) == 2
+    assert all(error['status'] == 'unresolved' for error in review['citation_errors'])
+    assert review['checks'] == data['checks']  # Restoring identity does not validate the path or the claim.
 
 
 def test_review_schema_matches_cross_field_parser_requirements():

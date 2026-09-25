@@ -7,7 +7,20 @@ from typing import Any
 
 from .evidence_view import canonical, review_evidence
 
-MAX_REVIEW_CHARS = 1048576
+# Bound the complete review payload without trimming evidence. The old 1 Mi-character
+# cap rejected an observed 1.05M-character investigation before the critic ran.
+# 4 Mi characters retains headroom for the actual function contract and wider reads;
+# provider context/time budgets remain independent limits, not implied guarantees.
+MAX_REVIEW_CHARS = 4 * 1024 * 1024
+
+
+class ReviewContextLimit(ValueError):
+    def __init__(self, input_chars: int, limit_chars: int):
+        super().__init__('review_context_limit')
+        self.input_chars = input_chars
+        self.limit_chars = limit_chars
+
+
 REVIEW_PROMPT = """Independently review this RimWorld draft against the question and visible evidence.
 Do not defend the author's conclusion. First identify the claims essential to its recommendation
 and the user's requested comparisons; check those before incidental numbers or wording.
@@ -73,7 +86,7 @@ def request_messages(question: str, draft: dict[str, Any], messages: list[dict[s
     payload = canonical({'question': question, 'draft': draft, 'evidence': evidence,
                          'tool_contract': contract or [], 'conversation_context': context})
     if len(payload) > MAX_REVIEW_CHARS:
-        raise ValueError('review_context_limit')
+        raise ReviewContextLimit(len(payload), MAX_REVIEW_CHARS)
     return [{'role': 'system', 'content': REVIEW_PROMPT}, {'role': 'user', 'content': payload}], evidence
 
 
@@ -148,7 +161,10 @@ def review_issues(review):
               for c in review['checks'] if c['verdict'] != 'supported']
     if review.get('citation_errors'):
         issues.append({'claim': 'Some essential-claim citations did not resolve.',
-                       'kind': 'citation_unverified', 'evidence_ids': [],
+                       'kind': 'citation_unverified',
+                       # A bad field path does not invalidate the record's identity.
+                       # author_feedback binds only IDs present in the actual ledger.
+                       'evidence_ids': sorted({e['reference']['evidence_id'] for e in review['citation_errors']}),
                        'reason': canonical(review['citation_errors']),
                        'impact': 'Verify the original claims against observations. These references are not evidence; do not accept unsupported objections or treat supported labels as approval.'})
     if review['coverage'] == 'partial':
