@@ -71,24 +71,43 @@ class SemanticActivityDataSource:
     def __init__(self, interaction: Any) -> None:
         self.interaction = interaction
 
+    async def _resolve_ref(self, ref: Mapping[str, Any]) -> dict[str, Any]:
+        if "id" in ref or ref.get("kind") == "cell":
+            return copy.deepcopy(dict(ref))
+        result = await self.interaction.look({"object": dict(ref), "aspects": ["identity"], "detail": 0})
+        if result.get("status") != "ok":
+            raise ToolExecutionError("activity_reference_partial", "Activity reference resolution was partial; use a stable ID.")
+        facts = result.get("facts", [])
+        if len(facts) != 1 or not isinstance(facts[0].get("object"), Mapping):
+            raise ToolExecutionError("activity_reference_ambiguous", "Activity reference did not resolve to exactly one object.")
+        obj = facts[0]["object"]
+        if not obj.get("id"):
+            raise ToolExecutionError("activity_reference_unresolved", "Activity reference returned no stable ID.")
+        return {"kind": ref["kind"], "id": obj["id"], "map": obj.get("map") or obj.get("map_id") or ref.get("map")}
+
     async def resolve(self, activity: Mapping[str, Any]) -> Mapping[str, Any]:
+        resolved = copy.deepcopy(activity)
+        resolved["actors"] = [await self._resolve_ref(ref) for ref in activity["actors"]]
+        if activity.get("subject") is not None:
+            resolved["subject"] = await self._resolve_ref(activity["subject"])
         destination = activity["destination"]
         if "candidates" in destination:
-            return copy.deepcopy(activity)
-        selector = copy.deepcopy(destination["selector"])
-        result = await self.interaction.look({"object": selector, "aspects": ["identity"], "detail": 0})
-        if result.get("status") != "ok":
-            raise ToolExecutionError("activity_destination_partial", "Destination discovery was partial; choose explicit candidates.")
-        rows = result.get("facts", []) if isinstance(result, Mapping) else []
-        refs = []
-        for row in rows:
-            obj = row.get("object") if isinstance(row, Mapping) else None
-            if isinstance(obj, Mapping) and obj.get("id"):
-                refs.append({"kind": "thing", "id": obj["id"], "map": obj.get("map") or obj.get("map_id")})
-        if not refs:
-            raise ToolExecutionError("activity_no_destinations", "The destination selector returned no resolved objects.")
-        resolved = copy.deepcopy(activity)
-        resolved["destination"] = {"candidates": refs[:8]}
+            resolved["destination"] = {"candidates": [await self._resolve_ref(ref) for ref in destination["candidates"]]}
+        else:
+            selector = copy.deepcopy(destination["selector"])
+            result = await self.interaction.look({"object": selector, "aspects": ["identity"], "detail": 0})
+            if result.get("status") != "ok":
+                raise ToolExecutionError("activity_destination_partial", "Destination discovery was partial; choose explicit candidates.")
+            rows = result.get("facts", []) if isinstance(result, Mapping) else []
+            refs = []
+            for row in rows:
+                obj = row.get("object") if isinstance(row, Mapping) else None
+                if isinstance(obj, Mapping) and obj.get("id"):
+                    refs.append({"kind": "thing", "id": obj["id"], "map": obj.get("map") or obj.get("map_id")})
+            if not refs:
+                raise ToolExecutionError("activity_no_destinations", "The destination selector returned no resolved objects.")
+            resolved["destination"] = {"candidates": refs[:8]}
+        resolved["resolution"] = {"status": "complete", "stable_ids": True}
         return resolved
 
     async def request(self, operation: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
