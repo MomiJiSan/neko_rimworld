@@ -756,6 +756,33 @@ fewer aspects. Existing held/fogged/map defaults and exact name ambiguity remain
 The sealed 12-episode regression supports simpler discovery and object access,
 not a general reasoning-quality claim. Complex rescue still failed; see the bench
 `planning/V23-RESULTS.md` for the full result and post-run deterministic repairs.
+
+### V2.4 activity evaluation (opt-in)
+
+The plugin contains an opt-in generic activity evaluator for bounded `move` and
+`transfer` activities. It compiles actor/subject/destination relationships into
+the existing read-only `look` and `inspect_route` operations, preserving each
+stage's actor, origin, destination, observation and coverage. A transfer has an
+approach stage (actor position to subject position) and a transfer stage
+(subject position to destination using the same actor with a hypothetical start).
+
+This is a mechanical evidence evaluator, not a rescue planner or action runner.
+It does not choose a best actor, calculate a safety score, execute a Job, predict
+carry speed, or claim that a native bed predicate proves post-carry eligibility.
+Observed route metrics are ranked only within their declared stage and metric
+scope; unknown, partial and uncomputed values do not become zero or safe.
+
+Set `NEKO_ACTIVITY_VARIANT=conservative` for the explicit contract surface,
+`simplified` for the smaller activity-only Agent surface, or `hybrid` for the
+activity surface alongside the existing semantic tools. The default is unset and
+keeps the existing Agent surface unchanged. This feature has no new Mod wire
+operation and requires a connected Mod advertising the existing world observation
+capability for route stages.
+
+The deterministic contract and replay tests are in the companion
+`rimworld-bench` repository. Passing them is an engineering guarantee about
+identity/stage binding and coverage propagation, not a claim that a model will
+make a correct high-level strategy choice.
 # Context efficiency and optional stage review
 
 Runtime timing advice is sent after the stable conversation prefix. It is not

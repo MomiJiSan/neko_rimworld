@@ -54,6 +54,7 @@ from .tools import ToolExecutionError, ToolSpec
 from .wiki_tools import WIKI_GUIDANCE
 from .world_order import order_world_fields
 from .object_tools import ObjectReader, state_contract, extend_look_schema, OBJECT_GUIDE
+from .activity_tools import activity_variant, make_activity_tool
 
 # Only this explicitly approved non-observation tool survives the adapter.
 PASSTHROUGH_TOOLS = frozenset({"wiki"})
@@ -199,10 +200,15 @@ class SemanticInteraction:
                 if name not in self.original:
                     continue
                 async def observe(args, operation=name):
-                    native = await self.execute_native(args, tool_name=operation)
-                    return order_world_fields(native["data"])
+                    return await self._world_read(args, operation)
                 handlers[name] = observe
                 semantic_specs.append(spec)
+        selected_variant = activity_variant()
+        if selected_variant == "simplified":
+            # The simplified surface deliberately leaves only the activity facade
+            # and explicitly approved passthrough tools visible. The conservative
+            # and hybrid variants retain the existing semantic tools.
+            semantic_specs = []
         for tool in semantic_specs:
             handler = handlers[tool["name"]]
 
@@ -214,6 +220,8 @@ class SemanticInteraction:
 
             specs.append(ToolSpec(tool["name"], tool["description"], tool["parameters"], guarded))
         passthrough = tuple(self.original[name] for name in sorted(PASSTHROUGH_TOOLS) if name in self.original)
+        if selected_variant is not None:
+            specs.append(make_activity_tool(self, selected_variant))
         return (*specs, *passthrough, submit)
 
     def review_contract(self):
@@ -241,6 +249,21 @@ class SemanticInteraction:
 
     async def aclose(self) -> None:
         return None
+
+    async def _world_read(self, args: dict[str, Any], operation: str) -> dict[str, Any]:
+        """Read one catalog-advertised world operation for semantic and activity adapters."""
+        if operation not in self.original:
+            raise ToolExecutionError("unsupported", f"The connected Mod does not support {operation}.")
+        native = await self.execute_native(args, tool_name=operation)
+        data = native.get("data")
+        if not isinstance(data, dict):
+            raise ToolExecutionError("invalid_world_result", f"The connected Mod returned no {operation} data.")
+        ordered = order_world_fields(data)
+        ordered["observation_id"] = native.get("observation_id")
+        ordered["status"] = native.get("status", "ok")
+        ordered["issues"] = copy.deepcopy(native.get("issues", []))
+        ordered["source_kind"] = "native"
+        return ordered
 
     # -- native read ------------------------------------------------------
 
