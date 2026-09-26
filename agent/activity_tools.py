@@ -59,6 +59,8 @@ def _simplified_schema() -> dict[str, Any]:
             "kind": {"type": "string", "enum": ["move", "transfer"]},
             "actors": {"type": "array", "minItems": 1, "maxItems": 8, "items": _ref_schema("pawn")},
             "subject": {"oneOf": [_ref_schema("pawn"), _ref_schema("thing")]},
+            "stats": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 256}, "maxItems": 8},
+            "start": {"oneOf": [_ref_schema("pawn"), _ref_schema("thing"), _ref_schema("cell")]},
             "destinations": {"oneOf": [{"type": "array", "minItems": 1, "maxItems": 8, "items": {"oneOf": [_ref_schema("thing"), _ref_schema("cell")]}}, {"type": "object", "additionalProperties": False, "required": ["selector"], "properties": {"selector": {"type": "object"}}}]},
             "preferences": {"type": "array", "items": {"type": "string", "enum": ["shorter_route", "lower_observed_hazard", "higher_observed_stat"]}, "maxItems": 3},
         },
@@ -96,7 +98,8 @@ class SemanticActivityDataSource:
         else:
             selector = copy.deepcopy(destination["selector"])
             result = await self.interaction.look({"object": selector, "aspects": ["identity"], "detail": 0})
-            if result.get("status") != "ok":
+            coverage = result.get("coverage", {})
+            if result.get("status") != "ok" or coverage.get("listing") not in (None, "complete"):
                 raise ToolExecutionError("activity_destination_partial", "Destination discovery was partial; choose explicit candidates.")
             rows = result.get("facts", []) if isinstance(result, Mapping) else []
             refs = []

@@ -98,7 +98,7 @@ def test_agent_surface_variants_are_small_and_reject_unknown_fields():
     conservative = _conservative_schema()
     simplified = _simplified_schema()
     assert set(conservative["properties"]) == {"kind", "actor", "subject", "destination", "inspect", "compare", "detail"}
-    assert set(simplified["properties"]) == {"kind", "actors", "subject", "destinations", "preferences"}
+    assert set(simplified["properties"]) == {"kind", "actors", "subject", "stats", "start", "destinations", "preferences"}
     assert conservative["additionalProperties"] is False
     assert simplified["additionalProperties"] is False
 

@@ -220,7 +220,11 @@ class SemanticInteraction:
 
             specs.append(ToolSpec(tool["name"], tool["description"], tool["parameters"], guarded))
         passthrough = tuple(self.original[name] for name in sorted(PASSTHROUGH_TOOLS) if name in self.original)
-        if selected_variant is not None:
+        activity_capable = selected_variant is not None and (
+            "inspect_route" in self.original and
+            self.setup.directory.get("world_observation", {}).get("version") == "world_observation.v2.2"
+        )
+        if activity_capable:
             specs.append(make_activity_tool(self, selected_variant))
         return (*specs, *passthrough, submit)
 

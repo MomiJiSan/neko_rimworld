@@ -32,7 +32,8 @@ def _pick(value, keys):
 
 
 def _route_summary(value):
-    data=value.get('data',{});route=data.get('route',{});env=data.get('path_environment')
+    data=value.get('data') if isinstance(value.get('data'), Mapping) else value
+    route=data.get('route',{});env=data.get('path_environment')
     result=dict(status=_status(value),observation_id=value.get('observation_id'),
                 sample=copy.deepcopy(value.get('sample') or data.get('sample')),issues=copy.deepcopy(value.get('issues',[])))
     if value.get('error'): result['error']=copy.deepcopy(value['error'])
@@ -83,11 +84,14 @@ def _environment_complete(env):
 
 def _evidence_for(stage, result, required_metrics):
     status=result.get('status')
+    observed_payload = bool(result.get('observation_id')) and (
+        isinstance(result.get('data'), Mapping) or isinstance(result.get('route'), Mapping)
+    )
     required=[];observed=[];missing=[]
     if stage['kind']=='actor_state':
-        required=['actor_state']; observed=['actor_state'] if status=='ok' else []; missing=[] if status=='ok' else ['actor_state']
+        required=['actor_state']; observed=['actor_state'] if status=='ok' and observed_payload else []; missing=[] if status=='ok' and observed_payload else ['actor_state']
     elif stage['kind']=='destination_state':
-        required=['destination_state']; observed=['destination_state'] if status=='ok' else []; missing=[] if status=='ok' else ['destination_state']
+        required=['destination_state']; observed=['destination_state'] if status=='ok' and observed_payload else []; missing=[] if status=='ok' and observed_payload else ['destination_state']
     else:
         required=['route']; observed=['route'] if status=='ok' and result.get('route',{}).get('status')=='found' else []
         if not observed: missing.append('route')
