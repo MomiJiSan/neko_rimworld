@@ -80,6 +80,35 @@ def _environment_complete(env):
             and coverage.get('changes_detected') is False)
 
 
+
+def _evidence_for(stage, result, required_metrics):
+    status=result.get('status')
+    required=[];observed=[];missing=[]
+    if stage['kind']=='actor_state':
+        required=['actor_state']; observed=['actor_state'] if status=='ok' else []; missing=[] if status=='ok' else ['actor_state']
+    elif stage['kind']=='destination_state':
+        required=['destination_state']; observed=['destination_state'] if status=='ok' else []; missing=[] if status=='ok' else ['destination_state']
+    else:
+        required=['route']; observed=['route'] if status=='ok' and result.get('route',{}).get('status')=='found' else []
+        if not observed: missing.append('route')
+        if 'path_hazards' in required_metrics:
+            required.append('path_environment')
+            if _environment_complete(result.get('path_environment',{})) and isinstance(result.get('path_hazards'),list) and all(_finite(x.get('cells')) for x in result['path_hazards'] if isinstance(x,dict)):
+                observed.append('path_environment')
+            else: missing.append('path_environment.coverage')
+        for metric in required_metrics:
+            if metric=='path_hazards': continue
+            raw=result.get('route',{}).get(metric)
+            unit={'steps':'grid_transitions','path_length':'map_cell_widths','native_cost':'native_path_cost'}[metric]
+            if metric=='steps' and _finite(raw): observed.append('metric:'+metric)
+            elif isinstance(raw,dict) and raw.get('unit')==unit and _finite(raw.get('value')): observed.append('metric:'+metric)
+            else: missing.append('metric:'+metric)
+    return dict(stage=stage['kind'],stage_id=stage['stage_id'],candidate_id=stage['candidate_id'],
+                actor=copy.deepcopy(stage.get('actor')),subject=copy.deepcopy(stage.get('subject')),
+                origin=copy.deepcopy(stage.get('origin')),destination=copy.deepcopy(stage.get('destination')),
+                required=required,observed=observed,missing=missing,status='complete' if not missing and status=='ok' else 'partial',
+                decision_ready=not missing and status=='ok',observation_id=result.get('observation_id'),evidence_id=result.get('evidence_id'))
+
 def compare_candidates(rows, metrics):
     """No cross-leg ranking, guessed units, null-to-zero or combined hazard score."""
     output={}
@@ -156,7 +185,7 @@ async def evaluate_activity(arguments, source: ActivityDataSource, *, variant='c
         if _status(value)=='world_changed': raise ActivityError('world_changed','Loaded world changed; discard this evaluation.')
         bytes_read+=len(canonical_ref(value).encode())
         summary=_route_summary(value) if request['operation']=='inspect_route' else _object_summary(value)
-        summary.update(evidence_id=request['request_id'],source_kind=source.source_kind)
+        summary.update(evidence_id=summary.get('observation_id') or request['request_id'],request_id=request['request_id'],source_kind=source.source_kind)
         if summary['status']!='ok': status='partial'
         if request['operation']=='look':
             objects[request['request_id']]=summary
@@ -168,12 +197,20 @@ async def evaluate_activity(arguments, source: ActivityDataSource, *, variant='c
         for s in c['stages']:
             s['result']=copy.deepcopy(results.get(binding[(c['candidate_id'],s['stage_id'])],
                                                   dict(status='not_computed',reason='activity_budget')))
-    return dict(status=status,activity=dict(evaluation_id=uuid.uuid4().hex,kind=plan['kind'],variant=variant),
-                source_kind=source.source_kind,candidates=candidates,objects=objects,
+    evidence=[]
+    for candidate in candidates:
+        for stage in candidate['stages']:
+            evidence.append(_evidence_for(stage,stage['result'],activity['compare']))
+    decision_ready=bool(evidence) and all(item['decision_ready'] for item in evidence)
+    evidence_status='complete' if decision_ready else 'partial'
+    return dict(status=status,read_status=status,evidence_status=evidence_status,decision_ready=decision_ready,
+                activity=dict(evaluation_id=uuid.uuid4().hex,kind=plan['kind'],variant=variant),
+                source_kind=source.source_kind,candidates=candidates,objects=objects,evidence=evidence,
                 resolution=copy.deepcopy(resolved.get('resolution',{})),
                 plan=dict(candidate_count=len(candidates),request_count=len(plan['requests']),limits=plan['limits']),
                 comparison=compare_candidates(candidates,activity['compare']),
-                coverage=dict(requests_completed=len(results),requests_total=len(plan['requests']),complete=status=='ok'),
+                coverage=dict(requests_completed=len(results),requests_total=len(plan['requests']),complete=status=='ok',
+                              decision_ready=decision_ready),
                 unknowns=['Action eligibility and outcome','Carrying effects on speed and path cost','Future hazards'],
                 limitations=['Sequential current observations, not an atomic snapshot.','Transfer uses a hypothetical subject-position origin; no pickup or movement occurred.',
                              'Native destination checks use current actor state and position, not simulated post-transfer state.'])

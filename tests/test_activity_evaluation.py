@@ -84,7 +84,9 @@ async def test_transfer_evaluation_keeps_transfer_hazards_separate_from_approach
     source = FixtureSource()
     result = await evaluate_activity(transfer_args(), source)
     assert result["status"] == "ok"
-    assert result["coverage"] == {"requests_completed": result["plan"]["request_count"], "requests_total": result["plan"]["request_count"], "complete": True}
+    assert result["coverage"]["requests_completed"] == result["plan"]["request_count"]
+    assert result["coverage"]["complete"] is True
+    assert result["decision_ready"] is False
     transfer_rows = [stage for candidate in result["candidates"] for stage in candidate["stages"] if stage["kind"] == "transfer"]
     assert transfer_rows and all(stage["result"]["path_hazards"][0]["cells"] == 2 for stage in transfer_rows)
     approach_rows = [stage for candidate in result["candidates"] for stage in candidate["stages"] if stage["kind"] == "approach"]
