@@ -100,7 +100,7 @@ class SemanticActivityDataSource:
 
 
 def make_activity_tool(interaction: Any, variant: str) -> ToolSpec:
-    schema = _simplified_schema() if variant == "simplified" else _conservative_schema()
+    schema = _simplified_schema() if variant in {"simplified", "hybrid"} else _conservative_schema()
     description = (
         "Evaluate one bounded move or transfer activity. The evaluator expands stages, preserves actor/subject/origin/destination "
         "and returns observed routes, object conditions, coverage and unknowns. It never performs a game action or claims a best/safe Job."
