@@ -46,6 +46,7 @@ def _conservative_schema() -> dict[str, Any]:
             "compare": {"type": "array", "items": {"type": "string", "enum": ["steps", "path_length", "native_cost", "path_hazards"]}, "maxItems": 4},
             "detail": {"type": "string", "enum": ["summary", "details"], "default": "summary"},
         },
+        "allOf": [{"if": {"properties": {"kind": {"const": "transfer"}}}, "then": {"required": ["subject"]}}],
     }
 
 
