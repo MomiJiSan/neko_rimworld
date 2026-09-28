@@ -772,17 +772,18 @@ carry speed, or claim that a native bed predicate proves post-carry eligibility.
 Observed route metrics are ranked only within their declared stage and metric
 scope; unknown, partial and uncomputed values do not become zero or safe.
 
-Set `NEKO_ACTIVITY_VARIANT=conservative` for the explicit contract surface,
-`simplified` for the smaller activity-only Agent surface, or `hybrid` for the
-activity surface alongside the existing semantic tools. The default is unset and
-keeps the existing Agent surface unchanged. This feature has no new Mod wire
-operation and requires a connected Mod advertising the existing world observation
-capability for route stages.
+Set `NEKO_ACTIVITY=1` to expose the single `evaluate_activity` tool alongside the
+existing semantic tools. The default is unset and keeps the existing Agent
+surface unchanged. The tool accepts one fixed activity description for `move` or
+`transfer`; stages, route metrics and unknown handling are implemented internally
+rather than selected through a second planning language. It has no new Mod wire
+operation and requires a connected Mod advertising world observation for route
+stages.
 
-The deterministic contract and replay tests are in the companion
-`rimworld-bench` repository. Passing them is an engineering guarantee about
-identity/stage binding and coverage propagation, not a claim that a model will
-make a correct high-level strategy choice.
+The evaluator reuses the existing object and route observations. It is still
+mechanical evidence, not a rescue planner or action runner: it does not choose a
+best actor, calculate a safety score, execute a Job, predict carry speed or claim
+that a bed predicate proves post-carry eligibility.
 # Context efficiency and optional stage review
 
 Runtime timing advice is sent after the stable conversation prefix. It is not

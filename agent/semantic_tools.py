@@ -54,7 +54,7 @@ from .tools import ToolExecutionError, ToolSpec
 from .wiki_tools import WIKI_GUIDANCE
 from .world_order import order_world_fields
 from .object_tools import ObjectReader, state_contract, extend_look_schema, OBJECT_GUIDE
-from .activity_tools import activity_variant, make_activity_tool
+from .activity import make_activity_tool
 
 # Only this explicitly approved non-observation tool survives the adapter.
 PASSTHROUGH_TOOLS = frozenset({"wiki"})
@@ -203,12 +203,7 @@ class SemanticInteraction:
                     return await self._world_read(args, operation)
                 handlers[name] = observe
                 semantic_specs.append(spec)
-        selected_variant = activity_variant()
-        if selected_variant == "simplified":
-            # The simplified surface deliberately leaves only the activity facade
-            # and explicitly approved passthrough tools visible. The conservative
-            # and hybrid variants retain the existing semantic tools.
-            semantic_specs = []
+        activity_enabled = os.environ.get("NEKO_ACTIVITY", "").strip().lower() in {"1", "true", "yes", "on"}
         for tool in semantic_specs:
             handler = handlers[tool["name"]]
 
@@ -220,12 +215,12 @@ class SemanticInteraction:
 
             specs.append(ToolSpec(tool["name"], tool["description"], tool["parameters"], guarded))
         passthrough = tuple(self.original[name] for name in sorted(PASSTHROUGH_TOOLS) if name in self.original)
-        activity_capable = selected_variant is not None and (
+        activity_capable = activity_enabled and self.object_reader is not None and (
             "inspect_route" in self.original and
             self.setup.directory.get("world_observation", {}).get("version") == "world_observation.v2.2"
         )
         if activity_capable:
-            specs.append(make_activity_tool(self, selected_variant))
+            specs.append(make_activity_tool(self))
         return (*specs, *passthrough, submit)
 
     def review_contract(self):
