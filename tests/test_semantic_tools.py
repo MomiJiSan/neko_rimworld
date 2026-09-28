@@ -140,6 +140,28 @@ def test_semantic_surface_replaces_the_query_vocabulary():
     assert [tool.name for tool in adapter.tools()] == ["submit_response"]
 
 
+def test_activity_flag_adds_one_tool_without_removing_verified_tools(monkeypatch):
+    monkeypatch.setenv('NEKO_ACTIVITY', '1')
+    source = public_source(spatial=True)
+    sections = ['identity', 'health', 'skills', 'gear', 'work', 'state']
+    ref = {'type': 'object', 'properties': {'id': {'type': 'string'}, 'name': {'type': 'string'}, 'map': {'type': 'string'}}}
+    state_properties = {name: {'type': 'array', 'items': ref} for name in ('targets',)}
+    state_properties.update({name: ref for name in ('actor', 'user')})
+    state_properties.update({name: {} for name in ('stats', 'include_fogged', 'detail_limit', 'exact_lookup')})
+    state_properties['sections'] = {'items': {'enum': sections}}
+    source['world_observation'] = {'version': 'world_observation.v2.2', 'tools': [
+        {'name': 'survey_space', 'operation': 'survey_space', 'description': 'survey', 'parameters': {'type': 'object'}},
+        {'name': 'inspect_route', 'operation': 'inspect_route', 'description': 'route', 'parameters': {'type': 'object'}},
+        {'name': 'inspect_state', 'operation': 'inspect_state', 'description': 'state',
+         'parameters': {'type': 'object', 'properties': state_properties}},
+    ]}
+    adapter = semantic_interaction_factory(make_game_tools(source, _noop_query), Session(), _update)
+    names = [tool.name for tool in adapter.tools()]
+    assert 'evaluate_activity' in names
+    assert names.count('evaluate_activity') == 1
+    assert 'look' in names and 'count' in names and 'inspect_route' in names
+
+
 def test_spatial_tool_is_capability_gated_and_does_not_add_a_navigation_step():
     without = semantic_interaction_factory(setup_for(), Session(), _update)
     assert [tool.name for tool in without.tools()] == ["look", "count", "submit_response"]
