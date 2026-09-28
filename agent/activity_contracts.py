@@ -9,6 +9,7 @@ from collections.abc import Mapping
 KINDS = ('move', 'transfer')
 INSPECTS = ('actor_state', 'approach_route', 'transfer_route', 'destination_state', 'move_route')
 METRICS = ('steps', 'path_length', 'native_cost', 'path_hazards')
+INTERNAL_METRICS = (*METRICS, 'observed_stat')
 PREFERENCES = ('shorter_route', 'lower_observed_hazard', 'higher_observed_stat')
 DEFAULT_INSPECTS = {'move': ('actor_state', 'move_route', 'destination_state'),
                     'transfer': INSPECTS[:4]}
@@ -90,7 +91,7 @@ def normalize_activity(arguments, variant='conservative'):
         preferences=strings(arguments.get('preferences',[]),PREFERENCES,'preferences',3)
         compare=[]
         for p in preferences or ['shorter_route']:
-            compare.extend({'shorter_route':['steps','path_length'],'lower_observed_hazard':['path_hazards'],'higher_observed_stat':[]}[p])
+            compare.extend({'shorter_route':['steps','path_length'],'lower_observed_hazard':['path_hazards'],'higher_observed_stat':['observed_stat']}[p])
         inspect=list(DEFAULT_INSPECTS[kind])
     else:
         actor=arguments.get('actor'); keys(actor,('candidates',),'actor')

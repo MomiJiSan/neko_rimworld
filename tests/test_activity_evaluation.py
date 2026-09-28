@@ -97,7 +97,7 @@ async def test_transfer_evaluation_keeps_transfer_hazards_separate_from_approach
 def test_agent_surface_variants_are_small_and_reject_unknown_fields():
     conservative = _conservative_schema()
     simplified = _simplified_schema()
-    assert set(conservative["properties"]) == {"kind", "actor", "subject", "destination", "inspect", "compare", "detail"}
+    assert set(conservative["properties"]) == {"kind", "actor", "subject", "start", "stats", "destination", "inspect", "compare", "detail"}
     assert set(simplified["properties"]) == {"kind", "actors", "subject", "stats", "start", "destinations", "preferences"}
     assert conservative["additionalProperties"] is False
     assert simplified["additionalProperties"] is False
@@ -135,3 +135,54 @@ async def test_partial_unknown_gas_is_never_ranked_as_zero():
 def test_advertised_schema_accepts_documented_candidate_wrapper():
     import jsonschema
     jsonschema.validate(transfer_args(), _conservative_schema())
+
+
+def test_schema_rejects_invalid_stage_context_and_selector_shape():
+    import jsonschema
+    move = {"kind": "move", "actor": {"candidates": [{"kind": "pawn", "id": "near"}]},
+            "subject": {"kind": "pawn", "id": "patient"}, "destination": [{"kind": "thing", "id": "bed-a"}]}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(move, _conservative_schema())
+    selector = {"kind": "move", "actors": [{"kind": "pawn", "id": "near"}],
+                "destinations": [{"kind": "thing", "id": "bed-a"}],
+                "preferences": ["higher_observed_stat"]}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(selector, _simplified_schema())
+
+
+@pytest.mark.asyncio
+async def test_native_object_state_observation_is_projected_to_stage_readiness():
+    class NativeLook(FixtureSource):
+        async def request(self, operation, arguments):
+            if operation == "look":
+                return {"status": "ok", "data": {"facts": [{"object": {"id": arguments["object"]["id"]},
+                    "state_sample": {"observation_id": "state-1"}, "state_coverage": {"registered_facets_read_successfully": True},
+                    "facts": {aspect: {"status": "observed"} for aspect in arguments['aspects']}}], "state_observations": [{
+                        "observation_id": "state-1", "status": "ok", "sample": {"load_epoch": "load-1", "started_tick": 1, "finished_tick": 1},
+                        "context": {"actor_id": None, "user_id": None}}]}}
+            return await super().request(operation, arguments)
+    args = {"kind": "move", "actor": {"candidates": [{"kind": "pawn", "id": "near"}]},
+            "destination": [{"kind": "thing", "id": "bed-a"}], "inspect": ["actor_state"], "compare": []}
+    result = await evaluate_activity(args, NativeLook())
+    assert result["decision_ready"] is True
+    assert result["evidence"][0]["observed"] == ["actor_state"]
+
+
+@pytest.mark.asyncio
+async def test_simplified_higher_stat_preference_produces_descending_comparison():
+    class StatSource(FixtureSource):
+        async def request(self, operation, arguments):
+            if operation == 'look':
+                actor_id = arguments['object']['id']
+                value = 16 if actor_id == 'near' else 8
+                return {'status': 'ok', 'observation_id': f'state-{actor_id}', 'data': {
+                    'facts': [{'object': {'id': actor_id}, 'state_sample': {'observation_id': f'state-{actor_id}'},
+                               'state_coverage': {'registered_facets_read_successfully': True},
+                               'facts': {'skills': {'ok': True}, 'stats': {'values': [{'definition': 'Medicine', 'value': value, 'status': 'observed'}], 'complete': True}}}],
+                    'state_observations': [{'observation_id': f'state-{actor_id}', 'status': 'ok', 'sample': {'load_epoch': 'load-1', 'started_tick': 1, 'finished_tick': 1}, 'context': {}}]}}
+            return await super().request(operation, arguments)
+    args = {'kind': 'move', 'actors': [{'kind': 'pawn', 'id': 'near'}, {'kind': 'pawn', 'id': 'middle'}],
+            'stats': ['Medicine'], 'destinations': [{'kind': 'thing', 'id': 'bed-a'}], 'preferences': ['higher_observed_stat']}
+    result = await evaluate_activity(args, StatSource(), variant='simplified')
+    entries = result['comparison']['observed_stat']['groups'][0]['entries']
+    assert entries[0]['actor']['id'] == 'near' and entries[0]['rank'] == 1

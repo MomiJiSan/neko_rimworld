@@ -147,7 +147,7 @@ class SemanticInteraction:
         self.finalizing = False
         self.surface = Surface(setup.directory)
         self.surface.add_query_schema(self.original["query"].parameters)
-        self.sample_identity: tuple[Any, Any] | None = None
+        self.sample_identity: tuple[Any, Any, Any] | None = None
         directory = setup.directory if isinstance(getattr(setup, "directory", None), dict) else {}
         self.object_contract = state_contract(directory)
         self.object_reader = ObjectReader(self) if self.object_contract else None
@@ -264,6 +264,9 @@ class SemanticInteraction:
             raise ToolExecutionError("invalid_world_result", f"The connected Mod returned no {operation} data.")
         ordered = order_world_fields(data)
         ordered["observation_id"] = native.get("observation_id")
+        for key in ("colony_id", "load_epoch", "connection_epoch"):
+            if native.get(key) is not None:
+                ordered[key] = native[key]
         ordered["status"] = native.get("status", "ok")
         ordered["issues"] = copy.deepcopy(native.get("issues", []))
         ordered["source_kind"] = "native"
@@ -284,7 +287,7 @@ class SemanticInteraction:
         value = observation.to_dict()
         response = value["response"]
         payload = response["payload"]
-        identity = (response["colony_id"], response["load_epoch"])
+        identity = (response["colony_id"], response["load_epoch"], response.get("connection_epoch"))
         if self.sample_identity is not None and identity != self.sample_identity:
             self.session.invalidated_error = "world_changed"
             raise ToolExecutionError(
@@ -302,6 +305,9 @@ class SemanticInteraction:
             )
         return dict(
             observation_id=value["observation_id"],
+            colony_id=response.get("colony_id"),
+            load_epoch=response.get("load_epoch"),
+            connection_epoch=response.get("connection_epoch"),
             status=payload["status"],
             data=pack(payload.get("data"), payload.get("issues", [])),
             issues=payload.get("issues", []),
