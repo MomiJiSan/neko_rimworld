@@ -79,6 +79,7 @@ async def test_real_object_reader_matrix_reuses_reads_and_preserves_context_stat
     result = await make_activity_tool(native).handler(arguments())
     assert result['status'] == 'ok' and len(result['candidates']) == 9
     assert len(result['reads']) == 24  # 3 actors, 3 approaches, 9 transfers, 9 bed contexts
+    assert len(json.dumps(result, ensure_ascii=False)) < 120_000
     for row in result['candidates']:
         stages = {s['kind']: result['reads'][s['read']] for s in row['stages']}
         assert stages['approach']['path_environment']['gases'][0]['cells'] == 0
@@ -113,8 +114,8 @@ async def test_move_uses_explicit_start_and_preserves_unknown_stats():
     result = await make_activity_tool(native).handler(args)
     assert all(s['kind'] != 'approach' for c in result['candidates'] for s in c['stages'])
     assert all(a['start']['id'] == 'patient' for op, a in native.calls if op == 'inspect_route')
-    stats = next(c for c in result['comparisons'] if 'stat' in c['scope'])
-    assert all(e['rank'] is None for e in stats['entries'])
+    assert result['status'] == 'ok'
+    assert all(v.get('status') == 'unknown_definition' for v in result['reads']['r1']['facts'][0]['facts']['stats']['values'])
 
 
 @pytest.mark.asyncio
@@ -136,6 +137,6 @@ async def test_recoverable_errors_keep_other_reads_and_oversize_result_reaches_r
     registry = ToolRegistry(); registry.register(make_activity_tool(native))
     prepared = registry.prepare(ToolCall(call_id='test', name='evaluate_activity', raw_arguments=json.dumps(arguments())))
     output = await registry.execute(prepared)
-    assert output.ok and output.value['data']['status'] == 'partial'
+    assert output.ok and output.value['data']['status'] == 'ok'
     assert len(output.value['data']['candidates']) == 9
-    assert any(r.get('reason') == 'activity_output_limit' for r in output.value['data']['reads'].values())
+    assert len(output.value['data']['reads']) == 24

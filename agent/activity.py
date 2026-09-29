@@ -136,27 +136,35 @@ class SemanticActivityDataSource:
             raise ToolExecutionError("activity_reference_unresolved", "Object has no stable ID or loaded map.")
         return dict(kind=kind, id=obj["id"], map=map_id)
 
-    async def _resolve(self, ref):
-        value = await self.interaction.look(dict(object=ref, aspects=["identity"], detail=0))
-        facts = value.get("facts", [])
-        if value.get("status") != "ok" or len(facts) != 1:
-            raise ToolExecutionError("activity_reference_unresolved", "Choose one complete object reference.", details={"resolution": value.get("resolution"), "facts": facts})
-        if ref["kind"] == "cell":
-            return _ref(facts[0]["facts"]["identity"], ("cell",))
-        result = self._identity(facts[0]["object"], ref["kind"])
-        if ref.get("id") and ref["id"] != result["id"]:
-            raise ToolExecutionError("activity_reference_mismatch", "Read returned a different identity.")
-        return result
+    async def _resolve(self, ref, role):
+        # IDs/cells are native references, not discovery queries. Preserve the
+        # caller's map default; do not replace it with another role's map.
+        if "id" in ref or ref["kind"] == "cell":
+            return copy.deepcopy(ref)
+        request = dict(targets=[ref], sections=["identity"], exact_lookup=True)
+        try:
+            native = await self.interaction.execute_native(request, tool_name="inspect_state")
+        except ToolExecutionError as error:
+            if not error.recoverable or error.code == "world_changed":
+                raise
+            raise ToolExecutionError(error.code, str(error), details={**error.details, "role": role, "reference": ref}) from error
+        data = native.get("data") or {}
+        rows = data.get("objects", [])
+        if native.get("status") != "ok" or len(rows) != 1 or not rows[0].get("target", {}).get("id"):
+            raise ToolExecutionError("activity_reference_unresolved", "Choose an exact ID from the returned candidates; do not repeat the same ambiguous name.",
+                                     details={"role": role, "reference": ref, "resolution": data.get("resolution"),
+                                              "objects": rows, "issues": native.get("issues", [])})
+        return self._identity(rows[0]["target"], ref["kind"])
 
     async def resolve(self, activity):
         activity = copy.deepcopy(activity)
-        activity["actors"] = [await self._resolve(ref) for ref in activity["actors"]]
+        activity["actors"] = [await self._resolve(ref, f"actors[{i}]") for i, ref in enumerate(activity["actors"])]
         for role in ("subject", "start"):
             if activity[role] is not None:
-                activity[role] = await self._resolve(activity[role])
+                activity[role] = await self._resolve(activity[role], role)
         destination = activity["destination"]
         if "candidates" in destination:
-            refs = [await self._resolve(ref) for ref in destination["candidates"]]
+            refs = [await self._resolve(ref, f"destinations[{i}]") for i, ref in enumerate(destination["candidates"])]
         else:
             value = await self.interaction.look(dict(object=destination["selector"], aspects=["identity"], detail=0))
             if value.get("status") != "ok" or value.get("coverage", {}).get("listing") != "complete":
@@ -165,7 +173,8 @@ class SemanticActivityDataSource:
         activity["destination"] = {"candidates": _refs(refs, MAX_DESTINATIONS)}
         activity["actors"] = _refs(activity["actors"], MAX_ACTORS, ("pawn",))
         roles = [*activity["actors"], *refs, activity["subject"], activity["start"]]
-        if len({r["map"] for r in roles if r}) != 1:
+        maps = {r["map"] for r in roles if r and r.get("map") not in (None, "current")}
+        if len(maps) > 1:
             raise ToolExecutionError("activity_map_mismatch", "All activity roles must share a loaded map.")
         return activity
 
@@ -175,24 +184,93 @@ class SemanticActivityDataSource:
         return await self.interaction._world_read(arguments, operation)
 
 
+def _compact_identity(value):
+    """A location reference, not a second full object inspection."""
+    if not isinstance(value, Mapping):
+        return copy.deepcopy(value)
+    keys = ("id", "kind", "name", "map", "map_id", "position", "held_position", "spawned", "is_free_colonist", "is_prisoner_of_colony", "is_slave_of_colony")
+    result = {key: copy.deepcopy(value[key]) for key in keys if key in value}
+    if "definition" in value: result["definition"] = copy.deepcopy(value["definition"])
+    return result
+
+
 def _project(value, operation):
-    """Preserve native scope/coverage; omit route geometry, never hazard factors."""
-    data = copy.deepcopy(value.get("data") if isinstance(value.get("data"), Mapping) else value)
-    data["status"] = value.get("status", "partial")
+    """One model view per observation; preserve factors, scope and failure causes."""
+    raw = value.get("data") if isinstance(value.get("data"), Mapping) else value
+    data = {"status": value.get("status", "partial")}
+    for key in ("error", "issues", "observation_id", "sample"):
+        if key in value:
+            data[key] = copy.deepcopy(value[key])
+    omitted = list(data.get("not_shown", []))
     if operation == "inspect_route":
-        if value.get("observation_id"):
-            data["observation_id"] = value["observation_id"]
-        if value.get("sample"):
-            data["sample"] = copy.deepcopy(value["sample"])
-        route = data.get("route", {})
-        route.pop("segments", None)
-        for key in ("objects", "environment", "region", "page"):
-            data.pop(key, None)
-        data["not_shown"] = ["route.segments", "corridor objects/environment/region"]
+        route = copy.deepcopy(raw.get("route", {}))
+        if "segments" in route:
+            route.pop("segments")
+            omitted.append("route.segments")
+        # grid_distance is the wire compatibility alias of path_length.
+        if "path_length" in route:
+            route.pop("grid_distance", None)
+        # Actor, target and full prose meanings are already bound by the stage.
+        # Keep the route numbers/units; native geometry remains in the ledger.
+        for key in ("actor", "target", "meaning", "grid_distance", "read_ms", "cooperative_budget_overrun", "segments_coverage"):
+            if key in route:
+                route.pop(key)
+                omitted.append("route." + key)
+        for key in ("context", "environment_contexts", "objects", "objects_summary", "object_state_scope", "environment", "region", "page", "consistency", "delivery_sample"):
+            if key in data:
+                data.pop(key)
+                omitted.append(key)
+        env = copy.deepcopy(raw.get("path_environment") or {})
+        for key in ("path_environment_bands", "roof_support_objects", "rooms", "field_semantics", "roof_support_objects_format", "map_context", "water_cells", "snow_cells", "polluted_cells", "glow_fraction"):
+            if key in env:
+                env.pop(key)
+                omitted.append("path_environment." + key)
+        # Preserve hazard values, status, affected counts and coverage. Drop
+        # repeated source activity snapshots and long per-cell index arrays.
+        for key in ("attack_influences", "local_hazards"):
+            for row in env.get(key, []):
+                if "source" in row:
+                    row["source"] = _compact_identity(row["source"])
+                for detail in ("activity", "checked_from", "example_cells"):
+                    if detail in row:
+                        row.pop(detail)
+                        omitted.append("path_environment." + key + "." + detail)
+                if "path_indices" in row:
+                    row["path_indices_count"] = len(row.pop("path_indices"))
+                    omitted.append("path_environment." + key + ".path_indices")
+        data["route"] = route
+        data["path_environment"] = env
+        data["changed_during_read"] = raw.get("changed_during_read", False)
         if not route:
             data["status"] = "partial"
-    elif not data.get("facts") or not data.get("state_observations"):
-        data["status"] = "partial"
+    else:
+        for key in ("facts", "state_observations", "coverage", "scope", "requested_aspects", "not_read", "context"):
+            if key in raw: data[key] = copy.deepcopy(raw[key])
+        for row in data.get("facts", []):
+            # Identity is bound by the candidate/stage. Keep native facets and
+            # their coverage; omit repeated object locations and body-part tables.
+            row.get("facts", {}).pop("identity", None)
+            if "object" in row:
+                row["object"] = _compact_identity(row["object"])
+            facts = row.get("facts", {})
+            health = facts.get("health", {})
+            if isinstance(health, Mapping) and "body_parts" in health:
+                health.pop("body_parts")
+                health["body_parts_not_shown"] = True
+                omitted.append("facts.health.body_parts")
+            if isinstance(health, Mapping): health.pop("field_semantics", None)
+            work = facts.get("work", {})
+            if isinstance(work, Mapping):
+                for detail_name in ("queued_jobs", "queued_jobs_total", "queued_jobs_complete", "work_types_meaning", "medical_care_context"):
+                    if detail_name in work:
+                        work.pop(detail_name)
+                        omitted.append("facts.work." + detail_name)
+            for facet in facts.values():
+                if isinstance(facet, Mapping): facet.pop("meaning", None)
+        if not data.get("facts") or not data.get("state_observations"):
+            data["status"] = "partial"
+    if omitted:
+        data["not_shown"] = sorted(set(omitted))
     return data
 
 
@@ -298,11 +376,11 @@ async def evaluate_activity(arguments, source: ActivityDataSource):
             raise ToolExecutionError("world_changed", "Activity observations span loaded worlds.", recoverable=False)
         epoch = current or epoch
         reads[read_id] = read
-        # Reserve space for rank references and pending-read markers. No candidate
-        # is dropped and no partially serialized fact is sent as a complete read.
+        # Measure the composed result after adding this projected read. Preserve
+        # every completed read and mark only the next work as not computed.
         if len(_key(result)) > MAX_TOOL_RESULT_CHARS - 24_000:
             reads[read_id] = dict(status="partial", error=dict(code="activity_output_limit",
-                message="Read smaller actor/destination sets; the raw observation is retained in the consultation."))
+                message="Narrow the actor/destination set; raw observation remains in the consultation ledger."))
             output_full = True
     result["comparisons"] = _comparisons(candidates, reads, activity["stats"])
     result["status"] = "ok" if all(r.get("status") == "ok" for r in reads.values()) else "partial"
