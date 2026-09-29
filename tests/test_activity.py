@@ -74,6 +74,16 @@ def arguments(kind='transfer'):
 
 
 @pytest.mark.asyncio
+async def test_stable_ids_skip_identity_discovery():
+    native = NativeInteraction()
+    args = {"kind": "move", "actors": [{"kind": "pawn", "id": "a", "map": "Map_0"}],
+            "destinations": [{"kind": "thing", "id": "bed1", "map": "Map_0"}], "stats": []}
+    result = await make_activity_tool(native).handler(args)
+    assert result['status'] == 'ok'
+    assert all(op != 'query' for op, _ in native.calls)
+
+
+@pytest.mark.asyncio
 async def test_real_object_reader_matrix_reuses_reads_and_preserves_context_stats_hazards():
     native = NativeInteraction()
     result = await make_activity_tool(native).handler(arguments())
