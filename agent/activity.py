@@ -378,7 +378,7 @@ async def evaluate_activity(arguments, source: ActivityDataSource):
         reads[read_id] = read
         # Measure the composed result after adding this projected read. Preserve
         # every completed read and mark only the next work as not computed.
-        if len(_key(result)) > MAX_TOOL_RESULT_CHARS - 24_000:
+        if len(_key(result)) > MAX_TOOL_RESULT_CHARS - 8_000:
             reads[read_id] = dict(status="partial", error=dict(code="activity_output_limit",
                 message="Narrow the actor/destination set; raw observation remains in the consultation ledger."))
             output_full = True
