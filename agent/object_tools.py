@@ -9,7 +9,7 @@ from .query_surface import SurfaceError
 from .semantic_surface import PAWN_KINDS, THING_KINDS, ASPECTS, KINDS, supported_aspects, normalize_object, validate_aspects, validate_detail
 from .world_order import order_world_fields
 from .tools import MAX_TOOL_RESULT_CHARS
-from .evidence_compiler import MAX_SOURCE_CHARS, canonical, model_size, requested, pruning_requested
+from .model_context import MAX_SOURCE_CHARS, canonical, model_size, enabled
 
 PHYSICAL = (*PAWN_KINDS, *THING_KINDS)
 OBJECT_GUIDE = (
@@ -109,10 +109,10 @@ class ObjectReader:
     async def look(self, args):
         if not isinstance(args, dict) or not isinstance(args.get('object'), dict):
             raise SurfaceError('look requires object')
-        unknown = set(args) - {'object','aspects','detail','stats','actor','user','offset', *({'include', 'focus'} if pruning_requested() else set())}
+        unknown = set(args) - {'object','aspects','detail','stats','actor','user','offset', *({'include', 'focus'} if enabled() else set())}
         if unknown:
             raise SurfaceError('look does not accept: ' + ', '.join(sorted(unknown)))
-        if pruning_requested():
+        if enabled():
             include = args.get('include', [])
             if not isinstance(include, list) or any(v not in ('body_parts', 'diagnostics') for v in include):
                 raise SurfaceError('look include accepts body_parts and diagnostics')
@@ -133,7 +133,7 @@ class ObjectReader:
         if not isinstance(aspects,list) or not aspects or any(not isinstance(a,str) for a in aspects):
             raise SurfaceError('aspects must be a nonempty string array')
         aspects = list(dict.fromkeys(aspects))
-        if pruning_requested():
+        if enabled():
             aspects = list(dict.fromkeys([*aspects, *({'skills':'skills','work':'work','capacities':'health'}[k]
                                                      for k in args.get('focus', {}))]))
         detail = validate_detail(args.get('detail',0))
@@ -259,9 +259,9 @@ class ObjectReader:
                     }
                 if 'state' in state:
                     visible_facets = ({k:v for k,v in facets.items() if k not in ('pawn', 'work', 'stats')}
-                                      if pruning_requested() else facets)
+                                      if enabled() else facets)
                     item['facts']['state'] = {'facets':visible_facets,'unsupported_components':row.get('unsupported_components')}
-                if 'state' not in state or pruning_requested():
+                if 'state' not in state or enabled():
                     pawn = facets.get('pawn',{})
                     for aspect in state:
                         if aspect == 'state':
@@ -330,7 +330,7 @@ class ObjectReader:
     def _fit_page(base, arguments=None):
         facts = base.get('facts',[])
         original = len(facts)
-        while (len(canonical(base)) > MAX_SOURCE_CHARS if requested() else False) or model_size(base, arguments=arguments) > MAX_TOOL_RESULT_CHARS - 4096:
+        while (len(canonical(base)) > MAX_SOURCE_CHARS if enabled() else False) or model_size(base, arguments=arguments) > MAX_TOOL_RESULT_CHARS - 4096:
             if len(facts) <= 1:
                 raise SurfaceError('Object facts exceed output bound; select fewer aspects or smaller detail')
             facts.pop()

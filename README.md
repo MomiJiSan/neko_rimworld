@@ -1,60 +1,31 @@
 # N.E.K.O RimWorld
 
-2026-09-30 research checkpoint: the unchanged historical 30-task answers were re-evaluated under Bench's `planning/EVALUATION-PROTOCOL-v1.md`. Initial compression regressed substantially; the latest on-demand candidate restored delivery but retains two major content regressions (components omitted and toxic gas missed on an approach path). All input candidates remain opt-in/default off. Committing this checkpoint is preservation, not a release, deployment or quality certification. See Bench's `planning/HISTORICAL-QUALITY-REEVALUATION-20260930.md` and `planning/RESEARCH-RETENTION.md`.
+### Current model context: ordinary JSON only
 
-### Model evidence candidates (default off)
+There is one input-reduction candidate: `NEKO_CONTEXT_PRUNING=1`. It is off by
+default and remains experimental: the historical 30-task review found two major
+content regressions (components omitted and toxic gas missed on an approach path).
+It adds no model/tool calls. Native observations and audit values remain intact;
+the author-facing view selects explicitly requested content in the same call.
 
-`NEKO_EVIDENCE_COMPACT=2` (or `aggressive`) enables the experimental v2 display
-projection, structural/delta encoding and equivalent tool-schema factoring.
-Unlike mode 1 below, v2 deliberately omits selected geometric, implementation and
-full body-table details, marked `not_shown`. The decoder restores the projected
-view, not the full raw JSON. Internal business values remain unchanged; review
-uses the author's visible evidence. Exact identity-only reads retain their detail.
+The former `NEKO_EVIDENCE_COMPACT` modes are retired from the runtime. A nonempty
+old setting fails explicitly; it is not silently mapped to a different algorithm.
+Historical table/reference and aggressive codecs now live in Bench's
+`experiments/legacy_input_encoding`, only for explicit offline replay. Reproduce
+old live studies with their sealed plugin/executor copies.
 
-The verified historical replay reduces cumulative public input by 65.11% across
-23 requests, including an interrupted trajectory. This is a local tokenizer
-estimate, not a quality guarantee or provider-usage certification. Autonomous
-paired validation is tracked in Bench's `planning/MODEL-INPUT-COMPILER-V2-20260929.md`.
-The 30-case real-model study is complete: public-input estimates fell 63.43%,
-while normal delivery fell from 29/30 to 23/30. Verified binding errors remain.
-The candidate is not recommended as a default. See Bench's
-`planning/MODEL-INPUT-COMPILER-V2-RESULTS-20260929.md`. No deployment or package-version promotion is implied.
+`agent/model_context.py` owns the switch and size boundary;
+`agent/context_pruning.py` owns JSON content projection;
+`agent/context_tools.py` owns matching tool descriptions. Review receives the
+author's ordinary JSON directly, without a second codec or display projection.
+JSON Schema factoring remains a single shared helper, not an alternative
+evidence representation. The existing cumulative public-input limit remains
+`NEKO_PUBLIC_INPUT_TOKEN_LIMIT`; it is an accounting guard, not provider billing.
 
-#### Mode 1: lossless representation
-
-`NEKO_EVIDENCE_COMPACT=1` enables an opt-in model-input compiler for semantic
-object/count/space/route reads and Activity. The default remains off pending
-autonomous model-quality validation. It adds no tool, query or model call.
-Package metadata remains 1.0.0; this is a development candidate, not a release.
-
-The compiler retains every JSON value, row order, null/false/zero, sample, scope,
-unknown and error. Repeated exact values become consultation-local shared entries;
-repeated object fields become tables with named columns. Common table values are
-explicit rather than inferred defaults. Literal marker keys are escaped, and
-audit metadata records source/view hashes; stream decoding rejects missing/replaced references. Same entity
-IDs never authorize merging different observations or actor/user contexts.
-The code-authored format guide is added once per request, not repeated per result.
-
-Internal business results and raw observations remain unchanged. Only model tool
-messages use the new view; private provider continuation and tool-call pairing are
-preserved. Review reconstructs the same visible facts and uses logical JSON
-pointers into that reconstruction; the reviewer input can also use the compiler.
-Native query/reference fallback and wiki retain their existing message formats.
-
-Enabled object/Activity/registry context limits measure a standalone compiled view
-while retaining a separate 4 Mi-character source guard (larger pre-existing custom
-tool guards remain bounded by their configured limit). The Mod's native result and
-wire limits are unchanged. Compilation cannot recover a Mod result rejected before
-delivery. The bounded report store still may omit observations at its 1 MiB limit;
-compilation does not promise an unlimited persistent evidence archive.
-
-`model_evidence_compiled` audit events and report `evidence_views` contain source/view
-hashes and character sizes. Character savings are not token savings. Bench's
-`analyze input-compaction` measures all archived requests, includes the new guide,
-verifies exact reconstruction and preserves the original call trace. It does not
-run a model or prove that the format improves answers or reaches 65% cumulative
-input reduction. Unknown formats can retain ordinary JSON; no field is dropped to
-meet a compression target.
+Current quality research is in Bench's `evaluation` package and
+`planning/EVALUATION-PROTOCOL-v1.md`. A source checkpoint is not a release,
+deployment or quality certification. See Bench's
+`planning/WORKSPACE-CONVERGENCE-20260930.md` for the current development boundary.
 
 The current checkout retains the v1.6 Agent runtime and supports the v1.6.1
 query revision supplied by the Mod.

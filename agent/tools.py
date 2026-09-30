@@ -10,7 +10,7 @@ from typing import Any
 
 from ..observation import Observation
 from .contracts import PreparedToolCall, ToolCall, ToolResult
-from .evidence_compiler import COMPACT_TOOLS, MAX_SOURCE_CHARS, aggressive_requested, model_size, requested, pruning_requested
+from .model_context import CONTEXT_TOOLS, MAX_SOURCE_CHARS, model_size, enabled
 
 MAX_TOOL_RESULT_CHARS = 131_072
 
@@ -59,10 +59,10 @@ class ToolSetup:
 
 
 class ToolRegistry:
-    def __init__(self, *, evidence_compiler=None, compact_enabled=None) -> None:
+    def __init__(self, *, context_pruner=None, context_enabled=None) -> None:
         self._tools: dict[str, ToolSpec] = {}
-        self._evidence_compiler = evidence_compiler
-        self._compact_enabled = (requested() or evidence_compiler is not None) if compact_enabled is None else compact_enabled
+        self._context_pruner = context_pruner
+        self._context_enabled = (enabled() or context_pruner is not None) if context_enabled is None else context_enabled
 
     def register(self, spec: ToolSpec) -> None:
         if type(spec.max_result_chars) is not int or not 1 <= spec.max_result_chars <= 32 * MAX_TOOL_RESULT_CHARS:
@@ -81,12 +81,9 @@ class ToolRegistry:
 
     def schemas(self) -> list[dict[str, Any]]:
         schemas = [self._tools[name].schema() for name in sorted(self._tools)]
-        if self._compact_enabled and pruning_requested():
+        if self._context_enabled and enabled():
             from .context_tools import model_tools
             return model_tools(schemas)
-        if self._compact_enabled and aggressive_requested():
-            from .schema_compaction import compact_tools
-            return compact_tools(schemas)
         return schemas
 
     def prepare(self, call: ToolCall) -> PreparedToolCall | ToolResult:
@@ -114,7 +111,7 @@ class ToolRegistry:
                 "Tool arguments must be a JSON object.",
                 recoverable=True,
             )
-        if pruning_requested() and call.name in ('look', 'count') and isinstance(parsed.get('object'), dict):
+        if enabled() and call.name in ('look', 'count') and isinstance(parsed.get('object'), dict):
             # Preserve explicit selector intent without spending another model
             # round on an unambiguous nesting repair. Conflicts still fail.
             for key in ('include_held', 'include_fogged', 'map'):
@@ -199,15 +196,15 @@ class ToolRegistry:
             )
 
         encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
-        compact = self._compact_enabled and spec.name in COMPACT_TOOLS and not spec.terminal
+        compact = self._context_enabled and spec.name in CONTEXT_TOOLS and not spec.terminal
         over_source = len(encoded) > max(spec.max_result_chars, MAX_SOURCE_CHARS) if compact else len(encoded) > spec.max_result_chars
         view = None
         over_view = False
         if compact and not over_source:
-            if self._evidence_compiler is not None:
+            if self._context_pruner is not None:
                 try:
-                    view = self._evidence_compiler.compile(value, max_view_chars=spec.max_result_chars,
-                        **({'arguments': prepared.arguments} if getattr(self._evidence_compiler, 'accepts_arguments', False) else {}))
+                    view = self._context_pruner.compile(value, max_view_chars=spec.max_result_chars,
+                        arguments=prepared.arguments)
                 except ValueError as error:
                     if str(error) != 'evidence_view_limit':raise
                     over_view = True

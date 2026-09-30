@@ -4,7 +4,6 @@ from __future__ import annotations
 import copy
 import json
 from typing import Any
-from .evidence_compiler import EvidenceDecoder
 
 
 def canonical(value: Any) -> str:
@@ -56,7 +55,6 @@ def review_evidence(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     calls = {}
     evidence = []
     read_calls = {}
-    decoder = EvidenceDecoder()
     for message in messages:
         if message.get('role') == 'assistant':
             for call in message.get('tool_calls', []):
@@ -71,7 +69,6 @@ def review_evidence(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             payload = json.loads(content) if isinstance(content, str) else copy.deepcopy(content)
         except (ValueError, TypeError):
             payload = content
-        payload = decoder.decode(payload)
         if isinstance(payload, dict) and isinstance(payload.get('data'), dict):
             payload['data'] = deduplicate_program_result(payload['data'])
         # Bind each native record directly to its business call. Keep the execution

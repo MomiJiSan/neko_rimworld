@@ -14,7 +14,7 @@ from typing import Protocol
 
 from .spatial_ranking import rank_paths
 from .tools import MAX_TOOL_RESULT_CHARS, ToolExecutionError, ToolSpec
-from .evidence_compiler import MAX_SOURCE_CHARS, model_size, requested, pruning_requested
+from .model_context import MAX_SOURCE_CHARS, model_size, enabled
 
 MAX_ACTORS, MAX_DESTINATIONS, MAX_PAIRS = 4, 8, 16
 ROUTE_METRICS = ("steps", "path_length", "native_cost")
@@ -56,12 +56,12 @@ def _refs(values, maximum, kinds=("pawn", "thing", "cell")):
 
 
 def normalize_activity(args):
-    extra = {'include', 'actor_aspects', 'actor_focus', 'user', 'margin'} if pruning_requested() else set()
+    extra = {'include', 'actor_aspects', 'actor_focus', 'user', 'margin'} if enabled() else set()
     if not isinstance(args, Mapping) or set(args) - {"kind", "actors", "subject", "start", "destinations", "stats", *extra}:
         _invalid("Use kind, actors, destinations, optional subject/start and stats.")
     kind = args.get("kind")
-    if kind not in (('move', 'transfer', 'state') if pruning_requested() else ('move', 'transfer')):
-        _invalid('kind must be move, transfer' + (' or state.' if pruning_requested() else '.'))
+    if kind not in (('move', 'transfer', 'state') if enabled() else ('move', 'transfer')):
+        _invalid('kind must be move, transfer' + (' or state.' if enabled() else '.'))
     if kind == "move" and "subject" in args or kind == "transfer" and "start" in args:
         _invalid("move has no subject; transfer starts at subject and accepts no start.")
     if kind == 'state' and any(k in args for k in ('subject', 'start')):
@@ -90,7 +90,7 @@ def normalize_activity(args):
     if len(actors) * len(destination.get("candidates", [])) > MAX_PAIRS:
         _invalid(f"At most {MAX_PAIRS} actor/destination pairs per activity.")
     result = dict(kind=kind, actors=actors, subject=subject, start=start, destination=destination, stats=list(stats))
-    if pruning_requested():
+    if enabled():
         result['user'] = _ref(args['user'], ('pawn',)) if 'user' in args else None
         margin = args.get('margin', 2)
         if type(margin) is not int or not 0 <= margin <= 12:
@@ -361,7 +361,7 @@ def _comparisons(candidates, reads, stats):
 
 async def evaluate_activity(arguments, source: ActivityDataSource):
     activity = await source.resolve(normalize_activity(arguments))
-    selective = pruning_requested()
+    selective = enabled()
     actors, destinations = activity["actors"], activity["destination"]["candidates"]
     if not destinations or len(actors) * len(destinations) > MAX_PAIRS:
         _invalid(f"Select 1..{MAX_PAIRS} actor/destination pairs.")
@@ -427,7 +427,7 @@ async def evaluate_activity(arguments, source: ActivityDataSource):
         # Measure the composed result after adding this projected read. Preserve
         # every completed read and mark only the next work as not computed.
         sized = {'tool': 'evaluate_activity', 'data': result} if selective else result
-        if (requested() and len(_key(result)) > MAX_SOURCE_CHARS) or model_size(sized, arguments=arguments) > MAX_TOOL_RESULT_CHARS - 8_000:
+        if (enabled() and len(_key(result)) > MAX_SOURCE_CHARS) or model_size(sized, arguments=arguments) > MAX_TOOL_RESULT_CHARS - 8_000:
             reads[read_id] = dict(status="partial", error=dict(code="activity_output_limit",
                 message="Narrow the actor/destination set; raw observation remains in the consultation ledger."))
             output_full = True
@@ -460,7 +460,7 @@ def make_activity_tool(interaction):
         return await evaluate_activity(arguments, SemanticActivityDataSource(interaction))
     parameters = schema()
     description = "Compare move or transfer candidates. Returns actor health/work/stats, separate approach/transfer routes and destination state with actor/user context. Reads are shared; stages reference reads. Native coverage and unknowns remain explicit; no action or success prediction."
-    if pruning_requested():
+    if enabled():
         parameters['properties']['kind']['enum'] = ['move', 'transfer', 'state']
         parameters['properties']['kind']['description'] = 'move/transfer reads paths. state reads only destination state for each actor/user pair; use it for contextual predicates, occupancy or reservations without requesting paths.'
         parameters['properties']['include'] = {'type': 'array', 'uniqueItems': True,

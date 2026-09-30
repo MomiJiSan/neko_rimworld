@@ -8,7 +8,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass
 
-from .evidence_compiler import canonical, digest
+from .model_context import canonical, digest
 
 GUIDE = (
     "Tool results are ordinary JSON. Repeated field explanations and exact duplicate "
@@ -316,14 +316,13 @@ class PrunedEvidence:
     source_chars: int
     source_sha256: str
     omissions: tuple
-    projection_applied: bool = True
 
     @property
     def view_chars(self):
         return len(self.content)
 
     def metrics(self):
-        return dict(format='json', projection='request_scoped_content' if self.projection_applied else 'none', source_chars=self.source_chars,
+        return dict(format='json', projection='request_scoped_content', source_chars=self.source_chars,
                     view_chars=self.view_chars, source_sha256=self.source_sha256,
                     view_sha256=digest(self.content), omission_count=len(self.omissions),
                     omissions=list(self.omissions[:128]))
@@ -331,20 +330,15 @@ class PrunedEvidence:
 
 class ContextPruner:
     guide = GUIDE
-    accepts_arguments = True
 
-    def __init__(self, *, project_display=True):
+    def __init__(self):
         self.seen_notes = set()
-        self.project_display = project_display
 
     def compile(self, value, *, arguments=None, max_view_chars=None):
         raw = canonical(value)
-        if self.project_display:
-            projected, seen, omitted = prune(value, arguments, seen_notes=self.seen_notes)
-            content = canonical(projected)
-        else:
-            content, seen, omitted = raw, self.seen_notes, []
+        projected, seen, omitted = prune(value, arguments, seen_notes=self.seen_notes)
+        content = canonical(projected)
         if max_view_chars is not None and len(content) > max_view_chars:
             raise ValueError('evidence_view_limit')
         self.seen_notes = seen
-        return PrunedEvidence(content, len(raw), digest(raw), tuple(omitted), self.project_display)
+        return PrunedEvidence(content, len(raw), digest(raw), tuple(omitted))

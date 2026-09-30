@@ -4,7 +4,7 @@ import json
 import pytest
 
 from plugin.plugins.neko_rimworld.agent.context_pruning import ContextPruner, prune
-from plugin.plugins.neko_rimworld.agent.evidence_compiler import make_compiler, requested
+from plugin.plugins.neko_rimworld.agent.model_context import make_pruner, enabled
 from plugin.plugins.neko_rimworld.agent.contracts import ToolCall
 from plugin.plugins.neko_rimworld.agent.tools import ToolRegistry, ToolSpec
 
@@ -110,9 +110,9 @@ def test_failed_activity_result_remains_an_error_without_cycles():
 
 @pytest.mark.asyncio
 async def test_actual_registry_passes_inclusion_arguments_and_keeps_raw_result(monkeypatch):
-    monkeypatch.setenv('NEKO_EVIDENCE_COMPACT', '3')
-    assert requested()
-    registry = ToolRegistry(evidence_compiler=make_compiler())
+    monkeypatch.setenv('NEKO_CONTEXT_PRUNING', '1')
+    assert enabled()
+    registry = ToolRegistry(context_pruner=make_pruner())
     async def read(args): return route()['data']
     registry.register(ToolSpec('inspect_route', 'path', {'type': 'object'}, read))
     raw = await registry.execute(registry.prepare(ToolCall('r', 'inspect_route', '{"include_objects":true,"include":["geometry"]}')))
@@ -124,7 +124,7 @@ async def test_actual_registry_passes_inclusion_arguments_and_keeps_raw_result(m
 async def test_activity_default_reads_only_requested_paths_and_optional_reads_stay_one_call(monkeypatch):
     from plugin.plugins.neko_rimworld.agent.activity import evaluate_activity, SemanticActivityDataSource
     from plugin.plugins.neko_rimworld.tests.test_activity import NativeInteraction
-    monkeypatch.setenv('NEKO_EVIDENCE_COMPACT', '3')
+    monkeypatch.setenv('NEKO_CONTEXT_PRUNING', '1')
     arguments = {'kind': 'transfer', 'actors': [{'kind': 'pawn', 'id': x, 'map': 'Map_0'} for x in ('a', 'b', 'c')],
                  'subject': {'kind': 'pawn', 'id': 'patient', 'map': 'Map_0'},
                  'destinations': [{'kind': 'thing', 'id': f'bed{i}', 'map': 'Map_0'} for i in (1, 2, 3)]}
@@ -160,7 +160,7 @@ def test_budget_charges_every_resend_and_never_charges_a_refused_request():
 
 
 def test_selector_nesting_repair_preserves_explicit_values_and_rejects_conflicts(monkeypatch):
-    monkeypatch.setenv('NEKO_EVIDENCE_COMPACT', '3')
+    monkeypatch.setenv('NEKO_CONTEXT_PRUNING', '1')
     registry = ToolRegistry()
     registry.register(ToolSpec('count', 'count', {'properties': {'object': {}, 'metric': {}}, 'additionalProperties': False}, None))
     args = {'object': {'kind': 'things'}, 'metric': 'records', 'include_held': False, 'include_fogged': True}
@@ -178,14 +178,17 @@ def test_script_outputs_are_not_reinterpreted_as_native_metadata():
 
 def test_review_never_projects_author_visible_opt_in_details_again():
     raw = route()
-    assert json.loads(make_compiler('3', project_display=False).compile(raw).content) == raw
+    from plugin.plugins.neko_rimworld.agent.stage_review import request_messages
+    messages, evidence = request_messages('question', {}, [{'role': 'tool', 'name': 'inspect_route', 'tool_call_id': 'c', 'content': json.dumps(raw)}])
+    assert evidence[0]['result'] == raw
+    assert json.loads(messages[1]['content'])['evidence'][0]['result'] == raw
 
 
 @pytest.mark.asyncio
 async def test_state_no_longer_smuggles_all_pawn_facts_and_selected_health_still_arrives(monkeypatch):
     from plugin.plugins.neko_rimworld.tests.test_activity import NativeInteraction
     from plugin.plugins.neko_rimworld.agent.object_tools import ObjectReader
-    monkeypatch.setenv('NEKO_EVIDENCE_COMPACT', '3')
+    monkeypatch.setenv('NEKO_CONTEXT_PRUNING', '1')
     native = NativeInteraction()
     result = await ObjectReader(native).look({'object': {'kind': 'pawn', 'id': 'a'}, 'aspects': ['state', 'health']})
     facts = result['facts'][0]['facts']
@@ -198,7 +201,7 @@ async def test_state_no_longer_smuggles_all_pawn_facts_and_selected_health_still
 def test_length_only_repair_does_not_replay_world_or_detail_and_never_hides_claim_errors(monkeypatch):
     from plugin.plugins.neko_rimworld.agent.session import AgentRunSession
     from plugin.plugins.neko_rimworld.agent.audit import AgentAuditLedger
-    monkeypatch.setenv('NEKO_EVIDENCE_COMPACT', '3')
+    monkeypatch.setenv('NEKO_CONTEXT_PRUNING', '1')
     session = AgentRunSession.create(ledger=AgentAuditLedger('question'), system_prompt='policy', question='question')
     session.messages.append({'role': 'tool', 'content': 'LARGE WORLD DATA'})
     session.submission.answer = [{'text': 'A conditional answer; B remains unknown.'}]
@@ -217,7 +220,7 @@ def test_length_only_repair_does_not_replay_world_or_detail_and_never_hides_clai
 async def test_runtime_length_repair_uses_one_small_request_and_preserves_full_report(monkeypatch):
     from plugin.plugins.neko_rimworld.tests.test_agent import FakeLogger, settings, turn
     from plugin.plugins.neko_rimworld.agent import AgentRuntime, AgentAuditRegistry
-    monkeypatch.setenv('NEKO_EVIDENCE_COMPACT', '3')
+    monkeypatch.setenv('NEKO_CONTEXT_PRUNING', '1')
     full = 'SAVED DETAIL ' * 400
     long_answer = 'This is a conditional conclusion with uncertainty. ' * 40
     class Model:
@@ -243,7 +246,7 @@ async def test_runtime_length_repair_uses_one_small_request_and_preserves_full_r
 async def test_redundant_move_leg_and_explicit_recipient_do_not_need_repair_calls(monkeypatch):
     from plugin.plugins.neko_rimworld.agent.activity import evaluate_activity, SemanticActivityDataSource
     from plugin.plugins.neko_rimworld.tests.test_activity import NativeInteraction
-    monkeypatch.setenv('NEKO_EVIDENCE_COMPACT', '3')
+    monkeypatch.setenv('NEKO_CONTEXT_PRUNING', '1')
     native = NativeInteraction()
     result = await evaluate_activity({'kind': 'move', 'actors': [{'kind': 'pawn', 'id': 'a', 'map': 'Map_0'}],
         'destinations': [{'kind': 'thing', 'id': 'bed1', 'map': 'Map_0'}],
@@ -259,7 +262,7 @@ async def test_redundant_move_leg_and_explicit_recipient_do_not_need_repair_call
 async def test_contextual_state_matrix_does_not_read_unrequested_paths_or_actor_profiles(monkeypatch):
     from plugin.plugins.neko_rimworld.agent.activity import evaluate_activity, SemanticActivityDataSource
     from plugin.plugins.neko_rimworld.tests.test_activity import NativeInteraction
-    monkeypatch.setenv('NEKO_EVIDENCE_COMPACT', '3')
+    monkeypatch.setenv('NEKO_CONTEXT_PRUNING', '1')
     native = NativeInteraction()
     result = await evaluate_activity({'kind': 'state',
         'actors': [{'kind': 'pawn', 'id': x, 'map': 'Map_0'} for x in ('a', 'b', 'c')],
@@ -283,7 +286,7 @@ def test_legacy_contract_does_not_advertise_unavailable_native_state_or_activity
 async def test_named_focus_includes_its_aspect_in_the_same_native_read(monkeypatch):
     from plugin.plugins.neko_rimworld.tests.test_activity import NativeInteraction
     from plugin.plugins.neko_rimworld.agent.object_tools import ObjectReader
-    monkeypatch.setenv('NEKO_EVIDENCE_COMPACT', '3')
+    monkeypatch.setenv('NEKO_CONTEXT_PRUNING', '1')
     native = NativeInteraction()
     result = await ObjectReader(native).look({'object': {'kind': 'pawn', 'id': 'a'},
         'aspects': ['health'], 'focus': {'skills': ['Medicine']}})

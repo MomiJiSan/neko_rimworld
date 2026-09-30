@@ -345,7 +345,7 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         model = self._model_factory(settings)
         setup = await self._tools_provider() if self._tools_provider is not None else ToolSetup(self._observation_tools)
-        tools = ToolRegistry(evidence_compiler=session.evidence_compiler, compact_enabled=session.evidence_compiler is not None)
+        tools = ToolRegistry(context_pruner=session.context_pruner, context_enabled=session.context_pruner is not None)
         for spec in setup.tools:
             tools.register(spec)
 
@@ -373,8 +373,8 @@ class AgentRuntime:
         if session.interaction is None and (setup.references_supported or reference_report is not None):
             # Native answer references and attached historical reports retain
             # their original author-facing paths and output-size contract.
-            session.evidence_compiler = None
-            tools = ToolRegistry(compact_enabled=False)
+            session.context_pruner = None
+            tools = ToolRegistry(context_enabled=False)
             for spec in setup.tools:
                 tools.register(spec)
             tools.register(make_submission_tool(session.submission, session.observations, submission_updated,
@@ -385,7 +385,7 @@ class AgentRuntime:
         if self._prepared_calls:
             for call in self._prepared_calls:
                 if session.interaction is not None:
-                    tools = ToolRegistry(evidence_compiler=session.evidence_compiler, compact_enabled=session.evidence_compiler is not None)
+                    tools = ToolRegistry(context_pruner=session.context_pruner, context_enabled=session.context_pruner is not None)
                     specs = {spec.name: spec for spec in (*setup.tools, *session.interaction.tools())}
                     for spec in specs.values():
                         tools.register(spec)
@@ -472,13 +472,13 @@ class AgentRuntime:
                 if session.interaction is not None:
                     session.interaction.finalizing = True
             if session.interaction is not None:
-                tools = ToolRegistry(evidence_compiler=session.evidence_compiler, compact_enabled=session.evidence_compiler is not None)
+                tools = ToolRegistry(context_pruner=session.context_pruner, context_enabled=session.context_pruner is not None)
                 for spec in session.interaction.tools():
                     tools.register(spec)
                 session.messages[0]["content"] = session.interaction.prompt(settings.preferred_cycles)
                 ledger.record("interaction_state", session.interaction.snapshot())
             elif finalizing:
-                tools = ToolRegistry(evidence_compiler=session.evidence_compiler, compact_enabled=session.evidence_compiler is not None)
+                tools = ToolRegistry(context_pruner=session.context_pruner, context_enabled=session.context_pruner is not None)
                 tools.register(make_submission_tool(session.submission, session.observations, submission_updated,
                                                     references_supported=setup.references_supported))
                 session.messages[0]["content"] = build_finalization_prompt(settings.preferred_cycles, references_supported=setup.references_supported) + ("\n\n" + setup.context if setup.context else "")

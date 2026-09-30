@@ -10,7 +10,7 @@ from typing import Any
 from .audit import AgentAuditLedger
 from .contracts import AssistantTurn
 from .handoff import SubmissionDraft
-from .evidence_compiler import COMPACT_TOOLS, make_compiler, requested, pruning_requested
+from .model_context import CONTEXT_TOOLS, make_pruner, enabled
 from .input_budget import InputBudget
 
 
@@ -31,7 +31,7 @@ class AgentRunSession:
     review: dict[str, Any] = field(default_factory=dict)
     review_initial_draft: SubmissionDraft | None = None
     review_initial_delivery: dict[str, Any] | None = None
-    evidence_compiler: Any = field(default_factory=lambda: make_compiler() if requested() else None, repr=False)
+    context_pruner: Any = field(default_factory=lambda: make_pruner() if enabled() else None, repr=False)
     evidence_views: list[dict[str, Any]] = field(default_factory=list)
     input_budget: Any = field(default_factory=InputBudget.from_environment, repr=False)
 
@@ -63,10 +63,10 @@ class AgentRunSession:
             *self.messages,
             {"role": "system", "content": advisory},
         ]
-        if self.evidence_compiler is not None:
+        if self.context_pruner is not None:
             # Only this code-authored format guide becomes an instruction. Game
             # descriptions/shared values remain in their original tool role.
-            messages[0] = {**messages[0], "content":messages[0]['content']+'\n'+self.evidence_compiler.guide}
+            messages[0] = {**messages[0], "content":messages[0]['content']+'\n'+self.context_pruner.guide}
         return messages
 
     def length_repair_messages(self):
@@ -77,7 +77,7 @@ class AgentRunSession:
         is unchanged by the existing length-only submission contract.
         """
         draft = self.submission
-        if not pruning_requested() or draft.claims_blocked or set(draft.errors) != {'delivery'}:
+        if not enabled() or draft.claims_blocked or set(draft.errors) != {'delivery'}:
             return None
         if draft.errors['delivery'].get('code') != 'handoff_over_budget' or not draft.answer or any(set(p) != {'text'} for p in draft.answer):
             return None
@@ -117,10 +117,10 @@ class AgentRunSession:
         if result.model_content is not None:
             self.evidence_views.append({"call_id":result.call_id,"tool":result.name,**result.model_view_metrics})
             return result.as_message()
-        if self.evidence_compiler is None or result.name not in COMPACT_TOOLS or result.terminal:
+        if self.context_pruner is None or result.name not in CONTEXT_TOOLS or result.terminal:
             return result.as_message()
-        view = self.evidence_compiler.compile(result.value,
-            **({'arguments': result.arguments} if getattr(self.evidence_compiler, 'accepts_arguments', False) else {}))
+        view = self.context_pruner.compile(result.value,
+            arguments=result.arguments)
         self.evidence_views.append({"call_id":result.call_id,"tool":result.name,**view.metrics()})
         return result.as_message(content=view.content)
 

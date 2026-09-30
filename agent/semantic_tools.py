@@ -165,8 +165,8 @@ class SemanticInteraction:
         build = build_finalization_prompt if self.finalizing else build_system_prompt
         guide = OBJECT_GUIDE if self.object_reader else TOOL_GUIDE
         prompt = build(preferred_cycles, references_supported=self.references_supported) + "\n\n" + guide
-        from .evidence_compiler import pruning_requested
-        if pruning_requested():
+        from .model_context import enabled
+        if enabled():
             from .context_tools import query_guide, task_prompt
             prompt = task_prompt(preferred_cycles, finalizing=self.finalizing, references_supported=self.references_supported)
             if not self.finalizing:
@@ -211,15 +211,15 @@ class SemanticInteraction:
                 handlers[name] = observe
                 semantic_specs.append(spec)
         activity_enabled = os.environ.get("NEKO_ACTIVITY", "").strip().lower() in {"1", "true", "yes", "on"}
-        from .evidence_compiler import pruning_requested
-        if pruning_requested() and activity_enabled and self.object_reader and 'inspect_route' in self.original:
+        from .model_context import enabled
+        if enabled() and activity_enabled and self.object_reader and 'inspect_route' in self.original:
             # One batch-capable path tool covers the single-target case too.
             # Native readers remain internal; the model need not select between
             # three overlapping public path interfaces on every request.
             semantic_specs = [s for s in semantic_specs if s['name'] not in ('inspect_space', 'inspect_route')]
         for tool in semantic_specs:
-            from .evidence_compiler import pruning_requested
-            if pruning_requested() and tool['name'] in ('look', 'inspect_route', 'survey_space'):
+            from .model_context import enabled
+            if enabled() and tool['name'] in ('look', 'inspect_route', 'survey_space'):
                 from .context_tools import configure_read_spec
                 tool = configure_read_spec(tool)
             handler = handlers[tool["name"]]
@@ -270,8 +270,8 @@ class SemanticInteraction:
         """Read one catalog-advertised world operation for semantic and activity adapters."""
         if operation not in self.original:
             raise ToolExecutionError("unsupported", f"The connected Mod does not support {operation}.")
-        from .evidence_compiler import pruning_requested
-        if pruning_requested() and operation in ('inspect_route', 'survey_space'):
+        from .model_context import enabled
+        if enabled() and operation in ('inspect_route', 'survey_space'):
             args = dict(args)
             include = args.pop('include', [])
             if not isinstance(include, list) or any(v not in ('geometry', 'diagnostics', 'environment', 'objects') for v in include):
@@ -356,8 +356,8 @@ class SemanticInteraction:
             return await self.object_reader.look(args)
         if any(key in args for key in ("stats", "actor", "user")):
             raise SurfaceError("This connection does not support unified state options")
-        from .evidence_compiler import pruning_requested
-        if pruning_requested():
+        from .model_context import enabled
+        if enabled():
             include, focus = args.get('include', []), args.get('focus', {})
             if not isinstance(include, list) or any(v not in ('body_parts', 'diagnostics') for v in include):
                 raise SurfaceError('look include accepts body_parts and diagnostics')
