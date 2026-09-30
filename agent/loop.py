@@ -321,6 +321,7 @@ class AgentRuntime:
             "knowledge": session.knowledge,
             "knowledge_omitted": session.knowledge_omitted,
             "reference_report_id": reference.get("report_id") if reference else None,
+            "evidence_views": copy.deepcopy(session.evidence_views),
         }
         try:
             metadata = await asyncio.wait_for(self._report_sink(record), timeout=3.0)
@@ -344,7 +345,7 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         model = self._model_factory(settings)
         setup = await self._tools_provider() if self._tools_provider is not None else ToolSetup(self._observation_tools)
-        tools = ToolRegistry()
+        tools = ToolRegistry(evidence_compiler=session.evidence_compiler, compact_enabled=session.evidence_compiler is not None)
         for spec in setup.tools:
             tools.register(spec)
 
@@ -369,12 +370,22 @@ class AgentRuntime:
             if session.interaction is not None:
                 session.messages[0]["content"] = session.interaction.prompt(settings.preferred_cycles)
 
+        if session.interaction is None and (setup.references_supported or reference_report is not None):
+            # Native answer references and attached historical reports retain
+            # their original author-facing paths and output-size contract.
+            session.evidence_compiler = None
+            tools = ToolRegistry(compact_enabled=False)
+            for spec in setup.tools:
+                tools.register(spec)
+            tools.register(make_submission_tool(session.submission, session.observations, submission_updated,
+                                                references_supported=setup.references_supported))
+
         # Prepared-evidence experiments cross the same production tool/result interface.
         # The injected calls are explicit study inputs, not model-generated calls.
         if self._prepared_calls:
             for call in self._prepared_calls:
                 if session.interaction is not None:
-                    tools = ToolRegistry()
+                    tools = ToolRegistry(evidence_compiler=session.evidence_compiler, compact_enabled=session.evidence_compiler is not None)
                     specs = {spec.name: spec for spec in (*setup.tools, *session.interaction.tools())}
                     for spec in specs.values():
                         tools.register(spec)
@@ -388,7 +399,7 @@ class AgentRuntime:
                     raise ValueError("Prepared calls must succeed; non-observations require an experimental interaction")
                 if result.observation is not None:
                     session.observations.append(result.observation)
-                session.append_tool_message(result.as_message())
+                session.append_tool_message(session.tool_message(result))
                 ledger.record("prepared_observation" if result.observation is not None else "prepared_interaction",
                               {"name": call.name, "result": result.value})
 
@@ -461,13 +472,13 @@ class AgentRuntime:
                 if session.interaction is not None:
                     session.interaction.finalizing = True
             if session.interaction is not None:
-                tools = ToolRegistry()
+                tools = ToolRegistry(evidence_compiler=session.evidence_compiler, compact_enabled=session.evidence_compiler is not None)
                 for spec in session.interaction.tools():
                     tools.register(spec)
                 session.messages[0]["content"] = session.interaction.prompt(settings.preferred_cycles)
                 ledger.record("interaction_state", session.interaction.snapshot())
             elif finalizing:
-                tools = ToolRegistry()
+                tools = ToolRegistry(evidence_compiler=session.evidence_compiler, compact_enabled=session.evidence_compiler is not None)
                 tools.register(make_submission_tool(session.submission, session.observations, submission_updated,
                                                     references_supported=setup.references_supported))
                 session.messages[0]["content"] = build_finalization_prompt(settings.preferred_cycles, references_supported=setup.references_supported) + ("\n\n" + setup.context if setup.context else "")
@@ -485,6 +496,20 @@ class AgentRuntime:
             request_messages = session.request_messages(advisory)
             if session.interaction is not None:
                 request_messages = session.interaction.request_messages(request_messages)
+            repair_messages = session.length_repair_messages()
+            if repair_messages is not None:
+                submission_tool = (session.interaction.submission() if session.interaction is not None
+                    and hasattr(session.interaction, 'submission') else
+                    make_submission_tool(session.submission, session.observations, submission_updated,
+                                         references_supported=setup.references_supported))
+                tools = ToolRegistry()
+                tools.register(ToolSpec(name='submit_response', description='Save the shortened answer; existing detail stays unchanged.',
+                    parameters={'type': 'object', 'properties': {'answer': {'type': 'string'}},
+                                'required': ['answer'], 'additionalProperties': False},
+                    handler=submission_tool.handler, terminal=submission_tool.terminal,
+                    exclusive=submission_tool.exclusive, max_result_chars=submission_tool.max_result_chars))
+                request_messages = repair_messages
+                ledger.record('length_repair_context', {'game_evidence_replayed': False, 'saved_detail_changed': False})
             tool_schemas = tools.schemas()
             request_sha256 = _canonical_hash({"messages": request_messages, "tools": tool_schemas})
             attempt = 1
@@ -499,6 +524,14 @@ class AgentRuntime:
                     settings.request_timeout_seconds,
                     max(0.001, available),
                 )
+                admitted, accounting = session.input_budget.admit(request_messages, tool_schemas)
+                if accounting is not None:
+                    ledger.record('public_input_admission', accounting)
+                if not admitted:
+                    return self._finish_degraded(ledger,
+                        reason='The consultation reached its cumulative public input limit before completion.',
+                        error_code='agent_input_budget', observations=session.observations,
+                        fallback_answer=session.fallback_answer)
                 request_event = {
                     "model": settings.model,
                     "base_url": settings.base_url,
@@ -693,7 +726,9 @@ class AgentRuntime:
                             error_code=session.invalidated_error, observations=session.observations,
                             fallback_answer="The loaded world changed; earlier observations are stale. Start a new consultation.",
                         )
-                    tool_messages.append(result.as_message())
+                    tool_messages.append(session.tool_message(result))
+                    if session.evidence_views and session.evidence_views[-1]['call_id'] == result.call_id:
+                        ledger.record('model_evidence_compiled', session.evidence_views[-1])
                     if result.terminal and result.ok:
                         data_value = result.value.get("data")
                         if isinstance(data_value, Mapping) and submitted_response is None:
@@ -812,6 +847,13 @@ class AgentRuntime:
         session.review.update(input_chars=len(messages[1]['content']), input_limit_chars=stage_review.MAX_REVIEW_CHARS)
         reviewer = self._review_model_factory(settings)
         schemas = [stage_review.REVIEW_TOOL]
+        admitted, accounting = session.input_budget.admit(messages, schemas)
+        if accounting is not None:
+            ledger.record('public_input_admission', {**accounting, 'stage': 'review'})
+        if not admitted:
+            session.review['status'] = 'skipped_budget'
+            session.review['reason'] = 'cumulative_public_input_limit'
+            return False
         session.model_calls += 1
         ledger.record("model_request_started", {"stage": "review", "messages": messages, "tools": schemas,
             "request_sha256": _canonical_hash({"messages": messages, "tools": schemas}), "attempt": 1, "max_attempts": 1,

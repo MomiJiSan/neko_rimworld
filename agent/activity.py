@@ -14,6 +14,7 @@ from typing import Protocol
 
 from .spatial_ranking import rank_paths
 from .tools import MAX_TOOL_RESULT_CHARS, ToolExecutionError, ToolSpec
+from .evidence_compiler import MAX_SOURCE_CHARS, model_size, requested, pruning_requested
 
 MAX_ACTORS, MAX_DESTINATIONS, MAX_PAIRS = 4, 8, 16
 ROUTE_METRICS = ("steps", "path_length", "native_cost")
@@ -55,13 +56,16 @@ def _refs(values, maximum, kinds=("pawn", "thing", "cell")):
 
 
 def normalize_activity(args):
-    if not isinstance(args, Mapping) or set(args) - {"kind", "actors", "subject", "start", "destinations", "stats"}:
+    extra = {'include', 'actor_aspects', 'actor_focus', 'user', 'margin'} if pruning_requested() else set()
+    if not isinstance(args, Mapping) or set(args) - {"kind", "actors", "subject", "start", "destinations", "stats", *extra}:
         _invalid("Use kind, actors, destinations, optional subject/start and stats.")
     kind = args.get("kind")
-    if kind not in ("move", "transfer"):
-        _invalid("kind must be move or transfer.")
+    if kind not in (('move', 'transfer', 'state') if pruning_requested() else ('move', 'transfer')):
+        _invalid('kind must be move, transfer' + (' or state.' if pruning_requested() else '.'))
     if kind == "move" and "subject" in args or kind == "transfer" and "start" in args:
         _invalid("move has no subject; transfer starts at subject and accepts no start.")
+    if kind == 'state' and any(k in args for k in ('subject', 'start')):
+        _invalid('state compares destination state with actor/user context; it has no journey subject/start.')
     actors = _refs(args.get("actors"), MAX_ACTORS, ("pawn",))
     subject = _ref(args.get("subject"), ("pawn", "thing")) if kind == "transfer" else None
     start = _ref(args["start"]) if "start" in args else None
@@ -85,7 +89,36 @@ def normalize_activity(args):
         destination = {"selector": copy.deepcopy(selector)}
     if len(actors) * len(destination.get("candidates", [])) > MAX_PAIRS:
         _invalid(f"At most {MAX_PAIRS} actor/destination pairs per activity.")
-    return dict(kind=kind, actors=actors, subject=subject, start=start, destination=destination, stats=list(stats))
+    result = dict(kind=kind, actors=actors, subject=subject, start=start, destination=destination, stats=list(stats))
+    if pruning_requested():
+        result['user'] = _ref(args['user'], ('pawn',)) if 'user' in args else None
+        margin = args.get('margin', 2)
+        if type(margin) is not int or not 0 <= margin <= 12:
+            _invalid('margin must be an integer in 0..12')
+        result['margin'] = margin
+        focus = args.get('actor_focus', {})
+        if not isinstance(focus, dict) or set(focus) - {'skills', 'work', 'capacities'} or any(
+            not isinstance(v, list) or not 1 <= len(v) <= 32 or any(not _text(n) for n in v) for v in focus.values()
+        ):
+            _invalid('actor_focus selects skills/work/capacities by exact definition names or labels.')
+        result['actor_focus'] = copy.deepcopy(focus)
+        for key, allowed in (
+            ('include', ('approach', 'destination_state', 'environment', 'objects', 'geometry')),
+            ('actor_aspects', ('health', 'skills', 'work', 'profile', 'gear', 'mood')),
+        ):
+            selected = args.get(key, [])
+            if not isinstance(selected, list) or any(not isinstance(v, str) or v not in allowed for v in selected) or len(set(selected)) != len(selected):
+                _invalid(f'{key} accepts distinct values from {", ".join(allowed)}.')
+            result[key] = list(selected)
+        result['actor_aspects'] = list(dict.fromkeys([*result['actor_aspects'],
+            *({'skills': 'skills', 'work': 'work', 'capacities': 'health'}[k] for k in focus)]))
+        if kind == 'move' and 'approach' in result['include']:
+            # move already is the actor/start-to-destination leg. A redundant
+            # selection must not require a second model request to remove it.
+            result['include'].remove('approach')
+        if kind == 'state' and set(result['include']) - {'destination_state'}:
+            _invalid('state has no paths; approach/environment/objects/geometry require move or transfer.')
+    return result
 
 
 def schema():
@@ -159,7 +192,7 @@ class SemanticActivityDataSource:
     async def resolve(self, activity):
         activity = copy.deepcopy(activity)
         activity["actors"] = [await self._resolve(ref, f"actors[{i}]") for i, ref in enumerate(activity["actors"])]
-        for role in ("subject", "start"):
+        for role in ("subject", "start", *(['user'] if activity.get('user') else [])):
             if activity[role] is not None:
                 activity[role] = await self._resolve(activity[role], role)
         destination = activity["destination"]
@@ -172,7 +205,7 @@ class SemanticActivityDataSource:
             refs = [self._identity(row["object"], "thing") for row in value.get("facts", [])]
         activity["destination"] = {"candidates": _refs(refs, MAX_DESTINATIONS)}
         activity["actors"] = _refs(activity["actors"], MAX_ACTORS, ("pawn",))
-        roles = [*activity["actors"], *refs, activity["subject"], activity["start"]]
+        roles = [*activity["actors"], *refs, activity["subject"], activity["start"], activity.get('user')]
         maps = {r["map"] for r in roles if r and r.get("map") not in (None, "current")}
         if len(maps) > 1:
             raise ToolExecutionError("activity_map_mismatch", "All activity roles must share a loaded map.")
@@ -328,6 +361,7 @@ def _comparisons(candidates, reads, stats):
 
 async def evaluate_activity(arguments, source: ActivityDataSource):
     activity = await source.resolve(normalize_activity(arguments))
+    selective = pruning_requested()
     actors, destinations = activity["actors"], activity["destination"]["candidates"]
     if not destinations or len(actors) * len(destinations) > MAX_PAIRS:
         _invalid(f"Select 1..{MAX_PAIRS} actor/destination pairs.")
@@ -336,22 +370,30 @@ async def evaluate_activity(arguments, source: ActivityDataSource):
         for destination in destinations:
             stages = []
             def add(kind, operation, args, origin=None, target=None):
+                if selective and operation == 'inspect_route':
+                    args = dict(args, margin=activity['margin'])
+                    if activity.get('user'):
+                        args['user'] = activity['user']
                 key = _key([operation, args])
                 if key not in requests:
                     requests[key] = (f"r{len(requests)+1}", operation, args)
                 stages.append(dict(kind=kind, actor=actor, subject=activity["subject"], origin=origin, destination=target, read=requests[key][0]))
-            add("actor_state", "look", dict(object=actor, aspects=["health", "skills", "work"], detail=0,
-                                          **({"stats": activity["stats"]} if activity["stats"] else {})))
+            aspects = activity.get('actor_aspects', []) if selective else ['health', 'skills', 'work']
+            if aspects or activity['stats']:
+                add("actor_state", "look", dict(object=actor, aspects=aspects or ['identity'], detail=0,
+                                              **({"stats": activity["stats"]} if activity["stats"] else {})))
             if activity["kind"] == "transfer":
                 subject = activity["subject"]
-                add("approach", "inspect_route", dict(actor=actor, to=subject, detail="summary"), actor, subject)
+                if not selective or 'approach' in activity['include']:
+                    add("approach", "inspect_route", dict(actor=actor, to=subject, detail="summary"), actor, subject)
                 add("transfer", "inspect_route", dict(actor=actor, start=subject, to=destination, detail="summary"), subject, destination)
-            else:
+            elif activity['kind'] == 'move':
                 start = activity["start"]
                 add("move", "inspect_route", dict(actor=actor, to=destination, detail="summary", **({"start": start} if start else {})), start or actor, destination)
-            user = activity["subject"] if activity["kind"] == "transfer" else actor
-            add("destination_state", "look", dict(object=destination, aspects=["state"], actor=actor, detail=0,
-                                                 **({"user": user} if user and user["kind"] == "pawn" else {})), target=destination)
+            user = activity.get('user') or (activity["subject"] if activity["kind"] == "transfer" else actor)
+            if activity['kind'] == 'state' or not selective or 'destination_state' in activity['include']:
+                add("destination_state", "look", dict(object=destination, aspects=["state"], actor=actor, detail=0,
+                                                     **({"user": user} if user and user["kind"] == "pawn" else {})), target=destination)
             candidates.append(dict(actor=actor, subject=activity["subject"], destination=destination, stages=stages))
     result = dict(kind=activity["kind"], source_kind=source.source_kind, candidates=candidates, reads=reads,
                   comparisons=[], status="partial", limitations=["Current, sequential observations; not an atomic snapshot.",
@@ -370,7 +412,13 @@ async def evaluate_activity(arguments, source: ActivityDataSource):
             value = dict(status="partial", error=dict(code=error.code, message=str(error), details=error.details))
         if value.get("status") == "world_changed":
             raise ToolExecutionError("world_changed", "Discard activity observations after a world change.", recoverable=False)
-        read = _project(value, operation)
+        if selective and operation == 'inspect_route':
+            from .context_pruning import route_view
+            raw = value.get('data') if isinstance(value.get('data'), Mapping) else value
+            read = route_view({**raw, 'status': value.get('status', raw.get('status', 'partial'))},
+                environment='environment' in activity['include'], objects='objects' in activity['include'])
+        else:
+            read = _project(value, operation)
         current = _sample(read).get("load_epoch")
         if current and epoch and current != epoch:
             raise ToolExecutionError("world_changed", "Activity observations span loaded worlds.", recoverable=False)
@@ -378,16 +426,56 @@ async def evaluate_activity(arguments, source: ActivityDataSource):
         reads[read_id] = read
         # Measure the composed result after adding this projected read. Preserve
         # every completed read and mark only the next work as not computed.
-        if len(_key(result)) > MAX_TOOL_RESULT_CHARS - 8_000:
+        sized = {'tool': 'evaluate_activity', 'data': result} if selective else result
+        if (requested() and len(_key(result)) > MAX_SOURCE_CHARS) or model_size(sized, arguments=arguments) > MAX_TOOL_RESULT_CHARS - 8_000:
             reads[read_id] = dict(status="partial", error=dict(code="activity_output_limit",
                 message="Narrow the actor/destination set; raw observation remains in the consultation ledger."))
             output_full = True
-    result["comparisons"] = _comparisons(candidates, reads, activity["stats"])
+    if not selective:
+        result["comparisons"] = _comparisons(candidates, reads, activity["stats"])
     result["status"] = "ok" if all(r.get("status") == "ok" for r in reads.values()) else "partial"
+    if selective:
+        # Ordinary query results, without an additional candidate/read-reference
+        # graph or automatic ranks. Each completed native read appears once.
+        emitted = set()
+        observations = []
+        for candidate in candidates:
+            for stage in candidate['stages']:
+                if stage['read'] in emitted:
+                    continue
+                emitted.add(stage['read'])
+                observations.append({**{k: copy.deepcopy(v) for k, v in stage.items() if k != 'read' and v is not None},
+                                     'observation': reads[stage['read']]})
+        limits = [result['limitations'][0]]
+        limits.append('Current object predicates/reservations do not establish complete action eligibility or future state.'
+                      if activity['kind'] == 'state' else result['limitations'][1])
+        return dict(kind=activity['kind'], status=result['status'], observations=observations,
+                    requested={'include': activity['include'], 'actor_aspects': activity['actor_aspects'], 'stats': activity['stats']},
+                    limitations=limits)
     return result
 
 
 def make_activity_tool(interaction):
     async def handler(arguments):
         return await evaluate_activity(arguments, SemanticActivityDataSource(interaction))
-    return ToolSpec("evaluate_activity", "Compare move or transfer candidates. Returns actor health/work/stats, separate approach/transfer routes and destination state with actor/user context. Reads are shared; stages reference reads. Native coverage and unknowns remain explicit; no action or success prediction.", schema(), handler)
+    parameters = schema()
+    description = "Compare move or transfer candidates. Returns actor health/work/stats, separate approach/transfer routes and destination state with actor/user context. Reads are shared; stages reference reads. Native coverage and unknowns remain explicit; no action or success prediction."
+    if pruning_requested():
+        parameters['properties']['kind']['enum'] = ['move', 'transfer', 'state']
+        parameters['properties']['kind']['description'] = 'move/transfer reads paths. state reads only destination state for each actor/user pair; use it for contextual predicates, occupancy or reservations without requesting paths.'
+        parameters['properties']['include'] = {'type': 'array', 'uniqueItems': True,
+            'items': {'enum': ['approach', 'destination_state', 'environment', 'objects', 'geometry']},
+            'description': 'Select additional content in this call: approach adds actor-to-subject paths for transfer; destination_state checks recipient/actor context; environment returns path/corridor hazards, coverage and tolerances (request for safety questions); objects lists corridor objects; geometry includes full path segments. Default paths only.'}
+        parameters['properties']['user'] = copy.deepcopy(parameters['properties']['actors']['items'])
+        parameters['properties']['user']['description'] = 'Optional recipient Pawn for route environmental tolerances and destination state; does not replace the traveller.'
+        parameters['properties']['margin'] = {'type': 'integer', 'minimum': 0, 'maximum': 12, 'default': 2,
+            'description': 'Corridor width in cells around the path when environmental context is needed.'}
+        parameters['properties']['actor_aspects'] = {'type': 'array', 'uniqueItems': True,
+            'items': {'enum': ['health', 'skills', 'work', 'profile', 'gear', 'mood']},
+            'description': 'Only requested actor facts are read, once per actor. Default none. stats independently requests exact StatDefs.'}
+        parameters['properties']['actor_focus'] = {'type': 'object', 'additionalProperties': False,
+            'properties': {key: {'type': 'array', 'minItems': 1, 'maxItems': 32, 'items': {'type': 'string'}}
+                           for key in ('skills', 'work', 'capacities')},
+            'description': 'Only these exact named skills/work types/capacities; includes their aspects automatically. Other actor_aspects stay as requested.'}
+        description = 'Compare all actors/destinations in one call. state: contextual destination predicates/occupancy/reservations only, no paths. move: actor/start-to-destination paths. transfer: subject-to-destination paths using each actor. Names/selectors resolve here; no preliminary ID/count/region query needed. Request environment for safety, approach for a first leg, destination_state alongside paths only if needed, actor_aspects/focus for relevant actor facts. No action, ETA or success prediction.'
+    return ToolSpec('evaluate_activity', description, parameters, handler)

@@ -9,6 +9,7 @@ from .query_surface import SurfaceError
 from .semantic_surface import PAWN_KINDS, THING_KINDS, ASPECTS, KINDS, supported_aspects, normalize_object, validate_aspects, validate_detail
 from .world_order import order_world_fields
 from .tools import MAX_TOOL_RESULT_CHARS
+from .evidence_compiler import MAX_SOURCE_CHARS, canonical, model_size, requested, pruning_requested
 
 PHYSICAL = (*PAWN_KINDS, *THING_KINDS)
 OBJECT_GUIDE = (
@@ -108,9 +109,22 @@ class ObjectReader:
     async def look(self, args):
         if not isinstance(args, dict) or not isinstance(args.get('object'), dict):
             raise SurfaceError('look requires object')
-        unknown = set(args) - {'object','aspects','detail','stats','actor','user','offset'}
+        unknown = set(args) - {'object','aspects','detail','stats','actor','user','offset', *({'include', 'focus'} if pruning_requested() else set())}
         if unknown:
             raise SurfaceError('look does not accept: ' + ', '.join(sorted(unknown)))
+        if pruning_requested():
+            include = args.get('include', [])
+            if not isinstance(include, list) or any(v not in ('body_parts', 'diagnostics') for v in include):
+                raise SurfaceError('look include accepts body_parts and diagnostics')
+            # Model-only inclusion controls never enter the native request.
+            focus = args.get('focus', {})
+            if not isinstance(focus, dict) or set(focus) - {'skills', 'work', 'capacities'} or any(
+                not isinstance(v, list) or not 1 <= len(v) <= 32 or any(not isinstance(n, str) or not n or len(n) > 256 for n in v)
+                for v in focus.values()
+            ):
+                raise SurfaceError('focus selects skills/work/capacities by 1..32 exact definition names or labels')
+            # Native requests below are built from explicit native keys. Retain
+            # these controls here so page fitting uses the requested model view.
         raw_object = args['object']
         kind = raw_object.get('kind')
         cell = kind == 'cell'
@@ -119,6 +133,9 @@ class ObjectReader:
         if not isinstance(aspects,list) or not aspects or any(not isinstance(a,str) for a in aspects):
             raise SurfaceError('aspects must be a nonempty string array')
         aspects = list(dict.fromkeys(aspects))
+        if pruning_requested():
+            aspects = list(dict.fromkeys([*aspects, *({'skills':'skills','work':'work','capacities':'health'}[k]
+                                                     for k in args.get('focus', {}))]))
         detail = validate_detail(args.get('detail',0))
         offset = args.get('offset',0)
         if type(offset) is not int or not 0 <= offset <= 8192 or cell and offset:
@@ -151,7 +168,7 @@ class ObjectReader:
         if any(k in args for k in ('actor','user')) and not state:
             raise SurfaceError('actor/user context requires a state aspect')
         if not cell and not state and stats is None and not any(k in args for k in ('actor','user')):
-            return self._fit_page(self._normalize_identities(await self.interaction._look_legacy({**args,'aspects':aspects})))
+            return self._fit_page(self._normalize_identities(await self.interaction._look_legacy({**args,'aspects':aspects})), args)
         direct = (kind in ('pawn','thing') and offset == 0
                   and not set(obj) - {'kind','ids','names','map','include_fogged'}
                   and len(obj.get('ids',obj.get('names',[]))) == 1
@@ -241,10 +258,14 @@ class ObjectReader:
                         'pain_fraction':'Current pain fraction, separate from injury severity and blood loss.',
                     }
                 if 'state' in state:
-                    item['facts']['state'] = {'facets':facets,'unsupported_components':row.get('unsupported_components')}
-                else:
+                    visible_facets = ({k:v for k,v in facets.items() if k not in ('pawn', 'work', 'stats')}
+                                      if pruning_requested() else facets)
+                    item['facts']['state'] = {'facets':visible_facets,'unsupported_components':row.get('unsupported_components')}
+                if 'state' not in state or pruning_requested():
                     pawn = facets.get('pawn',{})
                     for aspect in state:
+                        if aspect == 'state':
+                            continue
                         if aspect == 'work':value = facets.get('work',{'status':'not_applicable'})
                         elif pawn.get('status') != 'observed':value = pawn or {'status':'not_applicable'}
                         elif aspect == 'health':value = {k:v for k,v in pawn.items() if not _belongs(k, (*GEAR_FIELDS,'skills','traits'))}
@@ -257,7 +278,7 @@ class ObjectReader:
         if base['coverage']['state_facets_read_successfully'] is False:
             base['status'] = 'partial'
         base['not_read'].append('Omitted aspects are not evidence of absence. stats are computed only when requested; contextual predicates require the relevant actor/user.')
-        return self._fit_page(self._normalize_identities(base))
+        return self._fit_page(self._normalize_identities(base), args)
 
     @staticmethod
     def _canonical_identity(value):
@@ -306,10 +327,10 @@ class ObjectReader:
         return result
 
     @staticmethod
-    def _fit_page(base):
+    def _fit_page(base, arguments=None):
         facts = base.get('facts',[])
         original = len(facts)
-        while len(json.dumps(base,ensure_ascii=False,separators=(',',':'))) > MAX_TOOL_RESULT_CHARS - 4096:
+        while (len(canonical(base)) > MAX_SOURCE_CHARS if requested() else False) or model_size(base, arguments=arguments) > MAX_TOOL_RESULT_CHARS - 4096:
             if len(facts) <= 1:
                 raise SurfaceError('Object facts exceed output bound; select fewer aspects or smaller detail')
             facts.pop()

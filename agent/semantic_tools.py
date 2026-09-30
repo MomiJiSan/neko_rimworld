@@ -165,6 +165,13 @@ class SemanticInteraction:
         build = build_finalization_prompt if self.finalizing else build_system_prompt
         guide = OBJECT_GUIDE if self.object_reader else TOOL_GUIDE
         prompt = build(preferred_cycles, references_supported=self.references_supported) + "\n\n" + guide
+        from .evidence_compiler import pruning_requested
+        if pruning_requested():
+            from .context_tools import query_guide, task_prompt
+            prompt = task_prompt(preferred_cycles, finalizing=self.finalizing, references_supported=self.references_supported)
+            if not self.finalizing:
+                activity = os.environ.get('NEKO_ACTIVITY', '').strip().lower() in {'1','true','yes','on'} and 'inspect_route' in self.original
+                prompt += '\n\n' + query_guide(native_state=self.object_reader is not None, activity=activity)
         if not self.finalizing and "wiki" in self.original:
             prompt += "\n\n" + WIKI_GUIDANCE
         if not self.object_reader and not self.finalizing and self.setup.directory.get("world_observation", {}).get("version") == "world_observation.v2.2":
@@ -204,7 +211,17 @@ class SemanticInteraction:
                 handlers[name] = observe
                 semantic_specs.append(spec)
         activity_enabled = os.environ.get("NEKO_ACTIVITY", "").strip().lower() in {"1", "true", "yes", "on"}
+        from .evidence_compiler import pruning_requested
+        if pruning_requested() and activity_enabled and self.object_reader and 'inspect_route' in self.original:
+            # One batch-capable path tool covers the single-target case too.
+            # Native readers remain internal; the model need not select between
+            # three overlapping public path interfaces on every request.
+            semantic_specs = [s for s in semantic_specs if s['name'] not in ('inspect_space', 'inspect_route')]
         for tool in semantic_specs:
+            from .evidence_compiler import pruning_requested
+            if pruning_requested() and tool['name'] in ('look', 'inspect_route', 'survey_space'):
+                from .context_tools import configure_read_spec
+                tool = configure_read_spec(tool)
             handler = handlers[tool["name"]]
 
             async def guarded(args, handler=handler):
@@ -253,6 +270,16 @@ class SemanticInteraction:
         """Read one catalog-advertised world operation for semantic and activity adapters."""
         if operation not in self.original:
             raise ToolExecutionError("unsupported", f"The connected Mod does not support {operation}.")
+        from .evidence_compiler import pruning_requested
+        if pruning_requested() and operation in ('inspect_route', 'survey_space'):
+            args = dict(args)
+            include = args.pop('include', [])
+            if not isinstance(include, list) or any(v not in ('geometry', 'diagnostics', 'environment', 'objects') for v in include):
+                raise SurfaceError('spatial include accepts geometry, diagnostics, environment and objects')
+            if operation == 'inspect_route':
+                include_objects = args.pop('include_objects', False)
+                if type(include_objects) is not bool:
+                    raise SurfaceError('include_objects must be a boolean')
         native = await self.execute_native(args, tool_name=operation)
         data = native.get("data")
         if not isinstance(data, dict):
@@ -329,6 +356,23 @@ class SemanticInteraction:
             return await self.object_reader.look(args)
         if any(key in args for key in ("stats", "actor", "user")):
             raise SurfaceError("This connection does not support unified state options")
+        from .evidence_compiler import pruning_requested
+        if pruning_requested():
+            include, focus = args.get('include', []), args.get('focus', {})
+            if not isinstance(include, list) or any(v not in ('body_parts', 'diagnostics') for v in include):
+                raise SurfaceError('look include accepts body_parts and diagnostics')
+            if not isinstance(focus, dict) or set(focus) - {'skills', 'work', 'capacities'} or any(
+                not isinstance(v, list) or not 1 <= len(v) <= 32 or any(not isinstance(n, str) or not n or len(n) > 256 for n in v)
+                for v in focus.values()
+            ):
+                raise SurfaceError('focus selects skills/work/capacities by exact names or labels')
+            args = {k: v for k, v in args.items() if k not in ('include', 'focus')}
+            args['aspects'] = list(dict.fromkeys([*args.get('aspects', []),
+                *({'skills':'skills','work':'work','capacities':'health'}[k] for k in focus)]))
+            if 'work' in focus:
+                result = await self._look_legacy(args)
+                result['focus_unavailable'] = {'work': 'This connection exposes current jobs/status, not work-type assignments. Repeating look.work cannot provide the assignments.'}
+                return result
         return await self._look_legacy(args)
 
     def _validate_capabilities(self, obj):

@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from .evidence_view import canonical, review_evidence
+from .evidence_compiler import make_compiler, requested
 
 # Bound the complete review payload without trimming evidence. The old 1 Mi-character
 # cap rejected an observed 1.05M-character investigation before the critic ran.
@@ -83,11 +84,18 @@ def tool_contract(specs):
 def request_messages(question: str, draft: dict[str, Any], messages: list[dict[str, Any]], contract=None):
     evidence = review_evidence(messages)
     context = [m['content'] for m in messages if m.get('role') == 'user' and m.get('content') != question]
-    payload = canonical({'question': question, 'draft': draft, 'evidence': evidence,
-                         'tool_contract': contract or [], 'conversation_context': context})
+    value = {'question': question, 'draft': draft, 'evidence': evidence,
+             'tool_contract': contract or [], 'conversation_context': context}
+    # Review must receive every fact visible to the author. Do not apply a
+    # second display projection to already-decoded evidence or native fallback.
+    compiler = make_compiler(project_display=False) if requested() else None
+    payload = compiler.compile(value).content if compiler is not None else canonical(value)
     if len(payload) > MAX_REVIEW_CHARS:
         raise ReviewContextLimit(len(payload), MAX_REVIEW_CHARS)
-    return [{'role': 'system', 'content': REVIEW_PROMPT}, {'role': 'user', 'content': payload}], evidence
+    prompt = REVIEW_PROMPT
+    if requested():
+        prompt += '\n'+compiler.guide+'\nJSON pointers address the reconstructed ordinary JSON. Keep evidence_id from that reconstructed evidence array.\n'
+    return [{'role': 'system', 'content': prompt}, {'role': 'user', 'content': payload}], evidence
 
 
 def _pointer(value, path):

@@ -76,15 +76,17 @@ class ToolResult:
     duration_ms: float = 0.0
     observation: dict[str, Any] | None = None
     terminal: bool = False
+    model_content: str | None = field(default=None, repr=False)
+    model_view_metrics: dict[str, Any] = field(default_factory=dict)
 
-    def as_message(self) -> dict[str, Any]:
+    def as_message(self, *, content: str | None = None) -> dict[str, Any]:
         import json
 
         return {
             "role": "tool",
             "tool_call_id": self.call_id,
             "name": self.name,
-            "content": json.dumps(self.value, ensure_ascii=False, allow_nan=False, separators=(",", ":")),
+            "content": content if content is not None else self.model_content if self.model_content is not None else json.dumps(self.value, ensure_ascii=False, allow_nan=False, separators=(",", ":")),
         }
 
 

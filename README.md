@@ -1,5 +1,61 @@
 # N.E.K.O RimWorld
 
+2026-09-30 research checkpoint: the unchanged historical 30-task answers were re-evaluated under Bench's `planning/EVALUATION-PROTOCOL-v1.md`. Initial compression regressed substantially; the latest on-demand candidate restored delivery but retains two major content regressions (components omitted and toxic gas missed on an approach path). All input candidates remain opt-in/default off. Committing this checkpoint is preservation, not a release, deployment or quality certification. See Bench's `planning/HISTORICAL-QUALITY-REEVALUATION-20260930.md` and `planning/RESEARCH-RETENTION.md`.
+
+### Model evidence candidates (default off)
+
+`NEKO_EVIDENCE_COMPACT=2` (or `aggressive`) enables the experimental v2 display
+projection, structural/delta encoding and equivalent tool-schema factoring.
+Unlike mode 1 below, v2 deliberately omits selected geometric, implementation and
+full body-table details, marked `not_shown`. The decoder restores the projected
+view, not the full raw JSON. Internal business values remain unchanged; review
+uses the author's visible evidence. Exact identity-only reads retain their detail.
+
+The verified historical replay reduces cumulative public input by 65.11% across
+23 requests, including an interrupted trajectory. This is a local tokenizer
+estimate, not a quality guarantee or provider-usage certification. Autonomous
+paired validation is tracked in Bench's `planning/MODEL-INPUT-COMPILER-V2-20260929.md`.
+The 30-case real-model study is complete: public-input estimates fell 63.43%,
+while normal delivery fell from 29/30 to 23/30. Verified binding errors remain.
+The candidate is not recommended as a default. See Bench's
+`planning/MODEL-INPUT-COMPILER-V2-RESULTS-20260929.md`. No deployment or package-version promotion is implied.
+
+#### Mode 1: lossless representation
+
+`NEKO_EVIDENCE_COMPACT=1` enables an opt-in model-input compiler for semantic
+object/count/space/route reads and Activity. The default remains off pending
+autonomous model-quality validation. It adds no tool, query or model call.
+Package metadata remains 1.0.0; this is a development candidate, not a release.
+
+The compiler retains every JSON value, row order, null/false/zero, sample, scope,
+unknown and error. Repeated exact values become consultation-local shared entries;
+repeated object fields become tables with named columns. Common table values are
+explicit rather than inferred defaults. Literal marker keys are escaped, and
+audit metadata records source/view hashes; stream decoding rejects missing/replaced references. Same entity
+IDs never authorize merging different observations or actor/user contexts.
+The code-authored format guide is added once per request, not repeated per result.
+
+Internal business results and raw observations remain unchanged. Only model tool
+messages use the new view; private provider continuation and tool-call pairing are
+preserved. Review reconstructs the same visible facts and uses logical JSON
+pointers into that reconstruction; the reviewer input can also use the compiler.
+Native query/reference fallback and wiki retain their existing message formats.
+
+Enabled object/Activity/registry context limits measure a standalone compiled view
+while retaining a separate 4 Mi-character source guard (larger pre-existing custom
+tool guards remain bounded by their configured limit). The Mod's native result and
+wire limits are unchanged. Compilation cannot recover a Mod result rejected before
+delivery. The bounded report store still may omit observations at its 1 MiB limit;
+compilation does not promise an unlimited persistent evidence archive.
+
+`model_evidence_compiled` audit events and report `evidence_views` contain source/view
+hashes and character sizes. Character savings are not token savings. Bench's
+`analyze input-compaction` measures all archived requests, includes the new guide,
+verifies exact reconstruction and preserves the original call trace. It does not
+run a model or prove that the format improves answers or reaches 65% cumulative
+input reduction. Unknown formats can retain ordinary JSON; no field is dropped to
+meet a compression target.
+
 The current checkout retains the v1.6 Agent runtime and supports the v1.6.1
 query revision supplied by the Mod.
 The local Def Wiki is the v2.0 feature milestone described below; package
@@ -785,6 +841,42 @@ mechanical evidence, not a rescue planner or action runner: it does not choose a
 best actor, calculate a safety score, execute a Job, predict carry speed or claim
 that a bed predicate proves post-carry eligibility.
 # Context efficiency and optional stage review
+
+### Content-pruning candidate (`NEKO_EVIDENCE_COMPACT=3`)
+
+This opt-in replaces the v1/v2 evidence codecs with ordinary JSON. It removes
+unrequested content and duplicate copies; it has no shared-value dictionary,
+delta patches, extra planner or summary model. Modes 1/2 remain for existing
+experiments. The unset/default path is unchanged pending quality acceptance.
+
+In this mode, `look.aspects` is explicit and `state` means physical/device state.
+Pawn health, skills, work and gear use their own aspects. `focus` requests named
+skills/work types/capacities and their aspects in the same call; completeness is
+reported for that selection, with unmatched names explicit. Full body-part lists
+and implementation diagnostics are optional `include` values.
+
+With `NEKO_ACTIVITY=1` and native world support, `evaluate_activity` is the single
+public path/context matrix tool. `move` and `transfer` return paths;
+`kind=state` checks destination state for each actor/user without calculating
+paths. Names and destination selectors resolve in the call. Extra approach,
+environment, destination state and actor facts are requested in that call rather
+than always being read. `environment` is required when assessing path/corridor
+hazards; omitted environment is never evidence of safety. Native readers remain
+internal; the overlapping `inspect_space`/`inspect_route` public choices are
+removed only when this batch interface is available. Legacy connections are not
+advertised native capabilities they cannot execute.
+
+Only pure text handoff-length repairs use a small editing context containing the
+original question and saved answer. The existing detail stays saved; unsupported
+claims and other errors retain the research context. Limits are unchanged.
+
+`NEKO_PUBLIC_INPUT_TOKEN_LIMIT=<integer>` optionally limits the cumulative public
+input estimate across all requests, retries and review in one consultation.
+Admission refusal is a degraded result, not a successful answer. This counter
+excludes provider framing/private continuation and is not a billing guarantee.
+Original observations remain internal/audited; a pruned view is not a lossless
+copy of them. See the Bench content-pruning report for exact tested source and
+the separate input, delivery and factual-quality results.
 
 Runtime timing advice is sent after the stable conversation prefix. It is not
 inserted into the first system message on every request. Public observations and
