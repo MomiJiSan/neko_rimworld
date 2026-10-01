@@ -52,7 +52,7 @@ from .semantic_surface import (
     validate_detail,
     validate_metric,
 )
-from .tools import ToolExecutionError, ToolSpec
+from .tools import ToolExecutionError, ToolSpec, WORLD_OBSERVATION_VERSIONS
 from .wiki_tools import WIKI_GUIDANCE
 from .world_order import order_world_fields
 from .object_tools import ObjectReader, state_contract, extend_look_schema, OBJECT_GUIDE, observed_id_reference
@@ -177,7 +177,7 @@ class SemanticInteraction:
                 prompt += '\n\n' + query_guide(native_state=self.object_reader is not None, activity=activity)
         if not self.finalizing and "wiki" in self.original:
             prompt += "\n\n" + WIKI_GUIDANCE
-        if not self.object_reader and not self.finalizing and self.setup.directory.get("world_observation", {}).get("version") == "world_observation.v2.2":
+        if not self.object_reader and not self.finalizing and self.setup.directory.get("world_observation", {}).get("version") in WORLD_OBSERVATION_VERSIONS:
             prompt += "\nUse survey_space for a neighborhood/region, inspect_route for a path AND its environment, and inspect_state for object state/occupancy/reservations. Resolve names directly; no preliminary look is required. user is the intended user/recipient, actor performs interaction/travel. All checks are current and read-only. Distinguish target position from stopping cell, building type from settings, and existing reservations from physical occupancy. Safety conclusions require returned environmental coverage; native Danger is not comprehensive safety. Unsupported facets and hidden cells are unknown.\n"
         return prompt
 
@@ -202,7 +202,7 @@ class SemanticInteraction:
             semantic_specs.append(spatial_tool_schema(self.setup.directory))
             handlers["inspect_space"] = self.inspect_space
         world = self.setup.directory.get("world_observation", {})
-        if world.get("version") == "world_observation.v2.2":
+        if world.get("version") in WORLD_OBSERVATION_VERSIONS:
             for spec in world.get("tools", []):
                 name = spec["name"]
                 if name == "inspect_state" and self.object_reader:
@@ -237,7 +237,7 @@ class SemanticInteraction:
         passthrough = tuple(self.original[name] for name in sorted(PASSTHROUGH_TOOLS) if name in self.original)
         activity_capable = activity_enabled and self.object_reader is not None and (
             "inspect_route" in self.original and
-            self.setup.directory.get("world_observation", {}).get("version") == "world_observation.v2.2"
+            self.setup.directory.get("world_observation", {}).get("version") in WORLD_OBSERVATION_VERSIONS
         )
         if activity_capable:
             specs.append(make_activity_tool(self))
@@ -283,6 +283,14 @@ class SemanticInteraction:
                 include_objects = args.pop('include_objects', False)
                 if type(include_objects) is not bool:
                     raise SurfaceError('include_objects must be a boolean')
+                if self.setup.directory.get("world_observation", {}).get("version") == "world_observation.v2.3":
+                    # On-demand native generation: the route object listing the
+                    # model view would discard is not generated in the first
+                    # place. A continuation cursor pages object rows, so it keeps
+                    # objects requested. Environment, gases, threats, coverage
+                    # and route segments are internal forensics of every native
+                    # read and never depend on this flag.
+                    args['objects'] = bool(include_objects or 'objects' in include or args.get('cursor'))
         native = await self.execute_native(args, tool_name=operation)
         data = native.get("data")
         if not isinstance(data, dict):

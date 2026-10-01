@@ -11,6 +11,21 @@ Unresolved references distinguish missing objects from ambiguity. Health claim
 checks only hard-reject a mechanically bound subject, including a named table
 row; unbound prose remains subject to content review, not a forced extra read.
 
+### Native on-demand route objects (`world_observation.v2.3`)
+
+The plugin now accepts Mods advertising `world_observation.v2.2` or
+`world_observation.v2.3`. With `NEKO_CONTEXT_PRUNING=1` against a v2.3 Mod,
+the `inspect_route` display selection becomes a native read selection: when
+the model view would discard the incidental corridor object listing (no
+`include_objects`, no `objects` in `include`, no continuation cursor), the
+native request carries `objects:false` and the Mod skips generating those
+rows and their paging. Environment, gases, hazards, coverage and route
+segments remain internal forensics of every native read. `survey_space`
+objects stay discovery content and are never include-gated. v2.2
+connections keep the audited behavior: include selection is display-only
+and objects on/off produce the identical native request. Selective
+`evaluate_activity` route stages forward the same selection.
+
 ### Def-name recovery (`NEKO_DEF_NAME_RECOVERY=1`, opt-in)
 
 Definition selectors keep the native exact lookup as the only arbiter of

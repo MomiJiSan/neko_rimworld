@@ -9,7 +9,7 @@ import os
 from collections.abc import Callable
 from typing import Any
 
-from .agent.tools import ToolExecutionError, ToolHandler, ToolSetup, ToolSpec
+from .agent.tools import ToolExecutionError, ToolHandler, ToolSetup, ToolSpec, WORLD_OBSERVATION_VERSIONS
 from .bridge import BridgeServer
 from .observation import Observation
 
@@ -246,7 +246,7 @@ def _public_tools(catalog: dict[str, Any], public: dict[str, Any], query: ToolHa
         spatial_tools = (ToolSpec("spatial_query", capability.get("description", "Native reachability"), copy.deepcopy(capability["parameters"]), spatial),)
     world_tools = []
     world = catalog.get("world_observation")
-    if isinstance(world, dict) and world.get("version") == "world_observation.v2.2":
+    if isinstance(world, dict) and world.get("version") in WORLD_OBSERVATION_VERSIONS:
         allowed = {"survey_space", "inspect_route", "inspect_state"}
         specs = world.get("tools", [])
         if not isinstance(specs, list) or len(specs) != 3 or {s.get("name") for s in specs if isinstance(s, dict)} != allowed:

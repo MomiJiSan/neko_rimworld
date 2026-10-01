@@ -394,6 +394,12 @@ async def evaluate_activity(arguments, source: ActivityDataSource):
             def add(kind, operation, args, origin=None, target=None):
                 if selective and operation == 'inspect_route':
                     args = dict(args, margin=activity['margin'])
+                    if 'objects' in activity['include']:
+                        # The requested object listing must survive native
+                        # on-demand generation (world_observation.v2.3). On
+                        # older connections _world_read consumes the flag with
+                        # the identical full-generation request as before.
+                        args = dict(args, include_objects=True)
                     if activity.get('user'):
                         args['user'] = activity['user']
                 key = _key([operation, args])

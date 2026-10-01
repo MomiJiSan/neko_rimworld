@@ -8,7 +8,7 @@ import re
 from .query_surface import SurfaceError
 from .semantic_surface import PAWN_KINDS, THING_KINDS, ASPECTS, KINDS, supported_aspects, normalize_object, validate_aspects, validate_detail
 from .world_order import order_world_fields
-from .tools import MAX_TOOL_RESULT_CHARS
+from .tools import MAX_TOOL_RESULT_CHARS, WORLD_OBSERVATION_VERSIONS
 from .model_context import MAX_SOURCE_CHARS, canonical, model_size, enabled
 
 PHYSICAL = (*PAWN_KINDS, *THING_KINDS)
@@ -86,7 +86,7 @@ def _belongs(key, fields):
 
 def state_contract(directory):
     world = directory.get('world_observation', {})
-    if world.get('version') != 'world_observation.v2.2':
+    if world.get('version') not in WORLD_OBSERVATION_VERSIONS:
         return None
     for tool in world.get('tools', []):
         if tool.get('name') == 'inspect_state':

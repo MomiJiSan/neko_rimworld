@@ -62,6 +62,12 @@ class ToolSetup:
     knowledge_view: Any = None
 
 
+#: World observation contract versions this plugin serves. v2.3 adds the
+#: optional `objects` input (on-demand object detail; hazard/environment
+#: forensics stay unconditional). v2.2 connections keep full generation.
+WORLD_OBSERVATION_VERSIONS = frozenset({"world_observation.v2.2", "world_observation.v2.3"})
+
+
 class ToolRegistry:
     def __init__(self, *, context_pruner=None, context_enabled=None) -> None:
         self._tools: dict[str, ToolSpec] = {}
