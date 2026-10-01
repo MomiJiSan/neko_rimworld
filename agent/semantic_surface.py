@@ -1376,6 +1376,10 @@ def render(plan, native, resolution=None):
                     'path': list(issue.get('path') or [])} for issue in native.get('issues') or ()],
         'observation_id': native.get('observation_id'),
     }
+    if isinstance(resolution, dict) and 'name_resolution' in resolution:
+        # Deterministic Def-name recovery is disclosed on the delivered result:
+        # the author and review see the requested term and the canonical term.
+        out['name_resolution'] = copy.deepcopy(resolution['name_resolution'])
     if plan.metrics:
         out['measures'] = dict(result.get('aggregates') or {})
     if plan.grouping:

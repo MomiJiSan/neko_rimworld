@@ -11,6 +11,22 @@ Unresolved references distinguish missing objects from ambiguity. Health claim
 checks only hard-reject a mechanically bound subject, including a named table
 row; unbound prose remains subject to content review, not a forced extra read.
 
+### Def-name recovery (`NEKO_DEF_NAME_RECOVERY=1`, opt-in)
+
+Definition selectors keep the native exact lookup as the only arbiter of
+existence and quantity. When the local Def knowledge index is attached and
+this flag is on, a requested name that is not exact-known is normalized by
+word order/case (the mechanism ported from the 2026-10-01 feasibility audit
+controls: canonical round-trips, unique word-order hits, collision and
+incomplete-catalog refusal). A unique canonical hit is resolved within the
+same production call and disclosed on the result as `name_resolution`;
+collisions and incomplete catalogs refuse auto-selection. A name still
+missing after the native scan receives names-only `discovery` candidates
+(token hits plus bounded label containment, which covers localized colloquial
+names); candidates are never computed values and never replace the requested
+term. A stale index degrades to an ordinary honest miss. Flag unset keeps
+every lookup byte-identical; `agent/def_names.py` owns the mechanism.
+
 ### Current model context: ordinary JSON only
 
 There is one input-reduction candidate: `NEKO_CONTEXT_PRUNING=1`. It is off by

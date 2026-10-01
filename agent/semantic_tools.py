@@ -33,6 +33,8 @@ from .prompt import build_finalization_prompt, build_system_prompt
 from .query_surface import Surface, SurfaceError
 from .semantic_surface import (
     TOOL_GUIDE,
+    DEF_KINDS,
+    THING_KINDS,
     capability_values,
     apply_lookup,
     interpret_lookup,
@@ -152,6 +154,7 @@ class SemanticInteraction:
         self.object_contract = state_contract(directory)
         self.object_reader = ObjectReader(self) if self.object_contract else None
         self.spatial_supported = (directory.get("spatial_query", {}).get("version") == "spatial_query.v1" and "spatial_query" in self.original)
+        self._def_name_resolver = None
 
     # -- runtime contract -------------------------------------------------
 
@@ -336,6 +339,23 @@ class SemanticInteraction:
             pages=[copy.deepcopy(row.get("page")) for row in (payload.get("data") or {}).get("results", []) if isinstance(row, dict)],
         )
 
+    def _def_resolver(self):
+        """Optional deterministic Def-name recovery; None keeps lookups unchanged.
+
+        A broken or unavailable index degrades to no resolver: recovery is an
+        affordance, never a new failure path for ordinary lookups.
+        """
+        from .def_names import recovery_enabled
+        if not recovery_enabled():
+            return None
+        view = getattr(self.setup, 'knowledge_view', None)
+        if view is None:
+            return None
+        if self._def_name_resolver is None:
+            from .def_names import DefNameResolver
+            self._def_name_resolver = DefNameResolver.try_from_knowledge_view(view) or False
+        return self._def_name_resolver or None
+
     async def _resolve(self, obj: dict[str, Any]):
         """Resolve a name or definition, or return candidates instead of a pick.
 
@@ -350,11 +370,33 @@ class SemanticInteraction:
             if 'id' in recovered:
                 obj = {**obj, 'ids': [recovered['id']]}
                 obj.pop('names')
+        resolver = self._def_resolver()
+        name_resolution = None
+        requested_term = None
+        if (resolver is not None and isinstance(obj.get('definition'), str)
+                and obj['kind'] in DEF_KINDS + THING_KINDS):
+            requested_term = obj['definition']
+            advice = resolver.normalize(requested_term)
+            if advice['state'] == 'unique' and advice['auto_selection'] != requested_term:
+                # Deterministic word-order recovery only rewrites the requested
+                # name; the native exact lookup below stays the arbiter of what
+                # exists, so a stale index degrades to an ordinary miss.
+                name_resolution = {'requested': requested_term,
+                                   'resolved_as': advice['auto_selection'],
+                                   'method': 'token_normalization',
+                                   'catalog': resolver.source}
+                obj = {**obj, 'definition': advice['auto_selection']}
         spec = lookup_spec(self.surface, obj)
         if spec is None:
             return obj, None, None
         native = await self.execute_native(spec["request"])
         resolution = interpret_lookup(spec, native["data"])
+        if name_resolution is not None:
+            resolution['name_resolution'] = name_resolution
+        if resolver is not None and spec.get('kind') == 'definition' and resolution['status'] == 'missing_in_scope':
+            discovery = resolver.discovery(requested_term or spec['names'][0], *spec['names'])
+            if discovery is not None:
+                resolution['discovery'] = discovery
         return apply_lookup(obj, spec, resolution), resolution, native
 
     # -- tools ------------------------------------------------------------

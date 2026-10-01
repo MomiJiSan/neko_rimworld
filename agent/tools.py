@@ -56,6 +56,10 @@ class ToolSetup:
     references_supported: bool = False
     directory: dict[str, Any] | None = None
     context_blocks: tuple[tuple[str, str], ...] = ()
+    #: Ready immutable Def-knowledge view for this consultation, attached by
+    #: compose_wiki_tools. Consumers (wiki tool, Def-name recovery) share one
+    #: frozen snapshot; None keeps every lookup on the native exact path.
+    knowledge_view: Any = None
 
 
 class ToolRegistry:

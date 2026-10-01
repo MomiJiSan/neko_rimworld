@@ -342,5 +342,6 @@ def compose_wiki_tools(setup: ToolSetup, library: KnowledgeLibrary) -> ToolSetup
     if view is None:
         return setup
     return replace(setup, tools=(*setup.tools, make_wiki_tool(WikiStore(view))),
+                   knowledge_view=view,
                    context=setup.context + "\n\n" + WIKI_GUIDANCE,
                    context_blocks=(*setup.context_blocks, ("wiki", WIKI_GUIDANCE)))
