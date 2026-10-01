@@ -55,8 +55,8 @@ OBJECT_SELECTORS = {
     'colonists': ('ids', 'names', 'map'),
     'thing': ('ids', 'names', 'map'),
     'things': ('ids', 'names', 'definition', 'category', 'map', 'include_held', 'include_fogged', 'capabilities'),
-    'thing_def': ('definition',),
-    'thing_defs': ('definition', 'category'),
+    'thing_def': ('definition', 'include_held', 'include_fogged'),
+    'thing_defs': ('definition', 'category', 'include_held', 'include_fogged'),
 }
 # 主语寻址：不管模型要哪个 aspect，事实都必须能说清楚"这是谁/这是哪个"。
 # 少了这一层，就会出现「数字读对了、但没说清主语」的典型失败。
@@ -236,13 +236,11 @@ def _object_schema(directory=None):
             'category': {'type': 'string', 'description': 'For things: native broad ThingCategory kind (e.g. Item, Building), not a gameplay use such as medicine. For thing_defs: exact ThingCategoryDef content-category name. These are distinct domains.'},
             'map': {'type': 'string', 'default': 'current', 'description': 'Loaded map ID or current. For kind map this selects the map itself (alias for id); for Pawn/Thing populations it restricts their map scope.'},
             'include_held': {'type': 'boolean', 'default': True,
-                             'description': 'true = also count/count things inside holders (inventory, containers, equipment). '
-                                            'false = only things spawned on the map. The question "including what people carry" '
-                                            'requires true; the default is true, so only pass false when the caller explicitly '
-                                            'asks for ground/map objects alone.'},
+                             'description': 'true includes holder contents (inventory, containers, equipment); false keeps spawned map Things. '
+                                            'Default true; use false only for caller-requested ground/map scope. Ignored for definition kinds.'},
             'include_fogged': {'type': 'boolean', 'default': True,
-                               'description': 'true = also include things under fog of war. false = only currently visible things. '
-                                              'The default is true, so only pass false when the caller explicitly asks for what is visible.'},
+                               'description': 'true includes fogged Things; false keeps visible Things. '
+                                              'Default true; use false only for caller-requested visible scope. Ignored for definition kinds.'},
         },
         'required': ['kind'],
         'additionalProperties': False,
@@ -454,7 +452,10 @@ def normalize_object(raw):
         if key in raw:
             if type(raw[key]) is not bool:
                 raise SurfaceError(key + ' must be a boolean')
-            obj[key] = raw[key]
+            # Definitions have no instances, holders or fog state. Accept an
+            # otherwise valid shared selector without inventing a Def scope.
+            if kind not in DEF_KINDS:
+                obj[key] = raw[key]
     if kind == 'map' and 'map' in obj and ('ids' in obj or 'names' in obj):
         raise SurfaceError('map reads one map: use map, id/ids, or name/names, not competing selectors')
     if 'ids' in obj and ('definition' in obj or 'category' in obj):

@@ -579,6 +579,12 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
                     values = pawn.get(field)
                     if not isinstance(values, list):
                         continue
+                    # Newer native state replies explicitly mark the complete
+                    # hediff listing. Preserve that fact in the normalized
+                    # evidence index instead of downgrading it to the legacy
+                    # visible-only default.
+                    if field == "conditions" and pawn.get("conditions_complete") is True:
+                        options = {"visible_only": False}
                     normalized[parent][field] = {
                         "rows": [{("def_name" if key == "definition" else key): value for key, value in row.items()}
                                  for row in values if isinstance(row, Mapping)],
@@ -879,6 +885,26 @@ def _identity_evidence(index: Mapping[str, Any], evidence: Sequence[str],
                for subject in subjects)
 
 
+def _health_evidence(index, evidence, text, hit):
+    """Hard-check only a resolvable health subject, including a named table row."""
+    start, _ = _clause_span(text, hit.start())
+    prefix = text[start:hit.start()].strip()
+    # This is affirmative, unlike '不可断言'. Keep its existing evidence check.
+    prefix = re.sub(r'^不可否认\s*', '', prefix)
+    row_start = text.rfind('\n', 0, hit.start()) + 1
+    row = text[row_start:text.find('\n', hit.start()) if '\n' in text[hit.start():] else len(text)]
+    if row.lstrip().startswith('|'):
+        # Do not borrow an arbitrary name elsewhere in the report. A Markdown
+        # row with one exact subject cell is an explicit local binding.
+        prefix = row.strip().split('|')[1].strip()
+    prefix = re.sub(r'(?:目前|当前|现在)?(?:都是|均为|是|为)\s*$', '', prefix).strip()
+    if prefix in {'他', '她', '它', '他们', '她们', '它们', '该对象', '自身'}:
+        return None
+    rebound = prefix + ' ' + hit.group(0)
+    rebound_hit = re.compile(re.escape(hit.group(0))).search(rebound, len(prefix))
+    return _identity_evidence(index, evidence, rebound, rebound_hit)
+
+
 def _cited_numbers(clause: str) -> set[int]:
     r"""子句里真正作为测量被写出来的数字。
 
@@ -1007,6 +1033,10 @@ def check_claims(answer, detail=None, *, observations=(),
                     supported = _identity_evidence(idx, claim["evidence"], text, hit)
                     if supported is not False:
                         continue  # unsupported grammar is not proof of missing evidence
+                elif claim["code"] == "health_completeness_claim":
+                    supported = _health_evidence(idx, claim['evidence'], text, hit)
+                    if supported is not False:
+                        continue  # uncertain pronouns/prose must not force another read
                 elif not claim.get("always_reject") and _evidence_present(idx, claim["evidence"] or (), text[start:end]):
                     continue
                 current.append(dict(code=claim["code"], label=claim["label"],

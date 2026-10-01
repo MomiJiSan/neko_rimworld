@@ -366,8 +366,6 @@ class SubmissionDraft:
                 {"saved_fields": self.snapshot()["saved_fields"]},
             )
         previous_answer = self.answer
-        length_only_repair = (set(self.errors) == {"delivery"}
-                              and self.errors["delivery"].get("code") in {"handoff_over_budget", "handoff_transport_over_budget"})
         changed = set()
         for key in ("language", "answer", "detail"):
             if key not in patch:
@@ -388,14 +386,15 @@ class SubmissionDraft:
                 self.errors.pop(key, None)
             except (HandoffValidationError, EvidenceError, TypeError) as error:
                 self.errors[key] = {"code": getattr(error, "code", "invalid_evidence"), "message": str(error)}
-        # An overlength conclusion may be shortened without re-sending its saved
-        # report. Changing referenced evidence must still reconfirm the analysis.
+        # Text edits retain the saved report; checking prose consistency belongs
+        # to the author/review. Only a changed explicit evidence dependency needs
+        # reconfirmation, rather than treating every text edit as a new conclusion.
         same_references = ([p for p in previous_answer if "text" not in p]
                            == [p for p in self.answer if "text" not in p])
         if ("answer" in changed and previous_answer and self.detail is not None and "detail" not in patch
-                and not (length_only_repair and same_references)):
+                and not same_references):
             self.errors["detail"] = {"code": "submission_requires_confirmation",
-                                     "message": "Report conclusions or evidence changed; update or reconfirm the matching detail. Length-only repairs retain it automatically."}
+                                     "message": "Referenced evidence changed; update or reconfirm the matching detail."}
         if changed:
             self.revision += 1
         self.errors.pop("delivery", None)

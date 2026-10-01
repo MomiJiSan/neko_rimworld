@@ -1,5 +1,16 @@
 # N.E.K.O RimWorld
 
+### Interaction contracts
+
+The 180-token conclusion limit remains mandatory. Text-only answer edits retain
+saved detail; changing explicit observation references still requires matching
+detail. Definition selectors accept boolean held/fog flags as inapplicable and
+remove them before native reads. A physical ID already observed in this run can
+be recovered from `name`, preserving map scope and refusing name collisions.
+Unresolved references distinguish missing objects from ambiguity. Health claim
+checks only hard-reject a mechanically bound subject, including a named table
+row; unbound prose remains subject to content review, not a forced extra read.
+
 ### Current model context: ordinary JSON only
 
 There is one input-reduction candidate: `NEKO_CONTEXT_PRUNING=1`. It is off by

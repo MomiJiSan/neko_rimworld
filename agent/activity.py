@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import re
 from collections.abc import Mapping
 from typing import Protocol
 
@@ -18,6 +19,17 @@ from .model_context import MAX_SOURCE_CHARS, model_size, enabled
 
 MAX_ACTORS, MAX_DESTINATIONS, MAX_PAIRS = 4, 8, 16
 ROUTE_METRICS = ("steps", "path_length", "native_cost")
+
+
+def _looks_like_native_id(value, kind):
+    """Recognize explicit RimWorld ID shapes without guessing display names."""
+    if not isinstance(value, str) or not value or not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+", value):
+        return False
+    if kind == "pawn":
+        return value.startswith(("Thing_", "Pawn_"))
+    if kind == "thing":
+        return value.startswith(("Thing_", "Building_", "Plant_", "Apparel_", "Weapon_"))
+    return kind == "cell" and value.startswith("Cell_")
 
 
 def _key(value):
@@ -170,10 +182,15 @@ class SemanticActivityDataSource:
         return dict(kind=kind, id=obj["id"], map=map_id)
 
     async def _resolve(self, ref, role):
+        from .object_tools import observed_id_reference
+        ref = observed_id_reference(ref, getattr(getattr(self.interaction, 'session', None), 'observations', ()))
         # IDs/cells are native references, not discovery queries. Preserve the
         # caller's map default; do not replace it with another role's map.
         if "id" in ref or ref["kind"] == "cell":
             return copy.deepcopy(ref)
+        name = ref.get("name")
+        if _looks_like_native_id(name, ref["kind"]):
+            return {key: value for key, value in ref.items() if key != "name"} | {"id": name}
         request = dict(targets=[ref], sections=["identity"], exact_lookup=True)
         try:
             native = await self.interaction.execute_native(request, tool_name="inspect_state")
@@ -184,8 +201,13 @@ class SemanticActivityDataSource:
         data = native.get("data") or {}
         rows = data.get("objects", [])
         if native.get("status") != "ok" or len(rows) != 1 or not rows[0].get("target", {}).get("id"):
-            raise ToolExecutionError("activity_reference_unresolved", "Choose an exact ID from the returned candidates; do not repeat the same ambiguous name.",
-                                     details={"role": role, "reference": ref, "resolution": data.get("resolution"),
+            resolution = data.get('resolution') or next((row.get('resolution') for row in rows
+                if isinstance(row, dict) and row.get('resolution')), None)
+            ambiguous = (resolution or {}).get('status') == 'ambiguous'
+            message = ("Choose an exact ID from the returned candidates; the name is ambiguous."
+                       if ambiguous else "Reference was not resolved in the requested map. Use an exact object name or ID; inspect the returned reason.")
+            raise ToolExecutionError("activity_reference_unresolved", message,
+                                     details={"role": role, "reference": ref, "resolution": resolution,
                                               "objects": rows, "issues": native.get("issues", [])})
         return self._identity(rows[0]["target"], ref["kind"])
 

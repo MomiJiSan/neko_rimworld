@@ -53,7 +53,7 @@ from .semantic_surface import (
 from .tools import ToolExecutionError, ToolSpec
 from .wiki_tools import WIKI_GUIDANCE
 from .world_order import order_world_fields
-from .object_tools import ObjectReader, state_contract, extend_look_schema, OBJECT_GUIDE
+from .object_tools import ObjectReader, state_contract, extend_look_schema, OBJECT_GUIDE, observed_id_reference
 from .activity import make_activity_tool
 
 # Only this explicitly approved non-observation tool survives the adapter.
@@ -342,6 +342,14 @@ class SemanticInteraction:
         An ambiguous or incomplete lookup must never silently choose one object:
         the caller gets the candidates and the scope that produced them.
         """
+        if obj.get('kind') in ('pawn', 'thing') and len(obj.get('names', [])) == 1:
+            reference = {'kind': obj['kind'], 'name': obj['names'][0]}
+            if 'map' in obj:
+                reference['map'] = obj['map']
+            recovered = observed_id_reference(reference, self.session.observations)
+            if 'id' in recovered:
+                obj = {**obj, 'ids': [recovered['id']]}
+                obj.pop('names')
         spec = lookup_spec(self.surface, obj)
         if spec is None:
             return obj, None, None

@@ -19,7 +19,7 @@ OBJECT_GUIDE = (
     'look defaults to current state for physical objects/cells; request selected aspects for small reads, '
     'and stats for exact game-computed attributes. An unknown StatDef may return native discovery matches; these are names, not computed values or automatic replacements. '
     'actor interacts/travels, user receives/uses. Use health.capacities for Pawn capacities, not guessed StatDef names. '
-    'Resolve names directly; stable IDs belong in id/ids, never name/names. No preliminary ID lookup is required. '
+    'Resolve names directly; prefer id/ids for stable IDs. An exact ID already observed in this run can be normalized from name. No preliminary ID lookup is required. '
     'include_held/include_fogged retain their inclusive polarity and scope defaults. '
     'object.location.position is the canonical own-position cell; held_position is separate. A null location is not proof that the object is absent; retain its applicability and coverage. '
     'Use wiki for definition names/types when available; definition knowledge is not a current actor value. '
@@ -30,6 +30,55 @@ OBJECT_GUIDE = (
 )
 STATE_ASPECTS = ('state', 'health', 'skills', 'gear', 'work')
 GEAR_FIELDS = ('carried', 'equipment', 'apparel', 'inventory')
+
+
+def observed_id_reference(reference, observations):
+    """Recover a known physical ID without guessing from its spelling or reading again."""
+    if not isinstance(reference, dict) or 'name' not in reference or set(reference) & {'id', 'ids', 'names'}:
+        return reference
+    term, kind = reference['name'], reference.get('kind')
+    if kind not in ('pawn', 'thing') or not isinstance(term, str):
+        return reference
+    matches, conflicting_names = set(), set()
+
+    def visit(value, population=None):
+        if isinstance(value, dict):
+            root = value.get('from')
+            if root in ('pawn', 'pawns', 'spawned_free_colonists'):
+                population = 'pawn'
+            elif root in ('thing', 'things'):
+                population = 'thing'
+            observed_kind = value.get('kind')
+            if observed_kind not in ('pawn', 'thing'):
+                observed_kind = ('pawn' if value.get('runtime_type') == 'Verse.Pawn'
+                                 else population)
+            held_map = value.get('map_held')
+            map_id = value.get('map_id') or value.get('map') or (held_map.get('id') if isinstance(held_map, dict) else None)
+            requested_map = reference.get('map')
+            in_scope = isinstance(map_id, str) and (requested_map in (None, 'current', map_id))
+            ident = value.get('id')
+            if observed_kind == kind and isinstance(ident, str) and in_scope:
+                if ident == term:
+                    matches.add((ident, map_id))
+                if term in (value.get('name'), value.get('label')) and ident != term:
+                    conflicting_names.add(ident)
+            for key, child in value.items():
+                if key not in ('request', 'requested_target'):
+                    visit(child, population)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                visit(child, population)
+
+    for observation in observations:
+        response = observation.get('response', {}) if isinstance(observation, dict) else {}
+        payload = response.get('payload', {})
+        if payload.get('status') in ('ok', 'partial'):
+            visit(payload.get('data'))
+    if len(matches) != 1 or conflicting_names:
+        return reference
+    result = copy.deepcopy(reference)
+    result['id'] = result.pop('name')
+    return result
 
 def _belongs(key, fields):
     return any(key == field or key.startswith(field + '_') for field in fields)
@@ -59,7 +108,7 @@ def extend_look_schema(spec, contract):
         'Other aspects retain biography, mood, resources and definition facts. '
         'Use stats for exact game-computed StatDefs. actor performs interaction/travel; user is '
         'the intended recipient; omitted actor defaults to user. Context checks are observations, not action eligibility guarantees. '
-        'Resolve names directly; stable IDs belong in id/ids, not name/names. Do not look up IDs first. '
+        'Resolve names directly; prefer id/ids for stable IDs. Already observed IDs can be normalized from name. Do not look up IDs first. '
         'object.location gives canonical position and held_position cells without removing legacy fields. '
         'Unknown StatDefs may provide discovery.matches and matching_definition_kind; names are not computed values. '
         'Scope, coverage and unavailable facts are explicit.'
@@ -127,8 +176,18 @@ class ObjectReader:
             # these controls here so page fitting uses the requested model view.
         raw_object = args['object']
         kind = raw_object.get('kind')
+        if kind in ('pawn', 'thing'):
+            raw_object = observed_id_reference(raw_object, getattr(getattr(self.interaction, 'session', None), 'observations', ()))
         cell = kind == 'cell'
         obj = copy.deepcopy(raw_object) if cell else normalize_object(raw_object)
+        if kind in ('pawn', 'thing') and len(obj.get('names', [])) == 1:
+            reference = {'kind': kind, 'name': obj['names'][0]}
+            if 'map' in obj:
+                reference['map'] = obj['map']
+            recovered = observed_id_reference(reference, getattr(getattr(self.interaction, 'session', None), 'observations', ()))
+            if 'id' in recovered:
+                obj['ids'] = [recovered['id']]
+                obj.pop('names')
         aspects = args.get('aspects', ['state'] if kind in PHYSICAL or cell else ['identity'])
         if not isinstance(aspects,list) or not aspects or any(not isinstance(a,str) for a in aspects):
             raise SurfaceError('aspects must be a nonempty string array')
@@ -216,7 +275,7 @@ class ObjectReader:
                 if key in args:request[key] = copy.deepcopy(args[key])
             native = await self.interaction.execute_native(request,tool_name='inspect_state')
             data = order_world_fields(native['data'])
-            base['state_observations'].append({'observation_id':native['observation_id'],'sample':data.get('sample'), 'status':native['status'],'context':data.get('context'),'issues':native.get('issues',[]),'read_error':data.get('read_error'),'changed_during_read':data.get('changed_during_read',False)})
+            base['state_observations'].append({'observation_id':native.get('observation_id') or data.get('observation_id'), 'sample':data.get('sample'), 'status':native.get('status'),'context':data.get('context'),'issues':native.get('issues',[]),'read_error':data.get('read_error'),'changed_during_read':data.get('changed_during_read',False)})
             if native['status'] != 'ok':base['status'] = 'partial'
             rows = data.get('objects',[])
             if len(rows) > len(batch) or native['status'] == 'ok' and len(rows) != len(batch):
@@ -226,7 +285,7 @@ class ObjectReader:
                 base['state_failure'] = {key:copy.deepcopy(data[key]) for key in ('read_error','resolution','changed_during_read') if key in data}
                 rows = [*rows, *({'status':'unavailable','reason':'state_read_incomplete','requested_target':target} for target in targets[len(rows):])]
             for item,row in zip(batch,rows):
-                item['state_sample'] = {'tick':row.get('sample_tick'),'observation_id':native['observation_id']}
+                item['state_sample'] = {'tick':row.get('sample_tick'),'observation_id':native.get('observation_id') or data.get('observation_id')}
                 if row.get('status') in ('unavailable','unsupported') or 'facets' not in row and not cell:
                     item['state'] = copy.deepcopy(row)
                     if direct and obj.get('names') and re.fullmatch(r'Thing_[A-Za-z0-9_]+\d+', obj['names'][0]):
@@ -347,7 +406,8 @@ class ObjectReader:
     @staticmethod
     def _identity(native):
         identity = copy.deepcopy(native)
-        identity['definition'] = {'def_name':native['definition'],'label':native.get('definition_label')}
+        definition = native.get('definition')
+        identity['definition'] = {'def_name':definition,'label':native.get('definition_label')}
         identity['map_id'] = native.get('map')
         identity['map_held'] = {'id':native['map']} if native.get('map') else None
         membership = native.get('pawn_membership') or {}
