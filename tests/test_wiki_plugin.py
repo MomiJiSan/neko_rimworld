@@ -1,4 +1,4 @@
-"""Composition for offline, old-Mod and native/semantic fallback paths."""
+"""Composition for offline, public-query and native semantic paths."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from plugin.plugins.neko_rimworld.knowledge import KnowledgeLibrary
 from plugin.plugins.neko_rimworld.query_tools import make_game_tools
 from plugin.plugins.neko_rimworld.reports import ReportStore
 
-from .test_semantic_tools import _noop_query, catalog, setup_for
+from .test_semantic_tools import _noop_query, public_source, setup_for
 from .test_wiki_tools import write_snapshot
 
 
@@ -28,11 +28,11 @@ def library(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["offline", "legacy", "native"])
+@pytest.mark.parametrize("mode", ["offline", "public", "native"])
 async def test_provider_composes_wiki_without_losing_original_setup(tmp_path, mode, library):
     original = {
         "offline": ToolSetup((), "offline"),
-        "legacy": make_game_tools(catalog(), _noop_query),
+        "public": make_game_tools(public_source(), _noop_query),
         "native": setup_for(),
     }[mode]
 

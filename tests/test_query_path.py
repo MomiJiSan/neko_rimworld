@@ -99,10 +99,9 @@ async def test_arbitrary_tool_and_multiple_observations_survive_model_and_audit(
                 value = json.loads(message["content"])["data"]["response"]["payload"]["data"]
                 assert value["future_list"][-1] == {"id": 699, "value": None}
                 assert value["nested"] == nested
-            return AssistantTurn("r", "m", "stop", "The requested observation is available.")
+            return AssistantTurn("r", "m", "tool_calls", "", (ToolCall("submit", "submit_response", json.dumps({"answer": "The requested observation is available."})),))
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # Explicit legacy natural-text completion fixture.
         observation_tools=[ToolSpec("future_reader", "test", {"type": "object"}, handler)],
         audit_registry=registry,
         logger=FakeLogger(),

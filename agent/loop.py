@@ -10,12 +10,10 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 
 from .audit import AgentAuditCapacityError, AgentAuditLedger, AgentAuditRegistry, AgentRunState
-from .contracts import PreparedToolCall, ToolCall
+from .contracts import PreparedToolCall
 from .execution_environment import ExecutionEnvironment
 from .handoff import (
-    HandoffValidationError,
     attach_agent_handoff,
-    count_handoff_tokens,
     make_submission_tool,
 )
 from .model_client import AgentModelSettings, ModelClient, OpenAICompatibleModelClient
@@ -49,15 +47,11 @@ class AgentRuntime:
         tools_provider: Callable[[], Awaitable[ToolSetup]] | None = None,
         report_sink: Callable[[Mapping[str, Any]], Awaitable[Mapping[str, Any]]] | None = None,
         interaction_factory: Callable[..., Any] | None = None,
-        prepared_calls: tuple[ToolCall, ...] = (),
-        allow_text_completion: bool = False,
     ) -> None:
         self._observation_tools = tuple(observation_tools)
         self._tools_provider = tools_provider
         self._report_sink = report_sink
         self._interaction_factory = interaction_factory
-        self._prepared_calls = prepared_calls
-        self._allow_text_completion = allow_text_completion
         self._audit_registry = audit_registry
         self._logger = logger
         self._model_factory = model_factory or OpenAICompatibleModelClient
@@ -332,39 +326,9 @@ class AgentRuntime:
             session,
             submission_updated,
             interaction_factory=self._interaction_factory,
-            reference_report=reference_report,
             registry_factory=ToolRegistry,
         )
         tools = environment.registry()
-
-        # Prepared-evidence experiments cross the same production tool/result interface.
-        # The injected calls are explicit study inputs, not model-generated calls.
-        if self._prepared_calls:
-            for call in self._prepared_calls:
-                if session.interaction is not None:
-                    tools = ToolRegistry(
-                        context_pruner=session.context_pruner,
-                        context_enabled=session.context_pruner is not None,
-                    )
-                    specs = {spec.name: spec for spec in (*setup.tools, *session.interaction.tools())}
-                    for spec in specs.values():
-                        tools.register(spec)
-                if tools.is_terminal(call.name):
-                    raise ValueError("Prepared calls cannot finish an episode")
-                session.messages.append({"role": "assistant", "content": None, "tool_calls": [call.as_message_value()]})
-                prepared = tools.prepare(call)
-                result = await tools.execute(prepared) if isinstance(prepared, PreparedToolCall) else prepared
-                if not result.ok or (result.observation is None and session.interaction is None):
-                    raise ValueError(
-                        "Prepared calls must succeed; non-observations require an experimental interaction"
-                    )
-                if result.observation is not None:
-                    session.observations.append(result.observation)
-                session.append_tool_message(session.tool_message(result))
-                ledger.record(
-                    "prepared_observation" if result.observation is not None else "prepared_interaction",
-                    {"name": call.name, "result": result.value},
-                )
 
         reference_warning = ""
         if reference_report is not None:
@@ -657,56 +621,10 @@ class AgentRuntime:
                 continue
 
             if turn.content:
-                if session.interaction is not None:
-                    try:
-                        final = session.interaction.accept_text(turn.content, turn.finish_reason)
-                    except HandoffValidationError as exception:
-                        session.append_recovery(str(exception))
-                        ledger.record("final_text_rejected", {"error_code": exception.code, "message": str(exception)})
-                        continue
-                    if final is not None:
-                        completed = await self._complete_submission(
-                            question, settings, ledger, session, final, submission_mode="natural"
-                        )
-                        if completed is not None:
-                            return completed
-                        continue
-                if not self._allow_text_completion:
-                    session.append_recovery(
-                        "The consultation is not submitted. Continue any necessary research, then finish through submit_response. Ordinary assistant text does not complete this request."
-                    )
-                    ledger.record("explicit_submission_required", {"finish_reason": turn.finish_reason})
-                    continue
-                has_full = session.submission.full_text is not None
-                patch = (
-                    {"answer": [{"text": turn.content}]}
-                    if count_handoff_tokens(turn.content)[0] <= 180
-                    else {"detail": turn.content}
+                session.append_recovery(
+                    "The consultation is not submitted. Continue any necessary research, then finish through submit_response. Ordinary assistant text does not complete this request."
                 )
-                try:
-                    validated = session.submission.apply(
-                        patch, observations=session.observations, references_supported=setup.references_supported
-                    )
-                    ledger.set_draft(session.submission.snapshot())
-                except HandoffValidationError as exception:
-                    ledger.set_draft(session.submission.snapshot())
-                    session.append_recovery(
-                        "Your submission requires correction: "
-                        + str(exception)
-                        + " Use submit_response with only required/changed fields; valid saved fields will be reused."
-                    )
-                    ledger.record("final_text_rejected", {"error_code": exception.code, "message": str(exception)})
-                    continue
-                completed = await self._complete_submission(
-                    question,
-                    settings,
-                    ledger,
-                    session,
-                    validated,
-                    submission_mode="text_repair" if has_full else "text_fallback",
-                )
-                if completed is not None:
-                    return completed
+                ledger.record("explicit_submission_required", {"finish_reason": turn.finish_reason})
                 continue
 
             recovery = (

@@ -129,22 +129,6 @@ class WorkReadings:
         return result
 
 
-OBJECT_GUIDE = (
-    "Use look for object facts and count for population quantities/grouping. "
-    "look accepts the same object selectors; capabilities on things matches any listed native capability, "
-    "intersected with other selectors. Identity discovery does not scan environment. "
-    "look defaults to current state for physical objects/cells; request selected aspects for small reads, "
-    "and stats for exact game-computed attributes. An unknown StatDef may return native discovery matches; these are names, not computed values or automatic replacements. "
-    "actor interacts/travels, user receives/uses. Use health.capacities for Pawn capacities, not guessed StatDef names. "
-    "Resolve names directly; prefer id/ids for stable IDs. An exact ID already observed in this run can be normalized from name. No preliminary ID lookup is required. "
-    "include_held/include_fogged retain their inclusive polarity and scope defaults. "
-    "object.location.position is the canonical own-position cell; held_position is separate. A null location is not proof that the object is absent; retain its applicability and coverage. "
-    "Use wiki for definition names/types when available; definition knowledge is not a current actor value. "
-    "survey_space reads region and environment; inspect_route reads path and environment; "
-    "inspect_space remains the lightweight reachability/path-ranking tool. "
-    "Read per-observation scope, coverage and unknowns. Neither occupancy nor reservation "
-    "is a complete action check; native Danger is not overall safety."
-)
 STATE_ASPECTS = ("state", "health", "skills", "gear", "work")
 STATE_FACETS = ("condition", "reservations", "containment", "bed", "door", "production", "plant", "turret", "trap", "storage", "construction", "power", "fuel", "battery", "temperature_control", "ammunition", "breakdown", "switch", "rot", "manning", "explosive", "environment")
 GEAR_FIELDS = ("carried", "equipment", "apparel", "inventory")

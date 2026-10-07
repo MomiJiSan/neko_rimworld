@@ -49,18 +49,6 @@ async def test_progress_text_is_not_a_successful_submission():
     assert any(e["event"] == "explicit_submission_required" for e in registry.snapshot()["latest_run"]["events"])
 
 
-@pytest.mark.asyncio
-async def test_legacy_text_completion_requires_explicit_opt_in():
-    model = Script([AssistantTurn("offline", "offline", "stop", "A legacy text report.")])
-    runtime = AgentRuntime(
-        observation_tools=[],
-        audit_registry=AgentAuditRegistry(),
-        logger=LOG,
-        model_factory=lambda _: model,
-        allow_text_completion=True,
-    )
-    result = await runtime.run("Legacy task.", settings())
-    assert result["status"] == "ok" and result["submission_mode"] == "text_fallback"
 
 
 @pytest.mark.asyncio

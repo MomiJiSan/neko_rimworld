@@ -19,7 +19,6 @@ import copy
 import json
 from dataclasses import dataclass, field
 
-from .prompt import PLAIN_FINISH_GUIDANCE
 from .query_surface import SurfaceError
 
 # --- 封闭枚举 -----------------------------------------------------------------
@@ -224,37 +223,10 @@ SEMANTICS = {
 # 接口说明：只说工具怎么用，不包含语义提醒。
 # study 臂在共享的 Architecture prompt 前缀之后只接这一段——语义提醒由工具结果内联给出，
 # 不靠额外提示词奖励，否则就不是接口对比而是提示词对比了。
-TOOL_GUIDE = (
-    "Read-only game evidence through two semantic tools. You never write field names, paths or native "
-    "arguments; the program routes kind/aspects/metric/by to the native query.\n"
-    "look(object, aspects, detail?) reads facts about one object or a population; aspects are a closed set: "
-    "identity, health, skills, gear, work, mood, profile, resources, quantity, distribution.\n"
-    "count(object, metric, by?, detail?) measures a population: metric units sums stack_count, records counts "
-    "objects; by groups the result.\n"
-    "object selectors are closed: kind, exact name/names or ids, exact definition, category, and scope map "
-    "(default current), include_held (default true = also count things inside holders), include_fogged (default true = also "
-    "include things under fog). Both flags are the same polarity: true means more inclusive, false means narrower. An exact display name that "
-    "matches more than one object returns candidates; never assume one.\n"
-    "detail is the number of detail rows: 0 means counts only. With by given, detail caps the listed groups "
-    "(0 = all groups up to the display bound).\n"
-    "Every result states scope, coverage and not_read plainly. Read them before interpreting facts."
-)
 
 # 独立使用（不挂 Architecture）时的语义提醒。
-SEMANTIC_REMINDERS = (
-    "Unknown is not zero or empty; containment is not ownership; Pawn includes humans, animals and "
-    'mechanoids. health_percent cannot be read as "fully healthy". An incomplete scan is a lower bound, '
-    "not a total."
-)
 
-INTRO = (
-    TOOL_GUIDE
-    + "\n"
-    + SEMANTIC_REMINDERS
-    + "\nFinish with submit_response. Do not invent facts the tools did not return."
-)
 
-FINISH = PLAIN_FINISH_GUIDANCE
 
 
 # --- schema -------------------------------------------------------------------

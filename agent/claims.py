@@ -390,16 +390,6 @@ def _hit_is_negated(text: str, hit: re.Match[str], index: Mapping[str, Any] | No
     return bool(NEGATED_VERB_PREFIX.search(stripped))
 
 
-def _all_negated(text: str, pattern: str) -> bool:
-    """该模式的每一处出现都在否定/疑问语境里 → 视为没有做这个断言。
-
-    只要求“存在一处未被否定的出现”就判定为断言，因此偏向“宁漏不误杀”——
-    误杀会挡掉正确回答，代价更高。
-    """
-    hits = list(re.finditer(pattern, text))
-    if not hits:
-        return False
-    return all(_hit_is_negated(text, hit) for hit in hits)
 
 
 # ---------------------------------------------------------------------------

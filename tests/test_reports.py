@@ -9,7 +9,7 @@ from plugin.plugins.neko_rimworld.agent import AgentAuditRegistry, AgentRuntime,
 from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft, SubmissionPatchError, count_handoff_tokens
 from plugin.plugins.neko_rimworld.reports import ReportError, ReportStore
 
-from .test_agent import FakeLogger, ScriptedModel, query_tool, settings, turn
+from .test_agent import submitted_turn, FakeLogger, ScriptedModel, query_tool, settings, turn
 from .test_plugin import make_plugin
 
 
@@ -160,7 +160,6 @@ def runtime_for(model, store):
         return store.save(value)
 
     return AgentRuntime(
-        allow_text_completion=True,  # Explicit legacy natural-text completion fixture.
         observation_tools=[query_tool(unused)],
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),
@@ -170,14 +169,14 @@ def runtime_for(model, store):
 
 
 @pytest.mark.asyncio
-async def test_runtime_saves_long_plain_body_then_accepts_short_plain_repair():
+async def test_runtime_saves_detail_then_accepts_explicit_short_answer():
     body = "完整报告与调查细节。" * 100
-    model = ScriptedModel([turn(body), turn("简短交接。")])
+    model = ScriptedModel([submitted_turn(body), submitted_turn("简短交接。")])
     store = ReportStore()
     result = await runtime_for(model, store).run("Detailed report", settings())
     assert result["answer"] == "简短交接。\n\n" + body
     assert result["summary"] == "简短交接。"
-    assert result["delivery"]["submission_mode"] == "text_repair"
+    assert result["delivery"]["submission_mode"] == "submit_response"
     assert store.read(result["report"]["report_id"])["state"] == "complete"
 
 
@@ -231,7 +230,7 @@ async def test_explicit_reference_and_evidence_are_historical_not_live():
         created_at="2026-01-01", observations=[{"request": {"operation": "old query"}, "response": {"game_tick": 12}}]
     )
     model = ScriptedModel(
-        [turn("", ToolCall("1", "read_report_evidence", '{"index":0}')), turn("Historical explanation")]
+        [turn("", ToolCall("1", "read_report_evidence", '{"index":0}')), submitted_turn("Historical explanation")]
     )
     store = ReportStore()
     result = await runtime_for(model, store).run("Explain old report", settings(), reference_report=reference)
@@ -240,7 +239,7 @@ async def test_explicit_reference_and_evidence_are_historical_not_live():
     assert result["observations"] == []
     assert result["freshness"] is None
     assert store.read(result["report"]["report_id"])["reference_report_id"] == reference["report_id"]
-    fresh = ScriptedModel([turn("Fresh")])
+    fresh = ScriptedModel([submitted_turn("Fresh")])
     await runtime_for(fresh, store).run("Fresh", settings())
     assert "A full historical report." not in str(fresh.requests[0])
 
@@ -273,9 +272,8 @@ async def test_report_storage_failure_keeps_complete_result():
     async def fail_save(_record):
         raise OSError("Storage unavailable")
 
-    model = ScriptedModel([turn("Complete answer")])
+    model = ScriptedModel([submitted_turn("Complete answer")])
     runtime = AgentRuntime(
-        allow_text_completion=True,  # Explicit legacy natural-text completion fixture.
         observation_tools=[query_tool(unused)],
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),

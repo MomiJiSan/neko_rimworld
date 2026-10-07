@@ -9,7 +9,7 @@ The selected baseline is `v3-subtraction30-20261007-v3`: semantic reads, ordinar
 
 The original30 run delivered30/30 with84 requests and881,860 public input tokens. Its evidence adjudication was18 clean/12 minor/0 major/0 fatal. Selecting this default does not establish v2.4 quality parity or a new quality result. Fixed-evidence first-draft ablations are experiments, not deployed behavior.
 
-The look/count interface is mandatory: missing or uncompiled public query directories stop consultation before model dispatch. Historical reports use the same interface. Unavailable knowledge uses exact native names; supported world contracts retain their own state projection. Production never imports archived experiments.
+The look/count interface is mandatory: missing or uncompiled public query directories stop consultation before model dispatch. Historical reports use the same interface. Completion requires the explicit `submit_response` tool; ordinary assistant text is progress only. The runtime no longer accepts `allow_text_completion` or `prepared_calls`. Caller-prepared sessions remain supported through `execute(session, settings)`. Legacy template/GraphQL/resource tool publication has been removed; the internal public query backend remains. Unavailable knowledge uses exact native names; supported world contracts retain their own state projection. Production never imports archived experiments.
 
 ## Available reads
 

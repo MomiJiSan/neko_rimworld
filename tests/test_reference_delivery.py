@@ -29,7 +29,7 @@ from plugin.plugins.neko_rimworld.agent.handoff import (
 from plugin.plugins.neko_rimworld.agent.tools import ToolSetup
 from plugin.plugins.neko_rimworld.observation import Observation
 
-from .test_agent import FakeLogger, ScriptedModel, query_tool, settings, turn
+from .test_agent import submitted_turn, FakeLogger, ScriptedModel, query_tool, settings, turn
 from .test_presentation import observed, part
 
 
@@ -107,7 +107,6 @@ async def test_accepted_reference_survives_runtime_and_host_projection(host_tran
         return ToolSetup((query_tool(read),), references_supported=True)
 
     runtime = AgentRuntime(
-        allow_text_completion=True,
         observation_tools=[],
         tools_provider=setup,
         audit_registry=AgentAuditRegistry(),
@@ -203,7 +202,6 @@ async def test_oversized_reference_is_repaired_before_host_delivery():
         return ToolSetup((query_tool(read),), references_supported=True)
 
     runtime = AgentRuntime(
-        allow_text_completion=True,
         observation_tools=[],
         tools_provider=setup,
         audit_registry=AgentAuditRegistry(),
@@ -265,7 +263,7 @@ def test_reference_limit_applies_across_separated_parts_of_one_observation():
 
 
 @pytest.mark.asyncio
-async def test_plain_text_detail_repair_preserves_saved_reference_share():
+async def test_explicit_detail_repair_preserves_saved_reference_share():
     observation = observed()
     observation["received_at"] = "2026-09-19T00:00:00Z"
     observation["request"] = {"operation": "query", "arguments": {}}
@@ -289,7 +287,7 @@ async def test_plain_text_detail_repair_preserves_saved_reference_share():
                     ),
                 ),
             ),
-            turn(detail),
+            submitted_turn(detail),
         ]
     )
 
@@ -300,7 +298,6 @@ async def test_plain_text_detail_repair_preserves_saved_reference_share():
         return ToolSetup((query_tool(read),), references_supported=True)
 
     runtime = AgentRuntime(
-        allow_text_completion=True,
         observation_tools=[],
         tools_provider=setup,
         audit_registry=AgentAuditRegistry(),
@@ -309,7 +306,7 @@ async def test_plain_text_detail_repair_preserves_saved_reference_share():
     )
     result = await runtime.run("报告读数及其限制。", settings())
     assert result["status"] == "ok"
-    assert result["submission_mode"] == "text_repair"
+    assert result["submission_mode"] == "submit_response"
     assert 180 < count_handoff_tokens(result["agent_text"])[0] <= 200
     assert result["summary"] == result["agent_text"]
     assert result["delivery"]["fact_tokens"] > 180

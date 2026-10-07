@@ -17,7 +17,7 @@ and native semantics. Same-read identities may refer to their retained native
 ID; there is no numbered fact vocabulary. Raw evidence remains in the audit.
 
 The contract is the one `agent.loop` already calls on `session.interaction`:
-prompt, tools, attach_result, request_messages, accept_text, snapshot, aclose,
+prompt, tools, attach_result, request_messages, snapshot, aclose,
 plus `finalizing` and `supports_finalization`.
 """
 
@@ -27,13 +27,12 @@ import copy
 from typing import Any
 
 from .activity import make_activity_tool
-from .object_tools import OBJECT_GUIDE, ObjectReader, extend_look_schema, observed_id_reference, state_contract
+from .object_tools import ObjectReader, extend_look_schema, observed_id_reference, state_contract
 from .query_surface import Surface, SurfaceError
 from .research_surface import ReadOnlyResearchSurface, ResearchGuidance
 from .semantic_surface import (
     DEF_KINDS,
     THING_KINDS,
-    TOOL_GUIDE,
     apply_lookup,
     capability_values,
     interpret_lookup,
@@ -159,10 +158,8 @@ class SemanticInteraction(ReadOnlyResearchSurface):
         ):
             compatibility = "\nUse survey_space for a neighborhood/region, inspect_route for a path AND its environment, and inspect_state for object state/occupancy/reservations. Resolve names directly; no preliminary look is required. user is the intended user/recipient, actor performs interaction/travel. All checks are current and read-only. Distinguish target position from stopping cell, building type from settings, and existing reservations from physical occupancy. Safety conclusions require returned environmental coverage; native Danger is not comprehensive safety. Unsupported facets and hidden cells are unknown.\n"
         return ResearchGuidance(
-            read_guide=OBJECT_GUIDE if self.object_reader else TOOL_GUIDE,
             native_state=self.object_reader is not None,
             activity_route="inspect_route" in self.original,
-            definition_guide=self.original["wiki"].description if "wiki" in self.original else "",
             compatibility_guide=compatibility,
         )
 

@@ -105,103 +105,10 @@ async def test_live_reference_mode_remains_disabled_even_when_advertised(monkeyp
     assert make_game_tools(advertised, _noop_query).references_supported is False
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("version", ["resource_evidence.v1", "resource_evidence.v2"])
-async def test_resource_evidence_mode_preserves_three_tools_and_raw_observation(version):
-    source = catalog()
-    source["resource_parameters"] = {"type": "object", "properties": {"map_id": {"type": "string"}}}
-    source["resource_contract"] = {"version": version, "scope_rules": {"stored": "overlaps ground"}}
-    calls = []
-
-    async def query(arguments):
-        calls.append(arguments)
-        return Observation.from_response(arguments["operation"], arguments["arguments"], response())
-
-    setup = make_game_tools(source, query)
-    assert [t.name for t in setup.tools] == ["get_game_info", "query_game", "describe_game_schema"]
-    assert "resources" in setup.tools[0].parameters["properties"]
-    result = await setup.tools[0].handler({"resources": {"map_id": "Map_0"}})
-    assert calls == [{"operation": "resource_report", "arguments": {"map_id": "Map_0"}}]
-    assert result.value["response"] == response().to_dict()
-    assert version in setup.context
 
 
-@pytest.mark.asyncio
-async def test_mod_catalog_generates_both_tools_and_forwards_without_rewriting():
-    calls = []
-
-    async def query(arguments):
-        calls.append(copy.deepcopy(arguments))
-        return Observation.from_response(arguments["operation"], arguments["arguments"], response())
-
-    setup = make_game_tools(catalog(), query)
-    assert [t.name for t in setup.tools] == ["get_game_info", "query_game", "describe_game_schema"]
-    templates, exact, _describe = setup.tools
-    assert templates.parameters == catalog()["template_parameters"]
-    schema_text = json.dumps(templates.parameters)
-    for name in (
-        "target",
-        "sections",
-        "colony",
-        "colonists",
-        "pawn",
-        "status",
-        "mood",
-        "health",
-        "equipment",
-        "profile",
-    ):
-        assert f'"{name}"' in schema_text
-    assert '"Pawn"' in setup.context
-    assert "type Pawn {" not in setup.context
-    args = {
-        "requests": [
-            {"target": {"type": "colony"}, "sections": ["overview"]},
-            {
-                "target": {"type": "pawn", "id": "pawn1"},
-                "sections": ["status", "mood", "health", "equipment", "profile"],
-            },
-        ]
-    }
-    observed = await templates.handler(args)
-    assert calls[-1] == {"operation": "template_query", "arguments": args}
-    assert observed.value["response"] == response().to_dict()
-    binding = observed.value["response"]["payload"]["execution"]["bindings"][1]
-    assert binding["target"] == {"type": "pawn", "id": "pawn1"}
-    assert binding["sections"] == args["requests"][1]["sections"]
-    assert observed.value["response"]["payload"]["data"][binding["root"]]["id"] == "pawn1"
-    precise = {
-        "document": "query($id:ID!){pawn(id:$id){id name mood{level} health{summary{healthPercent}}}}",
-        "variables": {"id": "pawn1"},
-    }
-    await exact.handler(precise)
-    assert calls[-1] == {"operation": "graphql", "arguments": precise}
 
 
-@pytest.mark.asyncio
-async def test_object_selection_and_sections_are_mod_owned_and_forwarded_intact():
-    calls = []
-
-    async def query(arguments):
-        calls.append(copy.deepcopy(arguments))
-        return Observation.from_response(arguments["operation"], arguments["arguments"], response())
-
-    source = catalog()
-    setup = make_game_tools(source, query)
-    # The plugin consumes the Mod's published schema without sharing mutable state.
-    source["template_parameters"]["description"] = "changed after tool setup"
-    assert setup.tools[0].parameters == catalog()["template_parameters"]
-    arguments = {
-        "requests": [
-            {"target": {"type": "colonists", "name": "Walter", "first": 10}, "sections": ["summary"]},
-            {"target": {"type": "pawn", "id": "pawn1"}, "sections": ["mood"]},
-            {"target": {"type": "pawn", "id": "pawn1"}, "sections": ["health", "mood"]},
-            {"target": {"type": "pawn", "id": "pawn2"}, "sections": ["equipment", "profile"]},
-        ]
-    }
-    await setup.tools[0].handler(arguments)
-    # Repeated targets/sections are merged in Mod; Python must preserve intent for audit.
-    assert calls == [{"operation": "template_query", "arguments": arguments}]
 
 
 @pytest.mark.asyncio
@@ -217,7 +124,7 @@ async def test_catalog_cache_singleflight_reconnect_and_bound_tools():
         await asyncio.sleep(0)
         raw = response().to_dict()
         raw["connection_epoch"] = bridge.connection_key
-        raw["payload"] = {"status": "ok", "issues": [], "data": catalog()}
+        raw["payload"] = {"status": "ok", "issues": [], "data": _public_source()}
         return Observation({"response": raw})
 
     provider = CatalogTools(lambda: bridge, query)
@@ -247,76 +154,6 @@ async def test_catalog_failure_does_not_publish_stale_descriptions():
     assert not setup.tools and "No game loaded" in setup.context
 
 
-@pytest.mark.asyncio
-async def test_object_sections_batch_is_one_tool_call_with_schema_in_model_context():
-    calls = []
-
-    async def query(arguments):
-        calls.append(arguments)
-        return Observation.from_response(arguments["operation"], arguments["arguments"], response())
-
-    setup = make_game_tools(catalog(), query)
-
-    class Model:
-        count = 0
-
-        async def complete(self, messages, tools, *, timeout):
-            self.count += 1
-            assert '"Pawn"' in messages[0]["content"]
-            assert {t["function"]["name"] for t in tools} == {
-                "get_game_info",
-                "query_game",
-                "describe_game_schema",
-                "submit_response",
-            }
-            if self.count == 1:
-                return AssistantTurn(
-                    "r",
-                    "m",
-                    "tool_calls",
-                    "",
-                    (
-                        ToolCall(
-                            "c",
-                            "get_game_info",
-                            json.dumps(
-                                {
-                                    "requests": [
-                                        {"target": {"type": "colony"}, "sections": ["overview"]},
-                                        {
-                                            "target": {"type": "pawn", "id": "pawn1"},
-                                            "sections": ["status", "mood", "health", "equipment", "profile"],
-                                        },
-                                    ]
-                                }
-                            ),
-                        ),
-                    ),
-                )
-            payload = json.loads(next(m["content"] for m in reversed(messages) if m["role"] == "tool"))["data"][
-                "response"
-            ]["payload"]
-            pawn = payload["data"][payload["execution"]["bindings"][1]["root"]]
-            assert pawn["id"] == "pawn1"
-            assert {"status", "mood", "health", "equipment", "profile"}.issubset(pawn)
-            # 不要在这里写 “colonist”：这个 fixture 的观察里没有身份字段，
-            # 那句话会被提交时的断言检查（正确地）拒掉，而本用例测的是工具批量调用。
-            return AssistantTurn("r", "m", "stop", "I inspected the requested pawn's condition and equipment.")
-
-    async def provider():
-        return setup
-
-    runtime = AgentRuntime(
-        allow_text_completion=True,  # Explicit legacy natural-text completion fixture.
-        observation_tools=[],
-        tools_provider=provider,
-        audit_registry=AgentAuditRegistry(),
-        logger=FakeLogger(),
-        model_factory=lambda _: Model(),
-    )
-    result = await runtime.run("Inspect the colony and pawn1", settings())
-    assert result["status"] == "ok" and len(calls) == len(result["observations"]) == 1
-    assert "execution" not in result["summary"] and "o1" not in result["summary"]
 
 
 @pytest.mark.asyncio
@@ -324,7 +161,7 @@ async def test_terminal_batch_cannot_submit_before_observation_is_seen():
     async def query(args):
         return Observation.from_response(args["operation"], args["arguments"], response())
 
-    setup = make_game_tools(catalog(), query)
+    setup = make_game_tools(_public_source(), query)
 
     class Model:
         count = 0
@@ -338,7 +175,7 @@ async def test_terminal_batch_cannot_submit_before_observation_is_seen():
                     "tool_calls",
                     "",
                     (
-                        ToolCall("q", "query_game", '{"document":"{game{paused}}"}'),
+                        ToolCall("q", "query", '{"document":"{game{paused}}"}'),
                         submission_call("Premature", "Premature"),
                     ),
                 )
@@ -347,7 +184,6 @@ async def test_terminal_batch_cannot_submit_before_observation_is_seen():
             return AssistantTurn("r", "m", "tool_calls", "", (submission_call("Observed", "Observed"),))
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # Explicit legacy natural-text completion fixture.
         observation_tools=list(setup.tools),
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),
@@ -357,112 +193,23 @@ async def test_terminal_batch_cannot_submit_before_observation_is_seen():
     assert result["answer"] == "Observed" and result["audit"]["model_calls"] == 2
 
 
-@pytest.mark.asyncio
-async def test_schema_discovery_is_cached_metadata_and_never_fresh_evidence():
-    requests = []
-    spec = catalog()
-
-    async def query(arguments):
-        requests.append(copy.deepcopy(arguments))
-        return Observation(
-            {
-                "response": {
-                    "payload": {
-                        "status": "ok",
-                        "data": {
-                            "schema_id": spec["schema_id"],
-                            "metadata_only": True,
-                            "types": [{"name": "Thing", "fields": [{"name": "stackCount", "type": "Int"}]}],
-                        },
-                    }
-                }
-            }
-        )
-
-    setup = make_game_tools(spec, query)
-    assert spec["schema"] not in setup.context
-    assert len(setup.context) < len(spec["schema"])
-
-    class Model:
-        count = 0
-
-        async def complete(self, messages, tools, *, timeout):
-            self.count += 1
-            if self.count == 1:
-                return AssistantTurn(
-                    "r",
-                    "m",
-                    "tool_calls",
-                    "",
-                    tuple(ToolCall(str(i), "describe_game_schema", '{"types":["Thing"]}') for i in range(2)),
-                )
-            return AssistantTurn("r", "m", "stop", "The schema describes stackCount; no current game state was read.")
-
-    async def provider():
-        return setup
-
-    runtime = AgentRuntime(
-        allow_text_completion=True,  # Explicit legacy natural-text completion fixture.
-        observation_tools=[],
-        tools_provider=provider,
-        audit_registry=AgentAuditRegistry(),
-        logger=FakeLogger(),
-        model_factory=lambda _: Model(),
-    )
-    result = await runtime.run("Describe supported fields", settings())
-    assert result["status"] == "ok"
-    assert result["observations"] == [] and result["freshness"] is None
-    assert requests == [{"operation": "describe_schema", "arguments": {"types": ["Thing"]}}]
-    first = await setup.tools[2].handler({"types": ["Thing"]})
-    first["types"].clear()
-    assert (await setup.tools[2].handler({"types": ["Thing"]}))["types"]
 
 
-@pytest.mark.asyncio
-async def test_schema_discovery_rejects_mismatched_directory_and_invalid_requests():
-    calls = []
-
-    async def query(arguments):
-        calls.append(arguments)
-        return Observation(
-            {
-                "response": {
-                    "payload": {"status": "ok", "data": {"schema_id": "wrong", "metadata_only": True, "types": []}}
-                }
-            }
-        )
-
-    describe = make_game_tools(catalog(), query).tools[2]
-    with pytest.raises(ToolExecutionError, match="does not match"):
-        await describe.handler({"types": ["Thing"]})
-    for arguments in (
-        {"types": []},
-        {"types": ["Thing"] * 9},
-        {"types": [42]},
-        {"types": ["Thing"], "include_templates": "yes"},
-    ):
-        with pytest.raises(ToolExecutionError, match="Select"):
-            await describe.handler(arguments)
-    assert len(calls) == 1
 
 
-@pytest.mark.asyncio
-async def test_v3_has_one_resource_entry_and_shared_conditions():
-    source = catalog()
-    source["resource_parameters"] = {"type": "object", "properties": {"definition_where": {"type": "object"}}}
-    source["resource_contract"] = {"version": "resource_evidence.v3"}
-    source["selection_contract"] = {"version": "schema_conditions.v1"}
-    calls = []
 
-    async def query(arguments):
-        calls.append(arguments)
-        return Observation.from_response(arguments["operation"], arguments["arguments"], response())
 
-    setup = make_game_tools(source, query)
-    assert [t.name for t in setup.tools] == ["read_resources", "get_game_info", "query_game", "describe_game_schema"]
-    assert "resources" not in setup.tools[1].parameters["properties"]
-    condition = {"definition_where": {"fields": {"IsWeapon": {"eq": True}}}}
-    await setup.tools[0].handler(condition)
-    assert calls == [{"operation": "resource_report", "arguments": condition}]
-    assert "schema_conditions.v1" in setup.context
-    assert "Default supplies" not in setup.context
+def test_retired_catalogs_fail_without_querying_or_publishing_tools():
+    for source in (catalog(), _public_source(version="unsupported")):
+        with pytest.raises(ToolExecutionError) as caught:
+            make_game_tools(source, _noop_query)
+        assert caught.value.code == "semantic_surface_unavailable"
+        assert caught.value.recoverable is False
+
+
+def test_public_catalog_does_not_require_retired_template_contracts():
+    source = _public_source()
+    for key in ("schema", "query_rules", "template_parameters", "query_parameters", "type_index", "query_roots"):
+        source.pop(key, None)
+    CatalogTools._validate(source)
+    assert [tool.name for tool in make_game_tools(source, _noop_query).tools] == ["query", "describe_query"]

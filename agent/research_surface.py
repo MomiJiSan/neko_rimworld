@@ -7,10 +7,8 @@ from .handoff import attach_agent_handoff, make_submission_tool
 
 @dataclass(frozen=True, slots=True)
 class ResearchGuidance:
-    read_guide: str
     native_state: bool
     activity_route: bool
-    definition_guide: str = ""
     compatibility_guide: str = ""
 
 
@@ -54,9 +52,6 @@ class ReadOnlyResearchSurface:
 
     def request_messages(self, messages):
         return messages
-
-    def accept_text(self, text, finish_reason):
-        return None
 
     def attach_result(self, result):
         return attach_agent_handoff(result)

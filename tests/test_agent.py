@@ -136,14 +136,13 @@ def digest_view() -> Observation:
 async def test_connection_change_preserves_answer_but_reports_degraded_delivery() -> None:
     model = ScriptedModel([
         turn("", ToolCall("read-1", "query_game", "{}")),
-        turn("The connection changed; current colonist tasks are unknown."),
+        submitted_turn("The connection changed; current colonist tasks are unknown."),
     ])
 
     async def interrupted(_args):
         raise ToolExecutionError("connection_changed", "The game connection changed.")
 
     runtime = AgentRuntime(
-        allow_text_completion=True,
         observation_tools=[query_tool(interrupted)],
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),
@@ -158,15 +157,14 @@ async def test_connection_change_preserves_answer_but_reports_degraded_delivery(
 
 
 @pytest.mark.asyncio
-async def test_agent_can_answer_without_calling_a_tool() -> None:
-    model = ScriptedModel([turn("No live game data was needed for this answer.")])
+async def test_agent_can_answer_without_reading_game() -> None:
+    model = ScriptedModel([submitted_turn("No live game data was needed for this answer.")])
     registry = AgentAuditRegistry()
 
     async def digest(_args: dict[str, Any]) -> dict[str, Any]:
         raise AssertionError("digest should not be called")
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -177,17 +175,15 @@ async def test_agent_can_answer_without_calling_a_tool() -> None:
     assert result["status"] == "ok"
     assert result["answer"].startswith("No live")
     assert result["audit"]["cycles"] == 1
-    assert result["audit"]["tool_calls"] == 0
+    assert result["audit"]["tool_calls"] == 1
     latest = registry.snapshot()["latest_run"]
     assert latest["state"] == AgentRunState.COMPLETED
-    assert [event["event"] for event in latest["events"]] == [
-        "run_created",
-        "model_request_started",
-        "model_response_received",
-        "final_received",
-        "run_completed",
-        "handoff_built",
-    ]
+    events = [event["event"] for event in latest["events"]]
+    assert events[:3] == ["run_created", "model_request_started", "model_response_received"]
+    assert events[-3:] == ["final_received", "run_completed", "handoff_built"]
+    assert "submission_patch_accepted" in events and "tool_completed" in events
+    assert all(event["data"].get("name") == "submit_response"
+               for event in latest["events"] if event["event"] == "tool_started")
 
 
 @pytest.mark.asyncio
@@ -195,7 +191,7 @@ async def test_agent_tool_call_round_trip_is_auditable() -> None:
     model = ScriptedModel(
         [
             turn("", ToolCall("call-1", "query_game", "{}")),
-            turn("The colony currently has no visible threat."),
+            submitted_turn("The colony currently has no visible threat."),
         ]
     )
     registry = AgentAuditRegistry()
@@ -204,7 +200,6 @@ async def test_agent_tool_call_round_trip_is_auditable() -> None:
         return digest_view()
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -215,7 +210,7 @@ async def test_agent_tool_call_round_trip_is_auditable() -> None:
     assert result["status"] == "ok"
     assert result["observations"][0]["response"]["snapshot_sequence"] == 1
     assert result["audit"]["cycles"] == 2
-    assert result["audit"]["tool_calls"] == 1
+    assert result["audit"]["tool_calls"] == 2
     second_request = model.requests[1]
     assert any(message.get("role") == "assistant" and message.get("tool_calls") for message in second_request)
     tool_message = next(message for message in second_request if message.get("role") == "tool")
@@ -242,7 +237,6 @@ async def test_agent_reuses_summary_and_appends_detail() -> None:
         raise AssertionError("digest should not be called")
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -285,7 +279,6 @@ async def test_over_budget_submission_is_returned_to_the_model_for_revision() ->
         raise AssertionError("digest should not be called")
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),
@@ -302,12 +295,12 @@ async def test_over_budget_submission_is_returned_to_the_model_for_revision() ->
 
 
 @pytest.mark.asyncio
-async def test_long_plain_text_gets_prompt_feedback_instead_of_code_summarization() -> None:
+async def test_saved_detail_gets_prompt_feedback_instead_of_code_summarization() -> None:
     long_text = "模型生成的完整报告。" * 100
     agent_text = "这是模型重写后的自然语言交接。"
     model = ScriptedModel(
         [
-            turn(long_text),
+            submitted_turn(long_text),
             turn("", submission_call(long_text, agent_text)),
         ]
     )
@@ -317,7 +310,6 @@ async def test_long_plain_text_gets_prompt_feedback_instead_of_code_summarizatio
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -328,23 +320,22 @@ async def test_long_plain_text_gets_prompt_feedback_instead_of_code_summarizatio
     assert result["answer"] == agent_text + "\n\n" + long_text
     assert result["summary"] == agent_text
     assert any(
-        "only required/changed fields" in str(message.get("content"))
+        "answer" in str(message.get("content"))
         for message in model.requests[1]
-        if message.get("role") == "user"
+        if message.get("role") == "tool"
     )
-    assert any(event["event"] == "final_text_rejected" for event in registry.snapshot()["latest_run"]["events"])
+    assert any(event["event"] == "submission_patch_rejected" for event in registry.snapshot()["latest_run"]["events"])
 
 
 @pytest.mark.asyncio
 async def test_prompt_cycle_target_is_soft_not_a_hard_step_limit() -> None:
     calls = [turn("", ToolCall(f"call-{index}", "query_game", "{}")) for index in range(4)]
-    model = ScriptedModel([*calls, turn("Finished after the suggested cycle target.")])
+    model = ScriptedModel([*calls, submitted_turn("Finished after the suggested cycle target.")])
 
     async def digest(_args: dict[str, Any]) -> dict[str, Any]:
         return digest_view()
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),
@@ -354,7 +345,7 @@ async def test_prompt_cycle_target_is_soft_not_a_hard_step_limit() -> None:
 
     assert result["status"] == "ok"
     assert result["audit"]["cycles"] == 5
-    assert result["audit"]["tool_calls"] == 4
+    assert result["audit"]["tool_calls"] == 5
 
 
 @pytest.mark.asyncio
@@ -362,7 +353,7 @@ async def test_unknown_tool_is_returned_to_model_instead_of_blocking_the_loop() 
     model = ScriptedModel(
         [
             turn("", ToolCall("call-bad", "search_wiki", '{"query":"x"}')),
-            turn("Search is unavailable in this version."),
+            submitted_turn("Search is unavailable in this version."),
         ]
     )
 
@@ -371,7 +362,6 @@ async def test_unknown_tool_is_returned_to_model_instead_of_blocking_the_loop() 
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -388,14 +378,13 @@ async def test_unknown_tool_is_returned_to_model_instead_of_blocking_the_loop() 
 
 @pytest.mark.asyncio
 async def test_empty_model_turn_gets_auditable_recovery_prompt() -> None:
-    model = ScriptedModel([turn(), turn("Recovered final answer.")])
+    model = ScriptedModel([turn(), submitted_turn("Recovered final answer.")])
 
     async def digest(_args: dict[str, Any]) -> dict[str, Any]:
         return digest_view()
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -435,7 +424,6 @@ async def test_model_failure_returns_degraded_result_without_stopping_runtime() 
     registry = AgentAuditRegistry()
     logger = FakeLogger()
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=logger,
@@ -470,14 +458,13 @@ async def test_transient_provider_failure_is_retried_before_any_useful_delta() -
             },
         },
     )
-    model = ScriptedModel([transient, turn("The colony is available after retry.")])
+    model = ScriptedModel([transient, submitted_turn("The colony is available after retry.")])
     registry = AgentAuditRegistry()
 
     async def digest(_args: dict[str, Any]) -> dict[str, Any]:
         raise AssertionError("no game tool should run")
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -507,14 +494,13 @@ async def test_transient_failure_after_useful_delta_is_not_retried() -> None:
             "provider_error": {"type": "upstream_error", "message": "overloaded"},
         },
     )
-    model = ScriptedModel([transient_after_output, turn("must not be used")])
+    model = ScriptedModel([transient_after_output, submitted_turn("must not be used")])
     registry = AgentAuditRegistry()
 
     async def digest(_args: dict[str, Any]) -> dict[str, Any]:
         raise AssertionError("no game tool should run")
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -534,14 +520,13 @@ async def test_non_retryable_http_failure_is_not_retried() -> None:
         "The agent model endpoint returned HTTP 400.",
         diagnostics={"request_id": "request-invalid", "phase": "response_headers", "http_status": 400},
     )
-    model = ScriptedModel([permanent, turn("must not be used")])
+    model = ScriptedModel([permanent, submitted_turn("must not be used")])
     registry = AgentAuditRegistry()
 
     async def digest(_args: dict[str, Any]) -> dict[str, Any]:
         raise AssertionError("no game tool should run")
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -580,7 +565,6 @@ async def test_transient_retries_are_bounded_and_usage_is_accumulated(monkeypatc
         raise AssertionError("no game tool should run")
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -626,7 +610,6 @@ async def test_wall_time_fuse_returns_collected_evidence_instead_of_a_hard_failu
         return digest_view()
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=AgentAuditRegistry(),
         logger=FakeLogger(),
@@ -656,14 +639,13 @@ async def test_concurrent_runs_have_independent_message_sessions() -> None:
             await asyncio.sleep(0.01)
             question = next(message["content"] for message in messages if message.get("role") == "user")
             seen_questions.append(question)
-            return turn(f"answer:{question}")
+            return submitted_turn(f"answer:{question}")
 
     async def digest(_args: dict[str, Any]) -> dict[str, Any]:
         return digest_view()
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -696,7 +678,6 @@ async def test_cancellation_is_recorded_and_does_not_leave_an_active_run() -> No
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -766,7 +747,7 @@ async def test_runtime_audit_capacity_retains_observations_draft_and_result(monk
                 return turn("", ToolCall("draft", "submit_response", '{"detail":"Retained evidence report"}'))
             if ending == "provider_failure":
                 raise ModelClientError("model_http_error", "HTTP 400")
-            return turn("Brief answer" if ending == "success" else "")
+            return submitted_turn("Brief answer" if ending == "success" else "")
 
     async def read(_):
         return digest_view()
@@ -775,7 +756,6 @@ async def test_runtime_audit_capacity_retains_observations_draft_and_result(monk
         return store.save(record)
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(read)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -925,8 +905,8 @@ async def test_http_model_tool_loop_end_to_end() -> None:
             finish_reason = "tool_calls"
         else:
             assert any(item.get("role") == "tool" for item in body["messages"])
-            message = {"role": "assistant", "content": "The live colony is stable."}
-            finish_reason = "stop"
+            message = {"role": "assistant", "content": None, "tool_calls": [submitted_turn("The live colony is stable.").tool_calls[0].as_message_value()]}
+            finish_reason = "tool_calls"
         return sse_response(
             {
                 "id": f"resp-{len(request_bodies)}",
@@ -942,7 +922,6 @@ async def test_http_model_tool_loop_end_to_end() -> None:
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(digest)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -956,7 +935,7 @@ async def test_http_model_tool_loop_end_to_end() -> None:
     assert result["status"] == "ok"
     assert result["answer"] == "The live colony is stable."
     assert result["audit"]["model_calls"] == 2
-    assert result["audit"]["tool_calls"] == 1
+    assert result["audit"]["tool_calls"] == 2
     assert len(request_bodies) == 2
 
 
@@ -971,7 +950,6 @@ async def test_audit_limit_on_tool_completion_keeps_just_read_observation(monkey
         return digest_view()
 
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[query_tool(read)],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -996,7 +974,6 @@ async def test_cancellation_at_audit_limit_still_propagates(monkeypatch):
 
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
-        allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
         observation_tools=[],
         audit_registry=registry,
         logger=FakeLogger(),
@@ -1010,3 +987,12 @@ async def test_cancellation_at_audit_limit_still_propagates(monkeypatch):
     snapshot = registry.snapshot()
     assert snapshot["active_count"] == 0
     assert snapshot["latest_run"]["result"]["status"] == "cancelled"
+
+
+def submitted_turn(text: str) -> AssistantTurn:
+    """Script an explicit submission; oversized text saves detail for repair."""
+    from plugin.plugins.neko_rimworld.agent.handoff import count_handoff_tokens
+    if not text:
+        return turn()
+    field = "detail" if count_handoff_tokens(text)[0] > 180 else "answer"
+    return turn("", ToolCall("submit", "submit_response", json.dumps({field: text}, ensure_ascii=False)))
