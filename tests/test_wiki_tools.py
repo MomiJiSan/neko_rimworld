@@ -12,18 +12,33 @@ from plugin.plugins.neko_rimworld.agent.wiki_tools import WikiStore, knowledge_d
 
 
 def entry(name="Steel", label="steel", **changes):
-    return {"key": "Verse.ThingDef/" + name, "type": "Verse.ThingDef", "def_name": name,
-            "label": label, "description": "Definition description", "source_mod": "Core",
-            "package_id": "ludeon.rimworld", "facts": [{"name": "stackLimit", "value": "75"}],
-            "related": [{"key": "Verse.ThingCategoryDef/ResourcesRaw", "label": "raw resources"}],
-            "truncated": False, **changes}
+    return {
+        "key": "Verse.ThingDef/" + name,
+        "type": "Verse.ThingDef",
+        "def_name": name,
+        "label": label,
+        "description": "Definition description",
+        "source_mod": "Core",
+        "package_id": "ludeon.rimworld",
+        "facts": [{"name": "stackLimit", "value": "75"}],
+        "related": [{"key": "Verse.ThingCategoryDef/ResourcesRaw", "label": "raw resources"}],
+        "truncated": False,
+        **changes,
+    }
 
 
 def write_snapshot(directory: Path, entries=None, **changes):
-    snapshot = {"format": "neko.defs.v1", "game_version": "1.6", "language": "English",
-                "generated_at": "2026-09-01T00:00:00Z", "complete": True, "issues": [],
-                "mods": [{"package_id": "ludeon.rimworld", "name": "Core"}],
-                "entries": [entry()] if entries is None else entries, **changes}
+    snapshot = {
+        "format": "neko.defs.v1",
+        "game_version": "1.6",
+        "language": "English",
+        "generated_at": "2026-09-01T00:00:00Z",
+        "complete": True,
+        "issues": [],
+        "mods": [{"package_id": "ludeon.rimworld", "name": "Core"}],
+        "entries": [entry()] if entries is None else entries,
+        **changes,
+    }
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "current.json"
     path.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
@@ -52,8 +67,12 @@ async def test_one_minimal_tool_returns_mapping_not_observation(tmp_path):
     assert store.load()
     tool = make_wiki_tool(store)
     assert tool.name == "wiki"
-    assert tool.parameters == {"type": "object", "properties": {"query": {"type": "string", "maxLength": 4096}},
-                               "required": ["query"], "additionalProperties": False}
+    assert tool.parameters == {
+        "type": "object",
+        "properties": {"query": {"type": "string", "maxLength": 4096}},
+        "required": ["query"],
+        "additionalProperties": False,
+    }
     registry = ToolRegistry()
     registry.register(tool)
     result = await registry.execute(registry.prepare(ToolCall("w1", "wiki", '{"query":"Steel"}')))
@@ -68,16 +87,25 @@ async def test_one_minimal_tool_returns_mapping_not_observation(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("arguments", [{}, {"query": "Steel", "limit": 1}, {"query": None},
-                                        {"query": 1}, {"query": " "}, {"query": "a" * 4097}])
+@pytest.mark.parametrize(
+    "arguments",
+    [{}, {"query": "Steel", "limit": 1}, {"query": None}, {"query": 1}, {"query": " "}, {"query": "a" * 4097}],
+)
 async def test_argument_validation(tmp_path, arguments):
     with pytest.raises(ToolExecutionError):
         await make_wiki_tool(WikiStore(tmp_path)).handler(arguments)
 
 
 def test_exact_matches_rank_before_fuzzy_and_ambiguity_is_stable(tmp_path):
-    write_snapshot(tmp_path, [entry("SteelWall", "steel wall"), entry("Steel", "steel"),
-                              entry("ModSteel", "steel"), entry("A", "steel plate")])
+    write_snapshot(
+        tmp_path,
+        [
+            entry("SteelWall", "steel wall"),
+            entry("Steel", "steel"),
+            entry("ModSteel", "steel"),
+            entry("A", "steel plate"),
+        ],
+    )
     store = WikiStore(tmp_path)
     assert store.query("vErSe.ThingDef/sTEEL")["entries"][0]["def_name"] == "Steel"
     result = store.query("STEEL")
@@ -90,8 +118,9 @@ def test_exact_matches_rank_before_fuzzy_and_ambiguity_is_stable(tmp_path):
     assert store.query("unknown")["status"] == "not_found"
 
 
-@pytest.mark.parametrize("changes", [{"complete": False}, {"issues": ["one type failed"]},
-                                     {"entries": [entry(truncated=True)]}])
+@pytest.mark.parametrize(
+    "changes", [{"complete": False}, {"issues": ["one type failed"]}, {"entries": [entry(truncated=True)]}]
+)
 def test_partial_snapshot_and_entries_are_not_reported_as_complete(tmp_path, changes):
     write_snapshot(tmp_path, **changes)
     result = WikiStore(tmp_path).query("Steel")
@@ -149,25 +178,35 @@ def test_changed_in_place_file_is_rejected(tmp_path, monkeypatch):
 def test_result_and_entry_details_are_bounded(tmp_path, text):
     facts = [{"name": text, "value": text} for _ in range(50)]
     related = [{"key": text, "label": text} for _ in range(50)]
-    write_snapshot(tmp_path, [entry(str(i), "steel", description=text, facts=facts, related=related)
-                              for i in range(5)], mods=[{"package_id": text, "name": text}] * 100)
+    write_snapshot(
+        tmp_path,
+        [entry(str(i), "steel", description=text, facts=facts, related=related) for i in range(5)],
+        mods=[{"package_id": text, "name": text}] * 100,
+    )
     result = WikiStore(tmp_path).query("steel")
     assert len(json.dumps(result, ensure_ascii=False).encode("utf-8")) <= 8192
     assert result["status"] == "ambiguous"
     assert 1 <= len(result["entries"]) <= 3
-    assert all(e["candidate"] and e["not_read"] and e["facts"] == [] for e in result["entries"]) 
+    assert all(e["candidate"] and e["not_read"] and e["facts"] == [] for e in result["entries"])
 
 
-@pytest.mark.parametrize("diagnostics", [None, {}, "bad", [None], [{}],
-                                        [{"path": "x", "kind": "incomplete", "reason": 1}]])
+@pytest.mark.parametrize(
+    "diagnostics", [None, {}, "bad", [None], [{}], [{"path": "x", "kind": "incomplete", "reason": 1}]]
+)
 def test_optional_diagnostics_are_validated(tmp_path, diagnostics):
     write_snapshot(tmp_path, [entry(diagnostics=diagnostics)])
     assert WikiStore(tmp_path).query("Steel")["status"] == "unavailable"
 
 
-@pytest.mark.parametrize("changes", [{"warnings": None}, {"warnings": [1]},
-                                     {"provenance_complete": "false"},
-                                     {"entries": [entry(facts=[{"name": "x", "value": 1}])]}])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"warnings": None},
+        {"warnings": [1]},
+        {"provenance_complete": "false"},
+        {"entries": [entry(facts=[{"name": "x", "value": 1}])]},
+    ],
+)
 def test_extended_v1_contract_rejects_wrong_types(tmp_path, changes):
     write_snapshot(tmp_path, **changes)
     assert not WikiStore(tmp_path).load()
@@ -269,12 +308,15 @@ def test_long_related_key_round_trips_without_clipping(tmp_path):
     assert store.query(key)["entries"][0]["key"] == key
 
 
-@pytest.mark.parametrize("def_type,path,label,description,keyword", [
-    ("RimWorld.TraitDef", "degreeDatas[0]", "Kind", "Helps others feel welcome", "welcome"),
-    ("RimWorld.TraitDef", "degreeDatas[1]", "善良", "总会帮助其他殖民者", "帮助"),
-    ("RimWorld.ThoughtDef", "stages[0]", "Ate fine meal", "Enjoyed delicious food", "delicious"),
-    ("RimWorld.ThoughtDef", "stages[2]", "吃了精致餐食", "这顿饭非常美味", "美味"),
-])
+@pytest.mark.parametrize(
+    "def_type,path,label,description,keyword",
+    [
+        ("RimWorld.TraitDef", "degreeDatas[0]", "Kind", "Helps others feel welcome", "welcome"),
+        ("RimWorld.TraitDef", "degreeDatas[1]", "善良", "总会帮助其他殖民者", "帮助"),
+        ("RimWorld.ThoughtDef", "stages[0]", "Ate fine meal", "Enjoyed delicious food", "delicious"),
+        ("RimWorld.ThoughtDef", "stages[2]", "吃了精致餐食", "这顿饭非常美味", "美味"),
+    ],
+)
 def test_collected_names_and_descriptions_are_searchable(tmp_path, def_type, path, label, description, keyword):
     # Search must see past the response's eight-fact limit.
     facts = [{"name": f"modCustom[{i}].arbitrary", "value": str(i)} for i in range(12)]
@@ -307,10 +349,13 @@ def test_root_description_keyword_tokens_and_arbitrary_facts(tmp_path):
 def test_diagnostics_warnings_and_keys_share_eight_kib_budget(tmp_path, text):
     diagnostics = [{"path": text, "kind": "excluded", "reason": text}] * 12
     diagnostics.append({"path": "failedField", "kind": "incomplete", "reason": text})
-    entries = [entry(text[:4000] + str(i), "same", diagnostics=diagnostics,
-                     related=[{"key": text, "label": text}]) for i in range(3)]
-    write_snapshot(tmp_path, entries, warnings=[text] * 20, issues=[text] * 20,
-                   mods=[{"package_id": text, "name": text}] * 20)
+    entries = [
+        entry(text[:4000] + str(i), "same", diagnostics=diagnostics, related=[{"key": text, "label": text}])
+        for i in range(3)
+    ]
+    write_snapshot(
+        tmp_path, entries, warnings=[text] * 20, issues=[text] * 20, mods=[{"package_id": text, "name": text}] * 20
+    )
     result = WikiStore(tmp_path).query("same")
     assert len(json.dumps(result, ensure_ascii=False).encode("utf-8")) <= 8192
     assert result["status"] == "partial" and result["resolution"] == "ambiguous"
@@ -355,10 +400,7 @@ def test_summary_prioritizes_valued_properties_over_nulls_and_metadata(tmp_path)
         {"name": "legacyNull", "value": "null"},
         {"name": "empty", "value": "", "type": "System.String"},
     ] * 3
-    valued = [
-        {"name": f"customMod.property{i}", "value": str(i), "type": "System.Int32"}
-        for i in range(8)
-    ]
+    valued = [{"name": f"customMod.property{i}", "value": str(i), "type": "System.Int32"} for i in range(8)]
     valued[0] = {"name": "literalNull", "value": "null", "type": "System.String"}
     valued[1] = {"name": "disabled", "value": "False", "type": "System.Boolean"}
     source = entry(facts=facts + valued)
@@ -401,10 +443,17 @@ def test_complete_source_stays_distinguishable_from_small_tool_summary(tmp_path)
 
 
 def test_large_provenance_warnings_alone_never_lower_status(tmp_path):
-    entries = [entry(str(i), "same", description="D" * 760,
-                     facts=[{"name": "field", "value": "V" * 380}], related=[]) for i in range(3)]
-    write_snapshot(tmp_path, entries, mods=[{"package_id": "P" * 120, "name": "N" * 120}] * 10,
-                   warnings=["W" * 10000] * 100, provenance_complete=False)
+    entries = [
+        entry(str(i), "same", description="D" * 760, facts=[{"name": "field", "value": "V" * 380}], related=[])
+        for i in range(3)
+    ]
+    write_snapshot(
+        tmp_path,
+        entries,
+        mods=[{"package_id": "P" * 120, "name": "N" * 120}] * 10,
+        warnings=["W" * 10000] * 100,
+        provenance_complete=False,
+    )
     result = WikiStore(tmp_path).query("same")
     assert result["status"] == "ambiguous"
     assert result["warnings_truncated"]
@@ -416,13 +465,26 @@ def test_field_terms_do_not_outrank_explicit_object_name(tmp_path):
         {"name": "plant.growDays", "value": "3", "type": "System.Single"},
         {"name": "plant.harvestYield", "value": "6", "type": "System.Single"},
     ]
-    write_snapshot(tmp_path, [
-        entry("Plant_Rice", "水稻", type="Verse.ThingDef", key="Verse.ThingDef/Plant_Rice", facts=facts),
-        entry("PlantHarvestYield", "植物收获效率", type="RimWorld.StatDef",
-              key="RimWorld.StatDef/PlantHarvestYield", facts=[]),
-        entry("DrugHarvestYield", "成瘾品作物收获效率", type="RimWorld.StatDef",
-              key="RimWorld.StatDef/DrugHarvestYield", facts=[]),
-    ])
+    write_snapshot(
+        tmp_path,
+        [
+            entry("Plant_Rice", "水稻", type="Verse.ThingDef", key="Verse.ThingDef/Plant_Rice", facts=facts),
+            entry(
+                "PlantHarvestYield",
+                "植物收获效率",
+                type="RimWorld.StatDef",
+                key="RimWorld.StatDef/PlantHarvestYield",
+                facts=[],
+            ),
+            entry(
+                "DrugHarvestYield",
+                "成瘾品作物收获效率",
+                type="RimWorld.StatDef",
+                key="RimWorld.StatDef/DrugHarvestYield",
+                facts=[],
+            ),
+        ],
+    )
     result = WikiStore(tmp_path).query("水稻 growDays harvestYield")
     assert result["entries"][0]["key"] == "Verse.ThingDef/Plant_Rice"
     assert result["entries"][0]["match"] == "name_in_query"
@@ -448,9 +510,11 @@ def test_a_latin_name_must_be_a_whole_query_word(tmp_path):
 
 
 def test_field_names_list_reusable_valued_tokens(tmp_path):
-    facts = [{"name": "gas", "value": "null", "type": "null"},
-             {"name": "workAmount", "value": "1000", "type": "System.Int32"},
-             {"name": "degreeDatas[0].statFactors[0].value", "value": "0.75", "type": "System.Single"}]
+    facts = [
+        {"name": "gas", "value": "null", "type": "null"},
+        {"name": "workAmount", "value": "1000", "type": "System.Int32"},
+        {"name": "degreeDatas[0].statFactors[0].value", "value": "0.75", "type": "System.Single"},
+    ]
     facts += [{"name": f"filler{index}", "value": "x", "type": "System.String"} for index in range(10)]
     write_snapshot(tmp_path, [entry("Steel", "钢铁", facts=facts)])
     store = WikiStore(tmp_path)

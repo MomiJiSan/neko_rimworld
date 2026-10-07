@@ -44,6 +44,13 @@ def _compact(text):
         # Moving a scoped/anchored subschema can change reference resolution.
         if any(k in node for k in ("$id", "$anchor", "$dynamicRef", "$recursiveRef")):
             raise ValueError("scoped_schema")
+        reference = node.get("$ref")
+        if isinstance(reference, str) and reference.startswith("#"):
+            # References into a subschema's interior depend on its original
+            # property path. Factoring that node would invalidate the pointer.
+            prefixes = ("#/$defs/", "#/definitions/")
+            if not any(reference.startswith(prefix) and "/" not in reference[len(prefix):] for prefix in prefixes):
+                raise ValueError("scoped_schema")
         key = canonical(structure(node))
         counts[key] += 1
         values[key] = structure(node)
@@ -89,6 +96,9 @@ def _compact(text):
 
     output = visit(root)
     # Existing definitions retain their original names and relative scope.
+    # Keep their visited form: merging the unvisited originals back here used
+    # to silently undo all factoring inside named definitions.
+    definitions = copy.deepcopy(output.get("$defs", {}))
     for key, name in chosen.items():
         definitions[name] = visit(values[key], key)
     if definitions:
@@ -161,4 +171,139 @@ def compact_tools(tools):
         function = tool.get("function", {})
         if isinstance(function.get("parameters"), dict):
             function["parameters"] = compact_schema(function["parameters"])
+    return result
+
+
+def deduplicate_descriptions(tools):
+    """Publish identical parameter explanations once; never alter validation."""
+    seen = set()
+
+    def walk(node, property_name=None, bindings=""):
+        if isinstance(node, list):
+            return [walk(value, property_name, bindings) for value in node]
+        if not isinstance(node, dict):
+            return node
+        result = copy.deepcopy(node)
+        description = node.get("description")
+        if property_name is not None and isinstance(description, str):
+            # Distinct actor/user fields cannot authorize each other's prose.
+            # The full schema node must also match: equal words with different
+            # types, enums, defaults, constraints or nested properties stay local.
+            encoded = canonical(node)
+            key = (property_name, encoded, bindings if '"$ref"' in encoded else "")
+            if key in seen:
+                result.pop("description", None)
+            else:
+                seen.add(key)
+        for field, value in node.items():
+            if field in MAPS and isinstance(value, dict):
+                result[field] = {k: walk(v, k if field == "properties" else property_name, bindings) for k, v in value.items()}
+            elif field in ARRAYS and isinstance(value, list):
+                result[field] = [walk(v, property_name, bindings) for v in value]
+            elif field in SINGLES:
+                result[field] = walk(value, property_name, bindings)
+        return result
+
+    result = copy.deepcopy(tools)
+    for tool in result:
+        function = tool.get("function", {})
+        if isinstance(function.get("parameters"), dict):
+            parameters = function["parameters"]
+            bindings = canonical({k: parameters[k] for k in ("$defs", "definitions", "$id") if k in parameters})
+            function["parameters"] = walk(parameters, bindings=bindings)
+    return result
+
+
+def schema_contract(schema):
+    """Keep every validation keyword and property; omit prose annotations."""
+    if not isinstance(schema, dict):
+        return copy.deepcopy(schema)
+    result = copy.deepcopy(schema)
+    for key in ("description", "title", "examples"):
+        result.pop(key, None)
+    for key, value in schema.items():
+        if key in MAPS and isinstance(value, dict):
+            result[key] = {name: schema_contract(child) for name, child in value.items()}
+        elif key in ARRAYS and isinstance(value, list):
+            result[key] = [schema_contract(child) for child in value]
+        elif key in SINGLES:
+            result[key] = schema_contract(value)
+    return result
+
+
+def remove_redundant_constraints(schema):
+    """Remove unreachable definitions and types already entailed by enum/const.
+
+    This is only used for the model's parameter contract, never native dispatch.
+    Scoped and dynamic schemas retain their definition graph unchanged.
+    """
+    result = copy.deepcopy(schema)
+
+    def accepts_type(value, kind):
+        if isinstance(kind, list):
+            return any(accepts_type(value, item) for item in kind)
+        return {
+            "string": isinstance(value, str), "boolean": type(value) is bool,
+            "null": value is None, "object": isinstance(value, dict),
+            "array": isinstance(value, list),
+            "number": type(value) in (int, float),
+            "integer": type(value) is int or type(value) is float and value.is_integer(),
+        }.get(kind, False)
+
+    def simplify(node):
+        if not isinstance(node, dict):
+            return
+        choices = node.get("enum")
+        if "const" in node:
+            choices = [node["const"]]
+        if isinstance(choices, list) and choices and "type" in node and all(
+            accepts_type(value, node["type"]) for value in choices
+        ):
+            node.pop("type")
+        for child in children(node):
+            simplify(child)
+
+    simplify(result)
+    definitions = result.get("$defs")
+    if not isinstance(definitions, dict):
+        return result
+
+    def scoped(node):
+        if not isinstance(node, dict):
+            return False
+        ref = node.get("$ref")
+        interior = isinstance(ref, str) and ref.startswith("#") and (
+            not ref.startswith("#/$defs/") or "/" in ref[len("#/$defs/"):]
+        )
+        return interior or any(key in node for key in ("$id", "$anchor", "$dynamicAnchor", "$dynamicRef", "$recursiveRef")) or any(scoped(child) for child in children(node))
+
+    if scoped(result):
+        return result
+    reachable = set()
+
+    def references(node):
+        if not isinstance(node, dict):
+            return
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            name = ref[len("#/$defs/"):].split("/", 1)[0].replace("~1", "/").replace("~0", "~")
+            if name in definitions and name not in reachable:
+                reachable.add(name)
+                references(definitions[name])
+        for key, value in node.items():
+            if key == "$defs":
+                continue
+            if key in MAPS and isinstance(value, dict):
+                for child in value.values():
+                    references(child)
+            elif key in ARRAYS and isinstance(value, list):
+                for child in value:
+                    references(child)
+            elif key in SINGLES:
+                references(value)
+
+    references(result)
+    result["$defs"] = {name: node for name, node in definitions.items() if name in reachable}
+    if not result["$defs"]:
+        result.pop("$defs")
     return result

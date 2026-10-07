@@ -1,10 +1,10 @@
 import { Alert, Button, Card, EmptyState, Grid, Stack, StatCard, StatusBadge, TextBlock, Toolbar, ToolbarGroup } from "@neko/plugin-ui"
-import type { PanelController } from "../controller"
+import type { DiagnosticsController } from "./useDiagnostics"
 import { UsageSummary } from "../components/usage-summary"
 import { FailureNotice } from "../components/failure-notice"
 import { progressText, statusTone, text, timing } from "../format"
 
-export function HomePage({ c }: { c: PanelController }) {
+export function ExecutionOverview({ c }: { c: DiagnosticsController }) {
   const state = c.state
   const latest = c.latestRun
   const incident = state.last_incident || state.panel_error
@@ -27,7 +27,7 @@ export function HomePage({ c }: { c: PanelController }) {
         <Button onClick={() => c.openRun(latest.run_id!)}>查看本次详情</Button>
       </Stack> : <EmptyState title="还没有运行记录" description="在调试页发起一次咨询，或从 NEKO 对话中调用插件。" />}
     </Card>
-    {incident ? <Card title="最近异常"><Stack><TextBlock text={text(incident.message, "发生运行异常。", 500)} /><Button onClick={() => { c.setSessionMode("connection"); c.setPage("sessions") }}>查看连接事件</Button></Stack></Card> : null}
-    <Toolbar><ToolbarGroup><Button tone="primary" onClick={() => { c.setPage("debug") }}>进入调试</Button><Button onClick={() => { c.setPage("settings") }}>打开设置</Button></ToolbarGroup></Toolbar>
+    {incident ? <Card title="最近异常"><Stack><TextBlock text={text(incident.message, "发生运行异常。", 500)} /><Button onClick={() => { c.setSessionMode("connection"); c.setDiagnosticMode("records") }}>查看连接事件</Button></Stack></Card> : null}
+    <Toolbar><ToolbarGroup><Button tone="primary" onClick={() => { c.setDiagnosticMode("test") }}>进入调试</Button><Button onClick={() => { c.setPage("settings") }}>打开设置</Button></ToolbarGroup></Toolbar>
   </Stack>
 }

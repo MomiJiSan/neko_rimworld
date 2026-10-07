@@ -28,6 +28,7 @@
   这些都是同一个结构性缺陷：**证据没有绑定到主语**。v2 按主语建索引，并增加
   "全称量词必须绑定完整集合"的检查。
 """
+
 from __future__ import annotations
 
 import json
@@ -45,11 +46,18 @@ CLAIM_CLASSES = (
         # 实测失败：两场咨询把 held=false（排除持有物）的结果描述成“含被持有容器内容”，
         # 把真实的 74 单位报成 0。这一条是**确定性**的：观察里就带着范围标志，
         # 只要本轮没有任何一次读取是 include_held=true，这个声称就与证据矛盾。
-        patterns=(r"含被持有", r"包含被持有", r"含持有", r"包括(?:随身|身上|库存)", r"含被持有物",
-                  r"including held", r"including (?:carried|contained)"),
+        patterns=(
+            r"含被持有",
+            r"包含被持有",
+            r"含持有",
+            r"包括(?:随身|身上|库存)",
+            r"含被持有物",
+            r"including held",
+            r"including (?:carried|contained)",
+        ),
         evidence=("include_held_true",),
         hint="本轮没有任何一次读取包含持有物（include_held=true）。请读 include_held=true 后重报，"
-             "或把措辞改成“仅地图上生成的物体”。",
+        "或把措辞改成“仅地图上生成的物体”。",
     ),
     dict(
         code="fog_inclusive_claim",
@@ -57,7 +65,7 @@ CLAIM_CLASSES = (
         patterns=(r"含迷雾", r"包含迷雾", r"包括迷雾", r"含迷雾中", r"including fog", r"including fogged"),
         evidence=("include_fogged_true",),
         hint="本轮没有任何一次读取包含迷雾（include_fogged=true）。请读 include_fogged=true 后重报，"
-             "或把措辞改成“仅当前可见”。",
+        "或把措辞改成“仅当前可见”。",
     ),
     dict(
         code="identity_claim",
@@ -72,26 +80,31 @@ CLAIM_CLASSES = (
         # 改用系词前缀后，命中数降到 7，其中只有 1 条误报。
         # 用固定宽度回顾（Python re 不支持变长）：命中点落在名词上，
         # 前面的否定词才能被否定检查看到。
-        patterns=(r"(?<=是)殖民者|(?<=为)殖民者|(?<=算)殖民者|(?<=的)殖民者|(?<=属于)殖民者"
-                  r"|(?<=都是)殖民者|(?<=同为)殖民者|(?<=不是)殖民者|(?<=并非)殖民者",
-                  r"我方人员", r"我们的(?:人|成员)",
-                  # 派系归属也要求同一类证据：“属于玩家派系”是在断言身份事实。
-                  r"(?:属于|是|为)\s*(?:玩家|我方|我们的)?\s*(?:派系|阵营)",
-                  r"(?:are|is|were)\s+(?:a\s+|the\s+|our\s+)?colonists?\b",
-                  r"\bour (?:member|colonist)s?\b"),
+        patterns=(
+            r"(?<=是)殖民者|(?<=为)殖民者|(?<=算)殖民者|(?<=的)殖民者|(?<=属于)殖民者"
+            r"|(?<=都是)殖民者|(?<=同为)殖民者|(?<=不是)殖民者|(?<=并非)殖民者",
+            r"我方人员",
+            r"我们的(?:人|成员)",
+            # 派系归属也要求同一类证据：“属于玩家派系”是在断言身份事实。
+            r"(?:属于|是|为)\s*(?:玩家|我方|我们的)?\s*(?:派系|阵营)",
+            r"(?:are|is|were)\s+(?:a\s+|the\s+|our\s+)?colonists?\b",
+            r"\bour (?:member|colonist)s?\b",
+        ),
         evidence=("identity", "faction", "colonists_root"),
         hint="先读该对象的 identity/faction（例如 is_free_colonist、faction.is_player），"
-             "或把措辞限定为“该对象属于哪个派系未读取”。",
+        "或把措辞限定为“该对象属于哪个派系未读取”。",
     ),
     dict(
         code="ownership_claim",
         label="归属断言",
         # 只授权“在某玩家派系成员手里”——held_by_faction 能建立这一步。
-        patterns=(r"我们的(?:物资|资源|库存|财产)", r"我方(?:物资|资源|财产)",
-                  r"\bour (?:supplies|resources|property)\b"),
+        patterns=(
+            r"我们的(?:物资|资源|库存|财产)",
+            r"我方(?:物资|资源|财产)",
+            r"\bour (?:supplies|resources|property)\b",
+        ),
         evidence=("held_by_faction",),
-        hint="先读 held_by_faction.is_player（谁持有它、那个持有者是否属于玩家派系），"
-             "或明确写成“归属未确认”。",
+        hint="先读 held_by_faction.is_player（谁持有它、那个持有者是否属于玩家派系），或明确写成“归属未确认”。",
     ),
     dict(
         code="usability_claim",
@@ -105,28 +118,36 @@ CLAIM_CLASSES = (
         # 那是在说答复本身可直接使用，不是在说游戏物品可取用。所以“使用”
         # 必须带领域宾语（物资/资源/…），“交易/调配/动用/拿取/取用”本身
         # 就足够领域特定。
-        patterns=(r"(?:物资|资源|物品|库存|货物|装备|武器|药品|食物|黄金|白银|零件|材料)[^。；\n]{0,8}?可以[^。；\n]{0,4}?(?:交易|使用|调配|动用|拿取|取用)",
-                  r"可以[^。；\n]{0,4}?(?:交易|调配|动用|拿取|取用)",
-                  r"\bcan be (?:traded|used|taken)\b", r"\bavailable for (?:trade|use)\b"),
+        patterns=(
+            r"(?:物资|资源|物品|库存|货物|装备|武器|药品|食物|黄金|白银|零件|材料)[^。；\n]{0,8}?可以[^。；\n]{0,4}?(?:交易|使用|调配|动用|拿取|取用)",
+            r"可以[^。；\n]{0,4}?(?:交易|调配|动用|拿取|取用)",
+            r"\bcan be (?:traded|used|taken)\b",
+            r"\bavailable for (?:trade|use)\b",
+        ),
         evidence=(),
         # 显式声明：没有任何字段能授权这一类，所以总是拒绝。旧版靠“空 tuple 为假”
         # 顺带得到这个行为，重构时极易被“修掉”。
         always_reject=True,
         hint="单凭持有关系不能断言可取用/可交易：这些条件在只读 schema 里没有字段。"
-             "请改成“由某玩家派系成员持有”，并明确写成“可取用/可交易条件未确认”。",
+        "请改成“由某玩家派系成员持有”，并明确写成“可取用/可交易条件未确认”。",
     ),
     # 因果（"因为…所以…"）**有意不在此列**：字段证据无法判定一个机制解释是否成立，
     # 写成任何模式都只是假装覆盖。因果由复核/评分处理，不由提交时机械检查处理。
-
     dict(
         code="health_completeness_claim",
         label="健康完整性断言",
-        patterns=(r"完全健康", r"没有(?:任何)?(?:伤|病|问题)", r"无(?:伤|病)情", r"\bfully healthy\b",
-                  r"\bno injuries\b", r"\bcompletely healthy\b"),
+        patterns=(
+            r"完全健康",
+            r"没有(?:任何)?(?:伤|病|问题)",
+            r"无(?:伤|病)情",
+            r"\bfully healthy\b",
+            r"\bno injuries\b",
+            r"\bcompletely healthy\b",
+        ),
         evidence=("health_conditions",),
         hint="先读 health 的 conditions（含隐藏条目，visible_only=false）。"
-             "部位 HP 与行动能力都不能代替这份名单。"
-             "或写“已读的汇总值正常，但不能据此认定完全健康”。",
+        "部位 HP 与行动能力都不能代替这份名单。"
+        "或写“已读的汇总值正常，但不能据此认定完全健康”。",
     ),
 )
 
@@ -138,10 +159,12 @@ CLAIM_CLASSES = (
 #   * “12 项技能**全部**已知”说的是字段完整，不是列举完整
 # 所以量词必须与一个**数字紧邻**才算在数集合。
 QUANTIFIER_TOTAL_PATTERNS = (
-    r"全部\s*\d+", r"所有\s*\d+",
+    r"全部\s*\d+",
+    r"所有\s*\d+",
     r"\d+\s*(?:个|项|条|种|名|处|件|组|类)?\s*[，,]?\s*全部",
     r"\d+\s*(?:个|项|条|种|名|处|件|组|类)?\s*[，,]?\s*均(?:为|是|已|无)",
-    r"\ball\s+\d+", r"\d+\s+of\s+\d+\s+are\s+all\b",
+    r"\ball\s+\d+",
+    r"\d+\s+of\s+\d+\s+are\s+all\b",
 )
 # 排他性断言：只有当子句点名了某个**部分集合里的行标签**时才算越界，
 # 因为“唯一”本身也常用于描述本次返回。
@@ -155,10 +178,32 @@ QUANTIFIER_LABEL_PATTERNS = (r"唯一", r"仅有", r"只有", r"全部", r"所�
 # 实测（v1.10）：这条豁免只应用于“聚合本身被断言完整”的场合；
 # 后一句、另一个集合、聚合不完整（measure 无 complete / 扫描未完成 / 只有 request）都不适用。
 AGGREGATE_NARRATION_WORDS = ("聚合", "统计", "总计", "总量", "合计", "求和", "汇总", "总数")
-ROW_LEVEL_MARKERS = ("逐项", "逐条", "逐行", "逐个", "逐一", "每一项", "每一行", "每一件",
-                     "每个实例", "每个对象", "明细都", "完整明细", "完整清单", "完整列表",
-                     "全部读完", "全部读取", "均已读取", "都已读取", "均已检查", "都已检查",
-                     "均已核对", "都已核对", "均已确认", "都已确认")
+ROW_LEVEL_MARKERS = (
+    "逐项",
+    "逐条",
+    "逐行",
+    "逐个",
+    "逐一",
+    "每一项",
+    "每一行",
+    "每一件",
+    "每个实例",
+    "每个对象",
+    "明细都",
+    "完整明细",
+    "完整清单",
+    "完整列表",
+    "全部读完",
+    "全部读取",
+    "均已读取",
+    "都已读取",
+    "均已检查",
+    "都已检查",
+    "均已核对",
+    "都已核对",
+    "均已确认",
+    "都已确认",
+)
 
 
 def _licenses_aggregate_narration(clause: str, item: Mapping[str, Any], *, require_noun: bool = True) -> bool:
@@ -175,21 +220,66 @@ def _licenses_aggregate_narration(clause: str, item: Mapping[str, Any], *, requi
         return False
     return any(word in clause for word in AGGREGATE_NARRATION_WORDS) if require_noun else True
 
+
 # ---------------------------------------------------------------------------
 # 否定 / 引号
 # ---------------------------------------------------------------------------
 
 # 宽窗口标记：出现在**同一子句**内的触发词之前，说明这句说的是"没有/不能断定"。
-NEGATION = ("不能", "不可断言", "不可认定", "无法", "不足以", "并不", "并非", "不等于", "未读", "没读", "没有读",
-            "不能据此", "不足以说明", "未确认", "无法确认", "无从", "不能直接", "未取", "未获得",
-            # 实测（离线复演 v1.3 真实答案）：模型写的是“**也不代表**只有两件实物”，
-            # 是一句正确的否定，却被量词检查误判成断言。这类“不代表/不意味着/而非”
-            # 的否定形式必须认。
-            "不代表", "不意味着", "不构成", "不等同", "而非", "不是", "不能说明", "不应当", "不在",
-            # 疑问语境不是断言：实测标题“## 能否直接算作“我们的物资””曾被误拒。
-            "能否", "是否", "可否", "是不是", "算不算", "有没有",
-            "cannot", "can not", "can't", "not ", "no evidence", "does not", "doesn't", "insufficient",
-            "whether", "is it", "does not support", "not support", "no support", "fails to")
+NEGATION = (
+    "不能",
+    "不可断言",
+    "不可认定",
+    "无法",
+    "不足以",
+    "并不",
+    "并非",
+    "不等于",
+    "未读",
+    "没读",
+    "没有读",
+    "不能据此",
+    "不足以说明",
+    "未确认",
+    "无法确认",
+    "无从",
+    "不能直接",
+    "未取",
+    "未获得",
+    # 实测（离线复演 v1.3 真实答案）：模型写的是“**也不代表**只有两件实物”，
+    # 是一句正确的否定，却被量词检查误判成断言。这类“不代表/不意味着/而非”
+    # 的否定形式必须认。
+    "不代表",
+    "不意味着",
+    "不构成",
+    "不等同",
+    "而非",
+    "不是",
+    "不能说明",
+    "不应当",
+    "不在",
+    # 疑问语境不是断言：实测标题“## 能否直接算作“我们的物资””曾被误拒。
+    "能否",
+    "是否",
+    "可否",
+    "是不是",
+    "算不算",
+    "有没有",
+    "cannot",
+    "can not",
+    "can't",
+    "not ",
+    "no evidence",
+    "does not",
+    "doesn't",
+    "insufficient",
+    "whether",
+    "is it",
+    "does not support",
+    "not support",
+    "no support",
+    "fails to",
+)
 
 # 紧邻标记：中文否定常常直接贴在名词前（"没有殖民者"、"无殖民者"、"未见异常"）。
 # 只在命中点前 8 个字符内检查，避免"无"这种单字在长句里过度抑制。
@@ -276,7 +366,7 @@ def _hit_is_negated(text: str, hit: re.Match[str], index: Mapping[str, Any] | No
     if _inside_quotes(text, hit.start(), hit.end()):
         return True
     start, _ = _clause_span(text, hit.start())
-    before = text[start:hit.start()]
+    before = text[start : hit.start()]
     # “不可否认” is affirmative, not the question marker “可否”. Preserve an
     # enclosing genuine negation/question while neutralizing this substring.
     before = before.replace("不可否认", "承认")
@@ -355,8 +445,9 @@ def _population_signature(node: Mapping[str, Any], total: int | None) -> str | N
     if not isinstance(args, Mapping):
         return None
     try:
-        return json.dumps([node.get("from"), dict(args), scope.get("where"), total],
-                          sort_keys=True, ensure_ascii=False, default=str)
+        return json.dumps(
+            [node.get("from"), dict(args), scope.get("where"), total], sort_keys=True, ensure_ascii=False, default=str
+        )
     except (TypeError, ValueError):
         return None
 
@@ -371,7 +462,11 @@ def _completed_legacy_state_scope(observation: Mapping[str, Any]) -> dict[str, b
     """
     request = observation.get("request")
     response = observation.get("response")
-    if not isinstance(request, Mapping) or request.get("operation") != "inspect_state" or not isinstance(response, Mapping):
+    if (
+        not isinstance(request, Mapping)
+        or request.get("operation") != "inspect_state"
+        or not isinstance(response, Mapping)
+    ):
         return {}
     payload = response.get("payload")
     if not isinstance(payload, Mapping) or payload.get("status") != "ok":
@@ -389,11 +484,17 @@ def _completed_legacy_state_scope(observation: Mapping[str, Any]) -> dict[str, b
         if not isinstance(row, Mapping) or not isinstance(target, Mapping):
             return {}
         identity, facets, coverage = row.get("target"), row.get("facets"), row.get("coverage")
-        if (not isinstance(identity, Mapping) or not isinstance(identity.get("id"), str)
-                or not isinstance(facets, Mapping) or not facets
-                or not isinstance(coverage, Mapping) or coverage.get("registered_facets_read_successfully") is not True
-                or row.get("status") in ("unavailable", "unsupported")
-                or target.get("id") is not None and target["id"] != identity["id"]):
+        if (
+            not isinstance(identity, Mapping)
+            or not isinstance(identity.get("id"), str)
+            or not isinstance(facets, Mapping)
+            or not facets
+            or not isinstance(coverage, Mapping)
+            or coverage.get("registered_facets_read_successfully") is not True
+            or row.get("status") in ("unavailable", "unsupported")
+            or target.get("id") is not None
+            and target["id"] != identity["id"]
+        ):
             return {}
     return {"include_fogged_true": True} if args.get("include_fogged") is True else {}
 
@@ -458,8 +559,7 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
             if subject is not None:
                 index["labels"].setdefault(value, subject)
 
-    def collection(node: Mapping[str, Any], subject: str | None,
-                   refresh_key: str | None, sequence: int | None) -> None:
+    def collection(node: Mapping[str, Any], subject: str | None, refresh_key: str | None, sequence: int | None) -> None:
         rows = None
         for key in _ROW_KEYS:
             value = node.get(key)
@@ -479,27 +579,29 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
         # 聚合覆盖是**另一个问题**：发布过的返回契约说明，扫描与声明的度量
         # 完整时，聚合就是精确值，即使明细页只展示了一部分。
         aggregate_complete = (
-            bool(measures) and node.get("scan_complete") is True
-            and all(isinstance(measure, Mapping) and measure.get("complete") is True
-                    for measure in measures.values())
+            bool(measures)
+            and node.get("scan_complete") is True
+            and all(isinstance(measure, Mapping) and measure.get("complete") is True for measure in measures.values())
         )
         signature = _population_signature(node, total)
         if rows is None:
             # 只算聚合的结果节点没有明细键（limit 0）。它不构成“部分列举”，
             # 但必须记录，否则它的聚合完整性就丢了——实测（v1.10）就是这种节点
             # 与明细页分属两个结果，导致完整聚合被当成不完整明细。
-            index["collections"].append({
-                "total": total,
-                "returned": 0,
-                "complete": True,
-                "aggregate_complete": bool(aggregate_complete),
-                "signature": signature,
-                "refresh_key": (refresh_key, total) if refresh_key is not None else None,
-                "snapshot_sequence": sequence,
-                "labels": set(),
-                "subject": subject,
-                "owner_required": isinstance(node.get("scope"), Mapping) and bool(node["scope"].get("relation")),
-            })
+            index["collections"].append(
+                {
+                    "total": total,
+                    "returned": 0,
+                    "complete": True,
+                    "aggregate_complete": bool(aggregate_complete),
+                    "signature": signature,
+                    "refresh_key": (refresh_key, total) if refresh_key is not None else None,
+                    "snapshot_sequence": sequence,
+                    "labels": set(),
+                    "subject": subject,
+                    "owner_required": isinstance(node.get("scope"), Mapping) and bool(node["scope"].get("relation")),
+                }
+            )
             return
         page = node.get("page") if isinstance(node.get("page"), Mapping) else {}
         has_more = page.get("has_more")
@@ -524,27 +626,37 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
                         labels.add(value)
             elif isinstance(row, str) and len(row) >= 2:
                 labels.add(row)
-        index["collections"].append({
-            "total": total,
-            "returned": len(rows),
-            "refresh_complete": (complete and node.get("scan_complete") is True
-                                 and node.get("fields_complete") is True
-                                 and total == len(rows)),
-            "complete": bool(complete),
-            "aggregate_complete": bool(aggregate_complete),
-            "signature": signature,
-            "refresh_key": (refresh_key, total) if refresh_key is not None else None,
-            "snapshot_sequence": sequence,
-            "labels": labels,
-            "subject": subject,
-            "owner_required": isinstance(node.get("scope"), Mapping) and bool(node["scope"].get("relation")),
-            "observed_rows": rows,
-            "native_state_complete": node.get("_native_state_complete") is True,
-        })
+        index["collections"].append(
+            {
+                "total": total,
+                "returned": len(rows),
+                "refresh_complete": (
+                    complete
+                    and node.get("scan_complete") is True
+                    and node.get("fields_complete") is True
+                    and total == len(rows)
+                ),
+                "complete": bool(complete),
+                "aggregate_complete": bool(aggregate_complete),
+                "signature": signature,
+                "refresh_key": (refresh_key, total) if refresh_key is not None else None,
+                "snapshot_sequence": sequence,
+                "labels": labels,
+                "subject": subject,
+                "owner_required": isinstance(node.get("scope"), Mapping) and bool(node["scope"].get("relation")),
+                "observed_rows": rows,
+                "native_state_complete": node.get("_native_state_complete") is True,
+            }
+        )
 
-    def walk(node: Any, subject: str | None, depth: int,
-             path: tuple[str, ...] = (), sample: tuple[Any, ...] | None = None,
-             scopes: tuple[Any, ...] = ()) -> None:
+    def walk(
+        node: Any,
+        subject: str | None,
+        depth: int,
+        path: tuple[str, ...] = (),
+        sample: tuple[Any, ...] | None = None,
+        scopes: tuple[Any, ...] = (),
+    ) -> None:
         if budget[0] <= 0 or depth > _MAX_DEPTH:
             return
         if isinstance(node, list):
@@ -586,9 +698,14 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
                     if field == "conditions" and pawn.get("conditions_complete") is True:
                         options = {"visible_only": False}
                     normalized[parent][field] = {
-                        "rows": [{("def_name" if key == "definition" else key): value for key, value in row.items()}
-                                 for row in values if isinstance(row, Mapping)],
-                        "matched_count": pawn.get(field + "_total", len(values)), "scan_complete": True, "fields_complete": True,
+                        "rows": [
+                            {("def_name" if key == "definition" else key): value for key, value in row.items()}
+                            for row in values
+                            if isinstance(row, Mapping)
+                        ],
+                        "matched_count": pawn.get(field + "_total", len(values)),
+                        "scan_complete": True,
+                        "fields_complete": True,
                         "page": {"offset": 0, "has_more": pawn.get(field + "_complete") is False},
                         "scope": {"relation": relation, "args": options, "where": {}},
                         "_native_state_complete": field == "capacities" and pawn.get(field + "_complete") is not False,
@@ -616,23 +733,33 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
             scopes = ()
         # Only observed response metadata establishes freshness. Missing identity
         # is deliberately not a wildcard; request arguments never authorize refresh.
-        sample_keys = ("connection_epoch", "colony_id", "load_epoch", "game_tick",
-                       "snapshot_sequence")
+        sample_keys = ("connection_epoch", "colony_id", "load_epoch", "game_tick", "snapshot_sequence")
         if all(key in node and node[key] is not None for key in sample_keys):
             sample = tuple(node[key] for key in sample_keys)
         scope = node.get("scope")
         if isinstance(scope, Mapping):
-            scopes = (*scopes, {"from": node.get("from"),
-                               "relation": scope.get("relation"),
-                               "args": scope.get("args"),
-                               "where": scope.get("where"),
-                               "result_where": node.get("where")})
+            scopes = (
+                *scopes,
+                {
+                    "from": node.get("from"),
+                    "relation": scope.get("relation"),
+                    "args": scope.get("args"),
+                    "where": scope.get("where"),
+                    "result_where": node.get("where"),
+                },
+            )
         refresh_key = None
         sequence = sample[-1] if sample is not None else None
-        if (sample is not None and type(sequence) is int and sequence >= 0
-                and isinstance(scope, Mapping) and isinstance(scope.get("args"), Mapping)):
-            refresh_key = json.dumps([sample[:-1], local, path, scopes], sort_keys=True,
-                                     ensure_ascii=False, default=str)
+        if (
+            sample is not None
+            and type(sequence) is int
+            and sequence >= 0
+            and isinstance(scope, Mapping)
+            and isinstance(scope.get("args"), Mapping)
+        ):
+            refresh_key = json.dumps(
+                [sample[:-1], local, path, scopes], sort_keys=True, ensure_ascii=False, default=str
+            )
         collection(node, local, refresh_key, sequence)
         # 关系自带的读取口径是**观测自己声明的**，不是模型说的：结果节点上的
         # `scope.relation` 指出这是哪个关系，`scope.args` 是解析后的参数（默认值
@@ -643,8 +770,7 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
         if isinstance(node_scope, Mapping) and node_scope.get("relation") == HEALTH_CONDITIONS_RELATION:
             options = node_scope.get("args")
             included = isinstance(options, Mapping) and options.get("visible_only") is False
-            entry(local)["fields"].add(
-                "health_conditions_all" if included else "health_conditions_visible")
+            entry(local)["fields"].add("health_conditions_all" if included else "health_conditions_visible")
         for key, value in node.items():
             if key == "request":
                 # 请求参数不是观察结果：失败的请求不构成证据。
@@ -668,8 +794,7 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
             continue
         if item.get("refresh_complete"):
             later_complete[key] = max(later_complete.get(key, -1), item["snapshot_sequence"])
-        elif (not item["complete"] and key in later_complete
-              and later_complete[key] >= item["snapshot_sequence"]):
+        elif not item["complete"] and key in later_complete and later_complete[key] >= item["snapshot_sequence"]:
             item["superseded"] = True
     # A full native state read remains evidence after a narrower projection of
     # the same capacities in the same tick ONLY when all overlapping identities
@@ -679,44 +804,67 @@ def build_read_index(observations: Iterable[Mapping[str, Any]]) -> dict[str, Any
         if partial["complete"] or partial.get("superseded") or not partial.get("refresh_key"):
             continue
         for complete in completed_state:
-            if complete.get("refresh_key") != partial["refresh_key"] or complete["snapshot_sequence"] > partial["snapshot_sequence"]:
+            if (
+                complete.get("refresh_key") != partial["refresh_key"]
+                or complete["snapshot_sequence"] > partial["snapshot_sequence"]
+            ):
                 continue
-            known = {row.get("def_name"): row.get("level") for row in complete.get("observed_rows", []) if isinstance(row, Mapping)}
+            known = {
+                row.get("def_name"): row.get("level")
+                for row in complete.get("observed_rows", [])
+                if isinstance(row, Mapping)
+            }
             observed = partial.get("observed_rows", [])
-            if known and observed and all(isinstance(row, Mapping) and row.get("def_name") in known
-                                          and "level" in row and row["level"] == known[row["def_name"]] for row in observed):
+            if (
+                known
+                and observed
+                and all(
+                    isinstance(row, Mapping)
+                    and row.get("def_name") in known
+                    and "level" in row
+                    and row["level"] == known[row["def_name"]]
+                    for row in observed
+                )
+            ):
                 partial["superseded"] = True
                 break
     # 聚合完整性与明细完整性可能来自**不同的结果节点**（先查聚合，再查明细页）。
     # 返回契约按“同一总体”判定，所以把同一 from/args/where 的完整聚合关联到
     # 该总体的所有集合条目上。不同 def/范围 → 不同签名 → 不会互相授权。
     complete_populations = {
-        item["signature"] for item in index["collections"]
+        item["signature"]
+        for item in index["collections"]
         if item.get("aggregate_complete") and item.get("signature") is not None
     }
     if complete_populations:
         for item in index["collections"]:
             if item.get("signature") in complete_populations:
                 item["aggregate_complete"] = True
-    index["flags"]["colonists_root"] = bool(
-        index["roots"] & {"spawned_free_colonists", "colonists", "colonist"})
+    index["flags"]["colonists_root"] = bool(index["roots"] & {"spawned_free_colonists", "colonists", "colonist"})
     return index
 
 
-def observed_categories(observations: Iterable[Mapping[str, Any]],
-                        index: Mapping[str, Any] | None = None) -> dict[str, bool]:
+def observed_categories(
+    observations: Iterable[Mapping[str, Any]], index: Mapping[str, Any] | None = None
+) -> dict[str, bool]:
     """扁平证据视图，保留旧接口。
 
     新代码应使用 :func:`build_read_index`：这个视图会丢掉主语绑定，只适合
     兼容调用方与结构自检。
     """
     idx = dict(index) if index is not None else build_read_index(observations)
-    found = dict(identity=False, faction=False, held_by_faction=False,
-                 health_conditions=False, health_conditions_visible_only=False,
-                 health_body_parts=False, health_capacities=False,
-                 include_held_true=bool(idx["flags"]["include_held_true"]),
-                 include_fogged_true=bool(idx["flags"]["include_fogged_true"]),
-                 colonists_root=bool(idx["flags"]["colonists_root"]))
+    found = dict(
+        identity=False,
+        faction=False,
+        held_by_faction=False,
+        health_conditions=False,
+        health_conditions_visible_only=False,
+        health_body_parts=False,
+        health_capacities=False,
+        include_held_true=bool(idx["flags"]["include_held_true"]),
+        include_fogged_true=bool(idx["flags"]["include_fogged_true"]),
+        colonists_root=bool(idx["flags"]["colonists_root"]),
+    )
     buckets = [idx["global"], *idx["subjects"].values()]
     for bucket in buckets:
         fields = bucket["fields"]
@@ -796,13 +944,11 @@ def _evidence_present(index: Mapping[str, Any], evidence: Sequence[str], text: s
         return True
     mentioned = _mentioned_subjects(text, index)
     if mentioned:
-        return all(any(subject in _subjects_for(index, name) for name in evidence)
-                   for subject in mentioned)
+        return all(any(subject in _subjects_for(index, name) for name in evidence) for subject in mentioned)
     return any(None in _subjects_for(index, name) for name in evidence)
 
 
-def _identity_evidence(index: Mapping[str, Any], evidence: Sequence[str],
-                       text: str, hit: re.Match[str]) -> bool | None:
+def _identity_evidence(index: Mapping[str, Any], evidence: Sequence[str], text: str, hit: re.Match[str]) -> bool | None:
     """Bind only simple identity predicates; None means grammar is ambiguous.
 
     Subject grammar: an exact observed name/ID, an ASCII name/ID (including
@@ -812,7 +958,7 @@ def _identity_evidence(index: Mapping[str, Any], evidence: Sequence[str],
     This intentionally is not a general Chinese name/relative-clause parser.
     """
     start, _ = _clause_span(text, hit.start())
-    prefix = text[start:hit.start()].strip()
+    prefix = text[start : hit.start()].strip()
     # A quantified unnamed population is an explicit group, not a relative
     # clause. One named pawn's evidence cannot establish this population.
     if re.fullmatch(r"(?:这|那)?\s*\d+\s*(?:名|位|个)(?:殖民者)?(?:全部|都|均)?", prefix):
@@ -845,7 +991,7 @@ def _identity_evidence(index: Mapping[str, Any], evidence: Sequence[str],
             copula = re.search(r"(?:都是|同为|属于|是|为|算)(?:我们的)?\s*$", prefix)
             if copula is None:
                 return None
-            prefix = prefix[:copula.start()].strip()
+            prefix = prefix[: copula.start()].strip()
 
     aliases: dict[str, set[str]] = {}
     for key in index["subjects"]:
@@ -875,32 +1021,31 @@ def _identity_evidence(index: Mapping[str, Any], evidence: Sequence[str],
         if len(keys) > 1:
             return None  # duplicate labels do not identify a unique subject
         subjects.append(next(iter(keys)) if keys else (None if name in pronouns else ""))
-        remaining = remaining[match.end():]
+        remaining = remaining[match.end() :]
         if remaining:
             join = re.match(separator, remaining)
             if join is None:
                 return None
-            remaining = remaining[join.end():]
-    return all(any(subject in _subjects_for(index, label) for label in evidence)
-               for subject in subjects)
+            remaining = remaining[join.end() :]
+    return all(any(subject in _subjects_for(index, label) for label in evidence) for subject in subjects)
 
 
 def _health_evidence(index, evidence, text, hit):
     """Hard-check only a resolvable health subject, including a named table row."""
     start, _ = _clause_span(text, hit.start())
-    prefix = text[start:hit.start()].strip()
+    prefix = text[start : hit.start()].strip()
     # This is affirmative, unlike '不可断言'. Keep its existing evidence check.
-    prefix = re.sub(r'^不可否认\s*', '', prefix)
-    row_start = text.rfind('\n', 0, hit.start()) + 1
-    row = text[row_start:text.find('\n', hit.start()) if '\n' in text[hit.start():] else len(text)]
-    if row.lstrip().startswith('|'):
+    prefix = re.sub(r"^不可否认\s*", "", prefix)
+    row_start = text.rfind("\n", 0, hit.start()) + 1
+    row = text[row_start : text.find("\n", hit.start()) if "\n" in text[hit.start() :] else len(text)]
+    if row.lstrip().startswith("|"):
         # Do not borrow an arbitrary name elsewhere in the report. A Markdown
         # row with one exact subject cell is an explicit local binding.
-        prefix = row.strip().split('|')[1].strip()
-    prefix = re.sub(r'(?:目前|当前|现在)?(?:都是|均为|是|为)\s*$', '', prefix).strip()
-    if prefix in {'他', '她', '它', '他们', '她们', '它们', '该对象', '自身'}:
+        prefix = row.strip().split("|")[1].strip()
+    prefix = re.sub(r"(?:目前|当前|现在)?(?:都是|均为|是|为)\s*$", "", prefix).strip()
+    if prefix in {"他", "她", "它", "他们", "她们", "它们", "该对象", "自身"}:
         return None
-    rebound = prefix + ' ' + hit.group(0)
+    rebound = prefix + " " + hit.group(0)
     rebound_hit = re.compile(re.escape(hit.group(0))).search(rebound, len(prefix))
     return _identity_evidence(index, evidence, rebound, rebound_hit)
 
@@ -945,16 +1090,23 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
             return
         reported.add((start, end))
         total = item["total"]
-        shape = (f"matched={total}, returned={item['returned']}"
-                 if total is not None else f"returned={item['returned']}")
-        rejected.append(dict(
-            code="incomplete_quantifier_claim",
-            label="对不完整集合使用全称/排他量词",
-            quote=hit.group(0), start=hit.start(), end=hit.end(),
-            clause=text[start:end], clause_start=start, clause_end=end,
-            hint=(f"本轮有一次读取只返回了部分结果（{shape}，listing partial）：{reason}。"
-                  f"请先读完，或把措辞改成“已返回的 {item['returned']} 项中……”并说明总数未完整列举。"),
-        ))
+        shape = f"matched={total}, returned={item['returned']}" if total is not None else f"returned={item['returned']}"
+        rejected.append(
+            dict(
+                code="incomplete_quantifier_claim",
+                label="对不完整集合使用全称/排他量词",
+                quote=hit.group(0),
+                start=hit.start(),
+                end=hit.end(),
+                clause=text[start:end],
+                clause_start=start,
+                clause_end=end,
+                hint=(
+                    f"本轮有一次读取只返回了部分结果（{shape}，listing partial）：{reason}。"
+                    f"请先读完，或把措辞改成“已返回的 {item['returned']} 项中……”并说明总数未完整列举。"
+                ),
+            )
+        )
 
     def first_citing(cited: set[int], clause: str) -> Mapping[str, Any] | None:
         for item in partial:
@@ -979,7 +1131,14 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
             clause = text[start:end]
             # 只看量词附近的数字：远处出现同一个数字不算数这个集合。
             local = _cited_numbers(hit.group(0))
-            item = next((c for c in partial if isinstance(c["total"], int) and c["total"] in local and owner_is_bound(c, clause)), None)
+            item = next(
+                (
+                    c
+                    for c in partial
+                    if isinstance(c["total"], int) and c["total"] in local and owner_is_bound(c, clause)
+                ),
+                None,
+            )
             if item is None:
                 continue
             if _licenses_aggregate_narration(clause, item, require_noun=False):
@@ -992,7 +1151,10 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
                 continue
             start, end = _clause_span(text, hit.start())
             clause = text[start:end]
-            item = next((c for c in partial if owner_is_bound(c, clause) and any(label in clause for label in c["labels"])), None)
+            item = next(
+                (c for c in partial if owner_is_bound(c, clause) and any(label in clause for label in c["labels"])),
+                None,
+            )
             if item is None:
                 continue
             if _licenses_aggregate_narration(clause, item):
@@ -1001,8 +1163,7 @@ def _quantifier_rejections(text: str, index: Mapping[str, Any]) -> list[dict]:
     return rejected
 
 
-def check_claims(answer, detail=None, *, observations=(),
-                 index: Mapping[str, Any] | None = None) -> list[dict]:
+def check_claims(answer, detail=None, *, observations=(), index: Mapping[str, Any] | None = None) -> list[dict]:
     """Check every affirmative occurrence, with evidence bound to each subject.
 
     Offsets are Unicode character offsets in the named answer/detail field
@@ -1023,8 +1184,9 @@ def check_claims(answer, detail=None, *, observations=(),
     for field, path, text in fields:
         current = _quantifier_rejections(text, idx)
         for claim in CLAIM_CLASSES:
-            hits = {(hit.start(), hit.end()): hit
-                    for pattern in claim["patterns"] for hit in re.finditer(pattern, text)}
+            hits = {
+                (hit.start(), hit.end()): hit for pattern in claim["patterns"] for hit in re.finditer(pattern, text)
+            }
             for _, hit in sorted(hits.items()):
                 if _hit_is_negated(text, hit, idx):
                     continue
@@ -1034,15 +1196,26 @@ def check_claims(answer, detail=None, *, observations=(),
                     if supported is not False:
                         continue  # unsupported grammar is not proof of missing evidence
                 elif claim["code"] == "health_completeness_claim":
-                    supported = _health_evidence(idx, claim['evidence'], text, hit)
+                    supported = _health_evidence(idx, claim["evidence"], text, hit)
                     if supported is not False:
                         continue  # uncertain pronouns/prose must not force another read
-                elif not claim.get("always_reject") and _evidence_present(idx, claim["evidence"] or (), text[start:end]):
+                elif not claim.get("always_reject") and _evidence_present(
+                    idx, claim["evidence"] or (), text[start:end]
+                ):
                     continue
-                current.append(dict(code=claim["code"], label=claim["label"],
-                                    quote=hit.group(0), hint=claim["hint"],
-                                    start=hit.start(), end=hit.end(), clause=text[start:end],
-                                    clause_start=start, clause_end=end))
+                current.append(
+                    dict(
+                        code=claim["code"],
+                        label=claim["label"],
+                        quote=hit.group(0),
+                        hint=claim["hint"],
+                        start=hit.start(),
+                        end=hit.end(),
+                        clause=text[start:end],
+                        clause_start=start,
+                        clause_end=end,
+                    )
+                )
         rejected.extend({**item, "field": field, "path": path} for item in current)
     return rejected
 
@@ -1066,5 +1239,4 @@ def describe(rejected: Iterable[Mapping[str, Any]]) -> str:
     return " ".join(lines)
 
 
-__all__ = ["CLAIM_CLASSES", "build_read_index", "check_claims",
-           "describe", "observed_categories"]
+__all__ = ["CLAIM_CLASSES", "build_read_index", "check_claims", "describe", "observed_categories"]

@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from .prompt import PLAIN_ANSWER_GUIDANCE, PLAIN_DETAIL_GUIDANCE, PLAIN_SUBMISSION_GUIDANCE
-
 import copy
 import json
 import re
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Any, Iterable, Mapping
 
 from ..state import redact_text
+from .prompt import PLAIN_ANSWER_GUIDANCE, PLAIN_DETAIL_GUIDANCE, PLAIN_SUBMISSION_GUIDANCE
+from .tokenization import tokenizer as _tokenizer
 
 # The 180-token budget bounds the *model-authored* conclusion. Program-rendered
 # fact references travel in the same handoff but are not the model's wording, so
@@ -51,18 +50,6 @@ class HandoffValidationError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
-
-
-@lru_cache(maxsize=1)
-def _tokenizer() -> Any | None:
-    # tiktoken is supplied by the N.E.K.O host. A strict byte upper bound keeps
-    # the packaged plugin safe if it is unavailable in another environment.
-    try:
-        import tiktoken
-
-        return tiktoken.get_encoding("o200k_base")
-    except (ImportError, KeyError, RuntimeError, ValueError):
-        return None
 
 
 def count_handoff_tokens(text: str) -> tuple[int, str]:
@@ -148,8 +135,12 @@ def _answer_parts(value, *, references_supported=True):
             if extra:
                 message += " Unsupported fields: " + ", ".join(extra) + "."
             if top_level:
-                message += " Put " + ", ".join(top_level) + " at the top level of submit_response, not inside an answer part."
-            raise HandoffValidationError("unsupported_reference" if "observation_id" in part else "invalid_submission", message)
+                message += (
+                    " Put " + ", ".join(top_level) + " at the top level of submit_response, not inside an answer part."
+                )
+            raise HandoffValidationError(
+                "unsupported_reference" if "observation_id" in part else "invalid_submission", message
+            )
         if set(part) == {"text"}:
             normalized.append(
                 {"text": _validated_text(part["text"], field="answer.text", max_chars=MAX_FULL_TEXT_CHARS)}
@@ -245,6 +236,15 @@ def restated_values(text: str, values: Iterable[str]) -> list[str]:
     return sorted(_distinctive_numerals(text) & wanted)
 
 
+def rendered_authored_text(text: str,language: str) -> str:
+    """Remove only a trailing, matching tool-parameter serialization fragment.
+
+    Original submission parts remain unchanged. Native evidence/reference text
+    and embedded quoted markup are never routed through this cleanup.
+    """
+    return re.sub(r'</answer>\s*<parameter\s+name=[\"\x27]language[\"\x27]>\s*'+re.escape(language)+r'\s*(?:</parameter>)?\s*$', '',text).rstrip()
+
+
 def _render_answer(parts, observations, language):
     from .presentation import EvidenceError, render_evidence
 
@@ -256,11 +256,12 @@ def _render_answer(parts, observations, language):
             continue
         identity = part["observation_id"]
         paths = part.get("paths", [""])
-        if (not isinstance(paths, list) or not 1 <= len(paths) <= MAX_PATHS_PER_REFERENCE
-                or any(not isinstance(path, str) for path in paths)):
-            raise EvidenceError(
-                f"paths requires 1..{MAX_PATHS_PER_REFERENCE} data-relative JSON Pointers."
-            )
+        if (
+            not isinstance(paths, list)
+            or not 1 <= len(paths) <= MAX_PATHS_PER_REFERENCE
+            or any(not isinstance(path, str) for path in paths)
+        ):
+            raise EvidenceError(f"paths requires 1..{MAX_PATHS_PER_REFERENCE} data-relative JSON Pointers.")
         # Count the same observation across ALL parts, even when text or another
         # observation separates them. Normalize like the renderer so /a and a
         # are the same path. Keep rendering order independent of this limit.
@@ -293,9 +294,10 @@ def _render_answer(parts, observations, language):
     cited_parts: list[dict] = []
     for part in grouped:
         if "text" in part:
-            full.append(part["text"])
-            short.append(part["text"])
-            written.append(part["text"])
+            text=rendered_authored_text(part["text"],language)
+            full.append(text)
+            short.append(text)
+            written.append(text)
         else:
             cited_parts.append(part)
             body, brief, provenance = render_evidence([part], observations, language, _seen=seen_readings)
@@ -355,8 +357,9 @@ class SubmissionDraft:
             "complete": bool(self.full_text and self.agent_text and not self.errors),
         }
 
-    def apply(self, patch: Mapping[str, Any], *, observations=(), references_supported=True,
-              claims_supported=True) -> dict[str, Any]:
+    def apply(
+        self, patch: Mapping[str, Any], *, observations=(), references_supported=True, claims_supported=True
+    ) -> dict[str, Any]:
         from .presentation import EvidenceError
 
         if not patch or set(patch) - {"answer", "detail", "language"}:
@@ -389,12 +392,18 @@ class SubmissionDraft:
         # Text edits retain the saved report; checking prose consistency belongs
         # to the author/review. Only a changed explicit evidence dependency needs
         # reconfirmation, rather than treating every text edit as a new conclusion.
-        same_references = ([p for p in previous_answer if "text" not in p]
-                           == [p for p in self.answer if "text" not in p])
-        if ("answer" in changed and previous_answer and self.detail is not None and "detail" not in patch
-                and not same_references):
-            self.errors["detail"] = {"code": "submission_requires_confirmation",
-                                     "message": "Referenced evidence changed; update or reconfirm the matching detail."}
+        same_references = [p for p in previous_answer if "text" not in p] == [p for p in self.answer if "text" not in p]
+        if (
+            "answer" in changed
+            and previous_answer
+            and self.detail is not None
+            and "detail" not in patch
+            and not same_references
+        ):
+            self.errors["detail"] = {
+                "code": "submission_requires_confirmation",
+                "message": "Referenced evidence changed; update or reconfirm the matching detail.",
+            }
         if changed:
             self.revision += 1
         self.errors.pop("delivery", None)
@@ -412,10 +421,15 @@ class SubmissionDraft:
                 raise SubmissionPatchError(
                     first["code"],
                     "Unsupported claim needs evidence from this run: " + describe(rejected),
-                    {"saved_fields": self.snapshot()["saved_fields"],
-                     "rejected_claims": rejected,
-                     "required_fields": list(dict.fromkeys(item.get("field", "answer") for item in rejected))},
+                    {
+                        "saved_fields": self.snapshot()["saved_fields"],
+                        "rejected_claims": rejected,
+                        "required_fields": list(dict.fromkeys(item.get("field", "answer") for item in rejected)),
+                    },
                 )
+            # The current saved draft passed the claim check. A later length
+            # rejection must not inherit the previous draft's claim refusal.
+            self.claims_blocked = False
         self.full_text = self.agent_text = None
         fact_tokens = 0
         short = ""
@@ -457,7 +471,9 @@ class SubmissionDraft:
                     text_token_budget=HANDOFF_TOKEN_BUDGET,
                 )
             else:
-                details.update(handoff_tokens=count_handoff_tokens(short)[0] if short else None, token_budget=HANDOFF_TOKEN_BUDGET)
+                details.update(
+                    handoff_tokens=count_handoff_tokens(short)[0] if short else None, token_budget=HANDOFF_TOKEN_BUDGET
+                )
             first = next(iter(self.errors.values()))
             repair = " Valid inputs are saved. Correct the required fields."
             if references_supported and any("observation_id" in part for part in self.answer):
@@ -477,8 +493,7 @@ class SubmissionDraft:
                 )
             raise SubmissionPatchError(
                 first["code"],
-                " ".join(item["message"] for item in self.errors.values())
-                + repair,
+                " ".join(item["message"] for item in self.errors.values()) + repair,
                 details,
             )
         result = validate_submission(self.full_text, self.agent_text, fact_tokens=fact_tokens)
@@ -489,10 +504,11 @@ class SubmissionDraft:
         return result
 
 
-def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *, references_supported=True,
-                         claims_supported=True):
+def make_submission_tool(
+    draft: SubmissionDraft, observations, on_update=None, *, references_supported=True, claims_supported=True
+):
     """One production terminal implementation for the runtime and fixed-observation studies."""
-    from .tools import ToolExecutionError, ToolSpec
+    from .tool_contracts import ToolExecutionError, ToolSpec
 
     async def submit(arguments):
         arguments = dict(arguments)
@@ -514,16 +530,35 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
                 "unsupported_reference", "This Mod lacks result descriptions; submit answer as a plain text string."
             )
         try:
-            result = draft.apply(arguments, observations=observations,
-                                 references_supported=references_supported,
-                                 claims_supported=claims_supported)
+            result = draft.apply(
+                arguments,
+                observations=observations,
+                references_supported=references_supported,
+                claims_supported=claims_supported,
+            )
         except SubmissionPatchError as error:
             message = str(error)
             details = error.details
             if not references_supported:
                 import copy
+
                 def text_feedback(value):
-                    return value.replace("Submit answer parts, optional detail and language.", "Submit answer as text, optional detail and language.").replace("answer.text", "answer").replace("answer requires 1..16 ordered parts matching the submission schema.", "answer must be a nonempty text string.").replace("Provide answer parts for the short handoff; detail cannot replace them.", "Provide the short answer text; detail cannot replace it.")
+                    return (
+                        value.replace(
+                            "Submit answer parts, optional detail and language.",
+                            "Submit answer as text, optional detail and language.",
+                        )
+                        .replace("answer.text", "answer")
+                        .replace(
+                            "answer requires 1..16 ordered parts matching the submission schema.",
+                            "answer must be a nonempty text string.",
+                        )
+                        .replace(
+                            "Provide answer parts for the short handoff; detail cannot replace them.",
+                            "Provide the short answer text; detail cannot replace it.",
+                        )
+                    )
+
                 message = text_feedback(message)
                 details = copy.deepcopy(details)
                 for field_error in details.get("field_errors", {}).values():
@@ -593,7 +628,12 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
                     "maxLength": MAX_FULL_TEXT_CHARS,
                     "description": "Optional further explanation, excluded from the short handoff. null clears saved detail.",
                 },
-                "language": {"type": "string", "enum": ["zh", "en"], "default": "zh", "description": "Language of the whole submission. Set only here at the top level, never inside answer parts."},
+                "language": {
+                    "type": "string",
+                    "enum": ["zh", "en"],
+                    "default": "zh",
+                    "description": "Language of the whole submission. Set only here at the top level, never inside answer parts.",
+                },
             },
             "minProperties": 1,
             "additionalProperties": False,
@@ -603,8 +643,9 @@ def make_submission_tool(draft: SubmissionDraft, observations, on_update=None, *
     )
     if not references_supported:
         spec.parameters["properties"]["answer"] = {
-            "type": "string", "minLength": 1,
-            "description": PLAIN_ANSWER_GUIDANCE
+            "type": "string",
+            "minLength": 1,
+            "description": PLAIN_ANSWER_GUIDANCE,
         }
         spec.parameters["properties"]["detail"]["description"] = PLAIN_DETAIL_GUIDANCE
         return ToolSpec(

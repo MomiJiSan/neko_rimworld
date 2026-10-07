@@ -1,4 +1,5 @@
 """Composition for offline, old-Mod and native/semantic fallback paths."""
+
 from __future__ import annotations
 
 import asyncio
@@ -11,8 +12,9 @@ import pytest
 
 from plugin.plugins.neko_rimworld import NekoRimworldPlugin
 from plugin.plugins.neko_rimworld.agent.tools import ToolSetup
-from plugin.plugins.neko_rimworld.query_tools import make_game_tools
 from plugin.plugins.neko_rimworld.knowledge import KnowledgeLibrary
+from plugin.plugins.neko_rimworld.query_tools import make_game_tools
+from plugin.plugins.neko_rimworld.reports import ReportStore
 
 from .test_semantic_tools import _noop_query, catalog, setup_for
 from .test_wiki_tools import write_snapshot
@@ -28,19 +30,23 @@ def library(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["offline", "legacy", "native"])
 async def test_provider_composes_wiki_without_losing_original_setup(tmp_path, mode, library):
-    original = {"offline": ToolSetup((), "offline"),
-                "legacy": make_game_tools(catalog(), _noop_query),
-                "native": setup_for()}[mode]
+    original = {
+        "offline": ToolSetup((), "offline"),
+        "legacy": make_game_tools(catalog(), _noop_query),
+        "native": setup_for(),
+    }[mode]
 
     async def load():
         return original
 
     plugin = object.__new__(NekoRimworldPlugin)
+    plugin._reports = ReportStore()
     plugin._catalog_tools = SimpleNamespace(load=load)
     plugin._knowledge_directory = tmp_path
     plugin._knowledge = library
     missing = await plugin._load_agent_tools()
-    assert missing is original
+    assert missing.tools == original.tools and missing.context == original.context
+    assert missing.capabilities == ()
     write_snapshot(tmp_path)
     assert plugin._knowledge.refresh()
     setup = await plugin._load_agent_tools()
@@ -66,6 +72,7 @@ async def test_invalid_knowledge_does_not_advertise_wiki(tmp_path, library):
         return ToolSetup((), "offline")
 
     plugin = object.__new__(NekoRimworldPlugin)
+    plugin._reports = ReportStore()
     plugin._catalog_tools = SimpleNamespace(load=load)
     plugin._knowledge_directory = tmp_path
     plugin._knowledge = library
@@ -85,6 +92,7 @@ def test_provider_returns_while_background_refresh_is_blocked(tmp_path, monkeypa
         return original
 
     plugin = object.__new__(NekoRimworldPlugin)
+    plugin._reports = ReportStore()
     plugin._catalog_tools = SimpleNamespace(load=load)
     plugin._knowledge = library
     entered = Queue()
@@ -111,7 +119,8 @@ def test_provider_returns_while_background_refresh_is_blocked(tmp_path, monkeypa
                 result = asyncio.run(setup.tools[-1].handler({"query": "Steel"}))
                 assert result["status"] == "found"
             else:
-                assert setup is original
+                assert setup.tools == original.tools and setup.context == original.context
+                assert setup.capabilities == ()
         finally:
             library.close()
             release.set()

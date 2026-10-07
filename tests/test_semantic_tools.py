@@ -16,13 +16,11 @@ import pytest
 from plugin.plugins.neko_rimworld.agent import AgentAuditRegistry, AgentRuntime, ToolCall
 from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft
 from plugin.plugins.neko_rimworld.agent.semantic_tools import (
-    ENVIRONMENT_SWITCH,
     SemanticInteraction,
     semantic_interaction_factory,
     semantic_surface_available,
-    semantic_surface_requested,
 )
-from plugin.plugins.neko_rimworld.agent.tools import ToolSetup
+from plugin.plugins.neko_rimworld.agent.tools import ToolExecutionError, ToolSetup
 from plugin.plugins.neko_rimworld.query_tools import make_game_tools
 
 from .test_agent import FakeLogger, settings, turn
@@ -56,15 +54,21 @@ def public_source(*, directory=True, spatial=False):
             }
         },
     }
-    public = {"version": "public_query.v2", "parameters": parameters,
-              "rules": CATALOGUE_MARKER, "roots": []}
+    public = {"version": "public_query.v2", "parameters": parameters, "rules": CATALOGUE_MARKER, "roots": []}
     if directory:
         public.update(
-            roots=[{"from": "things", "type": "Thing", "description": "Map things."},
-                   {"from": "pawn", "type": "Pawn", "description": "One pawn."}],
+            roots=[
+                {"from": "things", "type": "Thing", "description": "Map things."},
+                {"from": "pawn", "type": "Pawn", "description": "One pawn."},
+            ],
             field_index={
-                "Thing": {"id": "String", "spawned": "Bool", "stack_count": "Int",
-                          "definition": "ThingDef", "parent_holder": "Thing"},
+                "Thing": {
+                    "id": "String",
+                    "spawned": "Bool",
+                    "stack_count": "Int",
+                    "definition": "ThingDef",
+                    "parent_holder": "Thing",
+                },
                 "Pawn": {"id": "String", "name": "String"},
             },
             common_fields=[],
@@ -75,7 +79,9 @@ def public_source(*, directory=True, spatial=False):
         source["spatial_query"] = {
             "version": "spatial_query.v1",
             "operation": "spatial_query",
-            "parameters": __import__("plugin.plugins.neko_rimworld.agent.semantic_surface", fromlist=["spatial_tool_schema"]).spatial_tool_schema()["parameters"],
+            "parameters": __import__(
+                "plugin.plugins.neko_rimworld.agent.semantic_surface", fromlist=["spatial_tool_schema"]
+            ).spatial_tool_schema()["parameters"],
         }
     return source
 
@@ -100,21 +106,10 @@ def _update(*_args, **_kwargs):
     return None
 
 
-@pytest.fixture(autouse=True)
-def _clean_environment(monkeypatch):
-    monkeypatch.delenv(ENVIRONMENT_SWITCH, raising=False)
-
-
 def test_semantic_surface_is_the_shipped_default():
-    assert semantic_surface_requested() is True
     assert semantic_surface_available(setup_for()) is True
 
 
-def test_deployment_can_return_to_the_mod_interface_without_a_code_change(monkeypatch):
-    monkeypatch.setenv(ENVIRONMENT_SWITCH, "0")
-    assert semantic_surface_requested() is False
-    assert semantic_surface_available(setup_for()) is False
-    assert semantic_interaction_factory(setup_for(), None, None) is None
 
 
 def test_the_mod_directory_leaves_the_prompt_but_the_enums_stay():
@@ -128,8 +123,7 @@ def test_the_mod_directory_leaves_the_prompt_but_the_enums_stay():
 
     assert CATALOGUE_MARKER not in prompt
     assert '"field_index"' not in prompt
-    assert "look(object, aspects, detail?)" in prompt
-    assert "count(object, metric, by?, detail?)" in prompt
+    assert "Specify the listed look.aspects" in prompt
 
 
 def test_semantic_surface_replaces_the_query_vocabulary():
@@ -140,26 +134,47 @@ def test_semantic_surface_replaces_the_query_vocabulary():
     assert [tool.name for tool in adapter.tools()] == ["submit_response"]
 
 
-def test_activity_flag_adds_one_tool_without_removing_verified_tools(monkeypatch):
-    monkeypatch.setenv('NEKO_ACTIVITY', '1')
+def test_native_activity_is_default_and_replaces_overlapping_path_tools(monkeypatch):
+    monkeypatch.setenv("NEKO_ACTIVITY", "1")
     source = public_source(spatial=True)
-    sections = ['identity', 'health', 'skills', 'gear', 'work', 'state']
-    ref = {'type': 'object', 'properties': {'id': {'type': 'string'}, 'name': {'type': 'string'}, 'map': {'type': 'string'}}}
-    state_properties = {name: {'type': 'array', 'items': ref} for name in ('targets',)}
-    state_properties.update({name: ref for name in ('actor', 'user')})
-    state_properties.update({name: {} for name in ('stats', 'include_fogged', 'detail_limit', 'exact_lookup')})
-    state_properties['sections'] = {'items': {'enum': sections}}
-    source['world_observation'] = {'version': 'world_observation.v2.2', 'tools': [
-        {'name': 'survey_space', 'operation': 'survey_space', 'description': 'survey', 'parameters': {'type': 'object'}},
-        {'name': 'inspect_route', 'operation': 'inspect_route', 'description': 'route', 'parameters': {'type': 'object'}},
-        {'name': 'inspect_state', 'operation': 'inspect_state', 'description': 'state',
-         'parameters': {'type': 'object', 'properties': state_properties}},
-    ]}
+    sections = ["identity", "health", "skills", "gear", "work", "state"]
+    ref = {
+        "type": "object",
+        "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "map": {"type": "string"}},
+    }
+    state_properties = {name: {"type": "array", "items": ref} for name in ("targets",)}
+    state_properties.update({name: ref for name in ("actor", "user")})
+    state_properties.update({name: {} for name in ("stats", "include_fogged", "detail_limit", "exact_lookup")})
+    state_properties["sections"] = {"items": {"enum": sections}}
+    source["world_observation"] = {
+        "version": "world_observation.v2.2",
+        "tools": [
+            {
+                "name": "survey_space",
+                "operation": "survey_space",
+                "description": "survey",
+                "parameters": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "inspect_route",
+                "operation": "inspect_route",
+                "description": "route",
+                "parameters": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "inspect_state",
+                "operation": "inspect_state",
+                "description": "state",
+                "parameters": {"type": "object", "properties": state_properties},
+            },
+        ],
+    }
     adapter = semantic_interaction_factory(make_game_tools(source, _noop_query), Session(), _update)
     names = [tool.name for tool in adapter.tools()]
-    assert 'evaluate_activity' in names
-    assert names.count('evaluate_activity') == 1
-    assert 'look' in names and 'count' in names and 'inspect_route' in names
+    assert "evaluate_activity" in names
+    assert names.count("evaluate_activity") == 1
+    assert "look" in names and "count" in names
+    assert "inspect_route" not in names and "inspect_space" not in names
 
 
 def test_spatial_tool_is_capability_gated_and_does_not_add_a_navigation_step():
@@ -202,25 +217,30 @@ def test_spatial_tool_forwards_names_directly_and_renders_claim_shaped_result():
             }
         )
     )
-    assert seen == [{
+    assert seen == [
+        {
             "from": {"kind": "pawn", "name": "Alice"},
             "to": {"kind": "thing", "name": "steel"},
-    }]
+        }
+    ]
     assert result["answer"] == "reachable"
     assert result["checked"]["native_reachability"] is True
     assert result["sample"]["game_tick"] == 42
 
 
-def test_a_mod_without_the_directory_keeps_its_own_interface():
+def test_a_mod_without_the_directory_is_rejected():
     setup = setup_for(directory=False)
     assert semantic_surface_available(setup) is False
-    assert semantic_interaction_factory(setup, None, None) is None
+    with pytest.raises(ToolExecutionError, match="requires a compilable"):
+        semantic_interaction_factory(setup, None, None)
 
 
-def test_a_setup_without_a_query_tool_keeps_its_own_interface():
+def test_a_setup_without_a_query_tool_is_rejected():
     """The adapter may only read through the Mod's query handler."""
     setup = ToolSetup(tools=(), directory=public_source()["public_query"], context="")
     assert semantic_surface_available(setup) is False
+    with pytest.raises(ToolExecutionError, match="requires a compilable"):
+        semantic_interaction_factory(setup, None, None)
 
 
 def test_a_directory_that_cannot_compile_is_refused_before_the_prompt_promises_it():
@@ -229,40 +249,79 @@ def test_a_directory_that_cannot_compile_is_refused_before_the_prompt_promises_i
     setup = make_game_tools(source, _noop_query)
     assert setup.directory is not None and "field_index" not in setup.directory
     assert semantic_surface_available(setup) is False
+    with pytest.raises(ToolExecutionError, match="requires a compilable"):
+        semantic_interaction_factory(setup, None, None)
 
 
 @pytest.mark.asyncio
-async def test_an_attached_report_keeps_the_mod_interface():
-    """A report registers its own evidence tool and prompt text.
-
-    An interaction adapter rebuilds both every cycle, so the attached-report
-    consultation stays on the Mod's own interface. This used to be a hard error;
-    it is now a per-run decision, and the report must still deliver.
-    """
+async def test_an_attached_report_keeps_the_semantic_interface():
+    """Historical evidence is composed as a capability, not another game vocabulary."""
     engaged = []
 
     def factory(setup, session, update):
         engaged.append(setup)
         return semantic_interaction_factory(setup, session, update)
 
-    model = _Model([
-        turn("", ToolCall("finish", "submit_response", json.dumps(
-            {"detail": "历史报告的完整说明。", "answer": [{"text": "历史报告的结论。"}]},
-            ensure_ascii=False))),
-    ])
+    model = _Model(
+        [
+            turn("", ToolCall("history", "read_report_evidence", '{"index":0}')),
+            turn(
+                "",
+                ToolCall(
+                    "finish",
+                    "submit_response",
+                    json.dumps(
+                        {"detail": "历史报告的完整说明。", "answer": "历史报告的结论。"}, ensure_ascii=False
+                    ),
+                ),
+            ),
+        ]
+    )
 
     async def tools_provider():
         return setup_for()
 
-    runtime = AgentRuntime(observation_tools=[], tools_provider=tools_provider,
-                           audit_registry=AgentAuditRegistry(), logger=FakeLogger(),
-                           model_factory=lambda _: model, interaction_factory=factory)
+    runtime = AgentRuntime(
+        observation_tools=[],
+        tools_provider=tools_provider,
+        audit_registry=AgentAuditRegistry(),
+        logger=FakeLogger(),
+        model_factory=lambda _: model,
+        interaction_factory=factory,
+    )
 
-    result = await runtime.run("这一问。", settings(), reference_report=report())
+    historical = report()
+    historical["observations"] = [{"observation_id": "historical-fixture", "historical_value": 28}]
+    result = await runtime.run("这一问。", settings(), reference_report=historical)
 
-    assert engaged == [], "the adapter must not be built for an attached report"
+    assert len(engaged) == 1
     assert result["status"] == "ok"
     assert "历史报告的结论。" in result["agent_text"]
+    for request in model.requests:
+        names = {tool["function"]["name"] for tool in request["tools"]}
+        assert {"look", "count", "read_report_evidence"} <= names
+        assert not names & {"query", "query_game", "get_game_info", "describe_query"}
+    evidence = next(json.loads(message["content"])["data"] for message in model.requests[1]["messages"]
+                    if message.get("role") == "tool" and message.get("name") == "read_report_evidence")
+    assert evidence["historical"] is True
+    assert evidence["observation"] == historical["observations"][0]
+
+
+@pytest.mark.asyncio
+async def test_unsupported_semantic_connection_never_calls_the_model():
+    class NeverCalled:
+        async def complete(self, *args, **kwargs):
+            raise AssertionError("Unsupported connection must stop before model dispatch")
+
+    async def provider():
+        return setup_for(directory=False)
+
+    runtime = AgentRuntime(observation_tools=[], tools_provider=provider, audit_registry=AgentAuditRegistry(),
+                           logger=FakeLogger(), model_factory=lambda _: NeverCalled(),
+                           interaction_factory=semantic_interaction_factory)
+    result = await runtime.run("question", settings())
+    assert result["status"] == "degraded"
+    assert result["audit"]["error_code"] == "semantic_surface_unavailable"
 
 
 class _Model:
@@ -274,8 +333,10 @@ class _Model:
 
     def __init__(self, turns):
         self._turns = list(turns)
+        self.requests = []
 
     async def complete(self, messages, tools, *, timeout):  # noqa: ARG002
+        self.requests.append({"messages": list(messages), "tools": list(tools)})
         return self._turns.pop(0)
 
 
@@ -296,7 +357,7 @@ async def test_wiki_is_the_only_extra_passthrough_and_never_an_observation(tmp_p
     session = Session()
     adapter = semantic_interaction_factory(setup, session, _update)
     assert [tool.name for tool in adapter.tools()] == ["look", "count", "wiki", "submit_response"]
-    assert "definition knowledge" in adapter.prompt(4)
+    assert "wiki" in {tool.name for tool in adapter.tools()}
     registry = ToolRegistry()
     for tool in adapter.tools():
         registry.register(tool)
@@ -325,24 +386,42 @@ def report():
 
 def test_spatial_catalog_to_real_handler_dispatch_and_observation_retention():
     import asyncio
+
     from plugin.plugins.neko_rimworld.observation import Observation
     from plugin.plugins.neko_rimworld.protocol import QUERY_RESULT, Payload, SessionDescriptor, make_envelope
+
     calls = []
+
     async def backend(request):
         calls.append(request)
-        envelope = make_envelope(QUERY_RESULT, '1'*32, 1,
-            payload=Payload(status='ok', data={'answer':'unreachable','checked':{'native_reachability':True},'explanation':'Native check returned false.','meaning':'The blocking cause is not identified.'}, issues=[]),
-            session=SessionDescriptor('2'*32,'3'*32,42,1), request_id='4'*32)
-        return Observation.from_response(request['operation'], request['arguments'], envelope)
+        envelope = make_envelope(
+            QUERY_RESULT,
+            "1" * 32,
+            1,
+            payload=Payload(
+                status="ok",
+                data={
+                    "answer": "unreachable",
+                    "checked": {"native_reachability": True},
+                    "explanation": "Native check returned false.",
+                    "meaning": "The blocking cause is not identified.",
+                },
+                issues=[],
+            ),
+            session=SessionDescriptor("2" * 32, "3" * 32, 42, 1),
+            request_id="4" * 32,
+        )
+        return Observation.from_response(request["operation"], request["arguments"], envelope)
+
     session = Session()
     adapter = semantic_interaction_factory(make_game_tools(public_source(spatial=True), backend), session, _update)
-    tool = next(t for t in adapter.tools() if t.name == 'inspect_space')
-    args = {'from':{'kind':'pawn','name':'Alice'},'to':{'kind':'cell','map':'current','x':1,'z':2}}
+    tool = next(t for t in adapter.tools() if t.name == "inspect_space")
+    args = {"from": {"kind": "pawn", "name": "Alice"}, "to": {"kind": "cell", "map": "current", "x": 1, "z": 2}}
     result = asyncio.run(tool.handler(args))
-    assert calls == [{'operation':'spatial_query','arguments':args}]
-    assert result['answer'] == 'unreachable'
-    assert result['meaning'] == 'The blocking cause is not identified.'
+    assert calls == [{"operation": "spatial_query", "arguments": args}]
+    assert result["answer"] == "unreachable"
+    assert result["meaning"] == "The blocking cause is not identified."
     assert len(session.observations) == 1
-    assert session.observations[0]['request']['operation'] == 'spatial_query'
+    assert session.observations[0]["request"]["operation"] == "spatial_query"
     adapter.finalizing = True
-    assert [t.name for t in adapter.tools()] == ['submit_response']
+    assert [t.name for t in adapter.tools()] == ["submit_response"]

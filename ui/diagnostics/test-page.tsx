@@ -1,12 +1,12 @@
 import { Alert, Button, Card, Field, Grid, InlineError, KeyValue, Stack, StatusBadge, Textarea, TextBlock } from "@neko/plugin-ui"
-import type { PanelController } from "../controller"
+import type { DiagnosticsController } from "./useDiagnostics"
 import { statusTone, text } from "../format"
 
-export function DebugPage({ c }: { c: PanelController }) {
+export function IndependentTestPage({ c }: { c: DiagnosticsController }) {
   return <Grid cols={2}>
     <Card title="Agent 咨询测试"><Stack>
       {c.referenceReportId ? <Stack><Alert tone="info">本次明确引用历史报告：{c.referenceReportId}。新查询仍会单独记录采样时间。</Alert><Button disabled={c.running} onClick={() => { c.setReferenceReportId("") }}>取消报告引用</Button></Stack> : null}
-      <Field label="问题" help="调用实际 rimworld_consult 入口。切换页面不会取消运行，也不会重新提交。" required>
+      <Field label="问题" help="独立咨询测试。与 N.E.K.O 的持续工作分开；切换页面不会取消或重新提交。" required>
         <Textarea value={c.question} onChange={c.setQuestion} placeholder="现在殖民地整体情况怎么样？" />
       </Field>
       {c.testError ? <InlineError title="咨询执行失败" error={c.testError} /> : null}
@@ -25,7 +25,7 @@ export function DebugPage({ c }: { c: PanelController }) {
         { key: "summary", label: "说明", value: text(c.probeResult.summary) },
         { key: "tick", label: "游戏 tick", value: text(c.probeResult.response?.game_tick) },
       ]} /> : null}
-      <Button onClick={() => { c.setSessionMode("connection"); c.setPage("sessions") }}>查看连接与协议详情</Button>
+      <Button onClick={() => { c.setSessionMode("connection"); c.setDiagnosticMode("records") }}>查看连接与协议详情</Button>
     </Stack></Card>
   </Grid>
 }

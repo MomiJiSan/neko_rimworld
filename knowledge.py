@@ -3,17 +3,18 @@
 Import owns the source file; consultations only pin immutable database paths.
 No SQLite connection is shared across threads and no source import runs in query().
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import sqlite3
 import stat
 import tempfile
 import threading
+from pathlib import Path
 from typing import Any
 
 import ijson
@@ -29,11 +30,13 @@ def signature(value: os.stat_result) -> list[int]:
 
 
 def validate_metadata(value: dict) -> None:
-    if (value.get("format") != "neko.defs.v1"
-            or any(not isinstance(value.get(k), str) for k in ("game_version", "language", "generated_at"))
-            or type(value.get("complete")) is not bool
-            or not isinstance(value.get("mods"), list)
-            or not isinstance(value.get("issues"), list)):
+    if (
+        value.get("format") != "neko.defs.v1"
+        or any(not isinstance(value.get(k), str) for k in ("game_version", "language", "generated_at"))
+        or type(value.get("complete")) is not bool
+        or not isinstance(value.get("mods"), list)
+        or not isinstance(value.get("issues"), list)
+    ):
         raise ValueError("invalid knowledge metadata")
     for field in ("issues", "warnings"):
         if field in value and (not isinstance(value[field], list) or any(not isinstance(x, str) for x in value[field])):
@@ -46,20 +49,34 @@ def validate_metadata(value: dict) -> None:
 
 
 def validate_entry(entry: Any) -> None:
-    if (not isinstance(entry, dict) or any(not isinstance(entry.get(k), str) for k in
-            ("key", "type", "def_name", "label", "description", "source_mod", "package_id"))
-            or not entry["type"] or not entry["def_name"]
-            or entry["key"] != entry["type"] + "/" + entry["def_name"]
-            or type(entry.get("truncated")) is not bool):
+    if (
+        not isinstance(entry, dict)
+        or any(
+            not isinstance(entry.get(k), str)
+            for k in ("key", "type", "def_name", "label", "description", "source_mod", "package_id")
+        )
+        or not entry["type"]
+        or not entry["def_name"]
+        or entry["key"] != entry["type"] + "/" + entry["def_name"]
+        or type(entry.get("truncated")) is not bool
+    ):
         raise ValueError("invalid definition")
-    for field, keys in (("facts", ("name", "value")), ("related", ("key", "label")),
-                        ("diagnostics", ("path", "kind", "reason"))):
+    for field, keys in (
+        ("facts", ("name", "value")),
+        ("related", ("key", "label")),
+        ("diagnostics", ("path", "kind", "reason")),
+    ):
         rows = entry.get(field, [] if field == "diagnostics" else None)
         if not isinstance(rows, list):
             raise ValueError("invalid definition rows")
         for row in rows:
-            if (not isinstance(row, dict) or any(not isinstance(row.get(k), str) for k in keys)
-                    or field == "facts" and "type" in row and not isinstance(row["type"], str)):
+            if (
+                not isinstance(row, dict)
+                or any(not isinstance(row.get(k), str) for k in keys)
+                or field == "facts"
+                and "type" in row
+                and not isinstance(row["type"], str)
+            ):
                 raise ValueError("invalid definition row")
 
 
@@ -89,8 +106,18 @@ def records(stream):
     in_entries = False
     root_started = False
     root_ended = False
-    allowed = {"format", "game_version", "language", "generated_at", "mods", "complete",
-               "provenance_complete", "issues", "warnings", "entries"}
+    allowed = {
+        "format",
+        "game_version",
+        "language",
+        "generated_at",
+        "mods",
+        "complete",
+        "provenance_complete",
+        "issues",
+        "warnings",
+        "entries",
+    }
     for prefix, event, value in ijson.parse(stream):
         if not root_started:
             if prefix != "" or event != "start_map":
@@ -142,6 +169,7 @@ def records(stream):
 
 class KnowledgeView:
     """Small immutable-version handle; each read owns its connection."""
+
     def __init__(self, path: Path, metadata: dict):
         self.path = path
         self.metadata = metadata
@@ -159,8 +187,10 @@ class KnowledgeView:
             if self._rows is None:
                 connection = self._connect()
                 try:
-                    self._rows = [{"key": key, "names": json.loads(names), "description": description}
-                                  for key, names, description in connection.execute("SELECT key,names,description FROM search")]
+                    self._rows = [
+                        {"key": key, "names": json.loads(names), "description": description}
+                        for key, names, description in connection.execute("SELECT key,names,description FROM search")
+                    ]
                 finally:
                     connection.close()
             return self._rows
@@ -176,6 +206,7 @@ class KnowledgeView:
 
 class IndexedKnowledgeView(KnowledgeView):
     """Publisher-built directory; payload reads verify the selected entry hash."""
+
     MAX_INDEX_BYTES = 32 * 1024 * 1024
 
     def __init__(self, directory: Path):
@@ -225,16 +256,30 @@ class IndexedKnowledgeView(KnowledgeView):
                 raise ValueError("invalid knowledge row")
             key, offset, length, checksum = (row.get(k) for k in ("key", "offset", "length", "sha256"))
             names, description = row.get("names"), row.get("description")
-            if (not isinstance(key, str) or not key or key in self._locations
-                    or type(offset) is not int or type(length) is not int
-                    or offset < previous_end or not 0 < length <= 8 * 1024 * 1024 or offset + length > total
-                    or not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum)
-                    or not isinstance(names, list) or any(not isinstance(n, str) for n in names)
-                    or not isinstance(description, str)):
+            if (
+                not isinstance(key, str)
+                or not key
+                or key in self._locations
+                or type(offset) is not int
+                or type(length) is not int
+                or offset < previous_end
+                or not 0 < length <= 8 * 1024 * 1024
+                or offset + length > total
+                or not isinstance(checksum, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", checksum)
+                or not isinstance(names, list)
+                or any(not isinstance(n, str) for n in names)
+                or not isinstance(description, str)
+            ):
                 raise ValueError("invalid knowledge record index")
             self._locations[key] = (offset, length, checksum)
-            self._rows.append({"key": key, "names": list(dict.fromkeys(n.casefold() for n in names if n)),
-                               "description": description.casefold()})
+            self._rows.append(
+                {
+                    "key": key,
+                    "names": list(dict.fromkeys(n.casefold() for n in names if n)),
+                    "description": description.casefold(),
+                }
+            )
             previous_end = offset + length
         self.index_signature = signature(before)
 
@@ -285,13 +330,14 @@ class KnowledgeLibrary:
         try:
             pointer = json.loads((self.cache / "current.json").read_text())
             filename = pointer.get("database", "")
-            if (pointer.get("index_version") != INDEX_VERSION
-                    or not re.fullmatch(r"[0-9a-f]{64}\.sqlite3", filename)):
+            if pointer.get("index_version") != INDEX_VERSION or not re.fullmatch(r"[0-9a-f]{64}\.sqlite3", filename):
                 return
             path = self.cache / filename
             connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
             try:
-                metadata = json.loads(connection.execute("SELECT value FROM metadata WHERE key='snapshot'").fetchone()[0])
+                metadata = json.loads(
+                    connection.execute("SELECT value FROM metadata WHERE key='snapshot'").fetchone()[0]
+                )
             finally:
                 connection.close()
             validate_metadata(metadata)
@@ -336,9 +382,11 @@ class KnowledgeLibrary:
             try:
                 ready = self.source.parent / "ready.json"
                 if ready.exists():
-                    if (isinstance(self._view, IndexedKnowledgeView)
-                            and self._view.index_signature == signature(ready.stat())
-                            and self._view._payload_signature == signature(self._view.path.stat())):
+                    if (
+                        isinstance(self._view, IndexedKnowledgeView)
+                        and self._view.index_signature == signature(ready.stat())
+                        and self._view._payload_signature == signature(self._view.path.stat())
+                    ):
                         return True
                     view = IndexedKnowledgeView(self.source.parent)
                     with self._lock:
@@ -366,7 +414,9 @@ class KnowledgeLibrary:
                     connection = sqlite3.connect(temporary)
                     connection.execute("PRAGMA cache_size=-4096")
                     connection.execute("CREATE TABLE entries(key TEXT PRIMARY KEY,payload TEXT NOT NULL)")
-                    connection.execute("CREATE TABLE search(key TEXT PRIMARY KEY,names TEXT NOT NULL,description TEXT NOT NULL)")
+                    connection.execute(
+                        "CREATE TABLE search(key TEXT PRIMARY KEY,names TEXT NOT NULL,description TEXT NOT NULL)"
+                    )
                     connection.execute("CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
                     metadata = {}
                     # Accept legacy BOM while hashing original bytes below.
@@ -379,10 +429,14 @@ class KnowledgeLibrary:
                             continue
                         validate_entry(value)
                         names, description = search_text(value)
-                        connection.execute("INSERT INTO entries VALUES(?,?)", (
-                            value["key"], json.dumps(value, ensure_ascii=False, separators=(",", ":"))))
-                        connection.execute("INSERT INTO search VALUES(?,?,?)", (
-                            value["key"], json.dumps(names, ensure_ascii=False), description))
+                        connection.execute(
+                            "INSERT INTO entries VALUES(?,?)",
+                            (value["key"], json.dumps(value, ensure_ascii=False, separators=(",", ":"))),
+                        )
+                        connection.execute(
+                            "INSERT INTO search VALUES(?,?,?)",
+                            (value["key"], json.dumps(names, ensure_ascii=False), description),
+                        )
                     validate_metadata(metadata)
                     source.seek(0)
                     digest = hashlib.sha256()
@@ -394,11 +448,15 @@ class KnowledgeLibrary:
                         raise ValueError("source changed during import")
                     metadata["sha256"] = digest.hexdigest()
                     metadata["index_version"] = INDEX_VERSION
-                    connection.execute("INSERT INTO metadata VALUES('snapshot',?)", (json.dumps(metadata, ensure_ascii=False),))
+                    connection.execute(
+                        "INSERT INTO metadata VALUES('snapshot',?)", (json.dumps(metadata, ensure_ascii=False),)
+                    )
                     connection.commit()
                     connection.close()
                     connection = None
-                filename = hashlib.sha256((metadata["sha256"] + ':' + str(INDEX_VERSION)).encode()).hexdigest() + '.sqlite3'
+                filename = (
+                    hashlib.sha256((metadata["sha256"] + ":" + str(INDEX_VERSION)).encode()).hexdigest() + ".sqlite3"
+                )
                 database = self.cache / filename
                 if database.exists():
                     temporary.unlink()

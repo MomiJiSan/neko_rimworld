@@ -34,12 +34,16 @@ function setup() {
   const state={ action_nonce:"test-nonce", status:"ready", port:48919, configuration:{token_configured:true,agent_configured:true,agent_api_key_configured:true,agent_base_url:"https://example.com/v1",agent_model:"test"}, agent:{active_count:0,recent_count:0,active_runs:[],recent_runs:[],latest_run:null} };
   const calls=[];
   let refreshes=0;
-  let invoke=async (id,args) => ({ result:{ status:"ok" } });
-  const props={ state, plugin:{id:"neko_rimworld",name:"RimWorld"}, actions:["rimworld_report","get_agent_run_details","rimworld_consult","probe_game_overview","save_agent_settings","save_bridge_settings"].map(id=>({id,entry_id:id})), warnings:[], locale:"zh-CN", api:{call:async(id,args)=>{calls.push({id,args});return invoke(id,args)}, refresh:async()=>{refreshes++;render()}} };
+  let invoke=async (id,args) => ({ result:id === "workspace_view" ? {workspaces:[],total:0,next_offset:null} : {status:"ok"} });
+  const props={ state, plugin:{id:"neko_rimworld",name:"RimWorld"}, actions:["workspace_view","rimworld_report","get_agent_run_details","rimworld_consult","probe_game_overview","save_agent_settings","save_bridge_settings"].map(id=>({id,entry_id:id})), warnings:[], locale:"zh-CN", api:{call:async(id,args)=>{calls.push({id,args});return invoke(id,args)}, refresh:async()=>{refreshes++;render()}} };
   function render(){ui.render(ui.h(window.TestPanel,props),root)}
   function button(label, selector="button") { const found=[...root.querySelectorAll(selector)].find(x=>x.textContent===label);assert.ok(found,`Missing ${label}: ${root.textContent}`);return found; }
   async function click(label,selector="button"){button(label,selector).click();await flush()}
-  async function tab(label){await click(label,'[role="tab"]')}
+  async function tab(label){
+    if(label === "调试") { await click("诊断",'[role="tab"]'); await click("独立测试",'[role="tab"]'); return }
+    if(label === "主页" || label === "会话与事件") { await click("诊断",'[role="tab"]'); await click("执行记录",'[role="tab"]'); return }
+    await click(label,'[role="tab"]')
+  }
   async function type(input,value){assert.ok(input);input.value=value;input.dispatchEvent(new window.Event("input",{bubbles:true}));await flush()}
   render();
   return {window,root,props,state,calls,render,button,click,tab,type,refreshes:()=>refreshes,setInvoke(fn){invoke=fn},async close(){ui.render(null,root);await window.happyDOM.abort();window.close()}};
@@ -48,7 +52,7 @@ function setup() {
 function summary(id,question){return {run_id:id,question,state:"completed",result_status:"ok",result_summary:question+" summary",event_count:61,revision:61,terminal:true,stage:"completed",latest_event:{event_seq:61,event:"run_completed",cycle:1,elapsed_ms:1000},latest_event_summary:"Run completed.",model_calls:1,tool_calls:1,duration_ms:1000}}
 function detail(id,question,offset=0){return {...summary(id,question),events:[{event_seq:offset+1,event:"model_response_received",elapsed_ms:100,data:{content:question}}],events_page:{offset,limit:50,total:61,has_more:offset===0},result:{status:"ok",answer:question+" full",summary:question+" summary",observations:[]}}}
 
-test("four pages preserve drafts across navigation and server refresh",async()=>{
+test("three pages preserve drafts across navigation and server refresh",async()=>{
   const h=setup();try{
     await flush();assert.equal(h.root.querySelectorAll('input[type="password"]').length,0);
     await h.tab("设置");
@@ -60,7 +64,7 @@ test("four pages preserve drafts across navigation and server refresh",async()=>
     assert.equal(h.root.querySelector('input[placeholder="https://example.com/v1"]').value,"https://draft.example/v1");
     assert.equal(h.root.querySelectorAll('input[type="password"]')[1].value,"temporary-test-secret");
     await h.tab("调试");assert.equal(h.root.querySelector("textarea").value,"unfinished question");
-    assert.equal(h.calls.length,0);
+    assert.ok(h.calls.every(x=>x.id === "workspace_view"));
   }finally{await h.close()}
 });
 
@@ -78,7 +82,7 @@ test("running consultation survives navigation and prevents duplicate submit",as
     finish({result:{status:"degraded",summary:"A limited result",audit:{run_id:"run-new"}}});await flush();
     await h.tab("调试");assert.match(h.root.textContent,/A limited result/);
     await h.click("打开本次会话详情");await flush();assert.match(h.root.textContent,/completed question full/);
-    assert.equal(h.root.querySelector('#rimworld-main-nav-tab-sessions').getAttribute("aria-selected"),"true");
+    assert.equal(h.root.querySelector('#rimworld-main-nav-tab-diagnostics').getAttribute("aria-selected"),"true");
     assert.equal(h.calls.filter(x=>x.id==="get_agent_run_details").length,1);
   }finally{await h.close()}
 });
@@ -90,6 +94,7 @@ test("degraded runs explain the provider failure and next action without opening
       provider_error:{type:"upstream_error",message:"Our servers are currently overloaded. Please try again later."}
     }};
     h.state.agent.recent_runs=[failed];h.state.agent.latest_run=failed;h.render();await flush();
+    await h.tab("会话与事件");
     assert.match(h.root.textContent,/模型服务过载/);
     assert.match(h.root.textContent,/已自动重试 2 次/);
     assert.match(h.root.textContent,/稍后重试或更换模型服务/);
@@ -104,6 +109,7 @@ test("active runs use lightweight progress and fetch full detail once on complet
   const h=setup();try{
     const active={...summary("active-run","Live progress"),state:"model_requesting",result_status:null,result_summary:null,terminal:false,revision:4,event_count:4,stage:"model_requesting",latest_event:{event_seq:4,event:"model_retry_scheduled",cycle:1,elapsed_ms:2500},latest_event_summary:"Retrying the model in 0.5 seconds.",duration_ms:2500};
     h.state.agent.active_count=1;h.state.agent.active_runs=[active];h.state.agent.recent_runs=[];h.state.agent.latest_run=active;h.render();await flush();
+    await h.tab("会话与事件");
     assert.match(h.root.textContent,/正在重试模型/);
     await h.tab("会话与事件");await flush();
     assert.match(h.root.textContent,/正在重试模型/);
@@ -201,7 +207,7 @@ test("late run detail replies cannot replace a newer selection",async()=>{
 
 test("top navigation supports keyboard selection",async()=>{
   const h=setup();try{
-    const tab=h.root.querySelector("#rimworld-main-nav-tab-home");tab.focus();
+    const tab=h.root.querySelector("#rimworld-main-nav-tab-work");tab.focus();
     tab.dispatchEvent(new h.window.KeyboardEvent("keydown",{key:"End",bubbles:true}));await flush();
     assert.equal(h.root.querySelector("#rimworld-main-nav-tab-settings").getAttribute("aria-selected"),"true");
     assert.ok(h.root.querySelector('input[type="password"]'));
@@ -238,9 +244,9 @@ test("saved reports show full body, preserve draft status and explicitly attach 
     assert.ok(h.root.textContent.includes(id));assert.match(h.root.textContent,/报告末尾保留/);assert.match(h.root.textContent,/不能当作正式交付/);
     await h.click("复制完整正文");assert.equal(await h.window.navigator.clipboard.readText(),full);
     await h.click("基于这份报告追问");await h.type(h.root.querySelector("textarea"),"解释原报告的细节");await h.click("运行咨询");
-    assert.equal(h.calls.find(x=>x.id==="rimworld_consult").args.report_id,id);
+    assert.deepEqual(JSON.parse(JSON.stringify(h.calls.find(x=>x.id==="rimworld_consult").args)),{question:`解释原报告的细节\n请分析保存的历史报告 ${id}。`});
     await h.click("取消报告引用");await h.click("运行咨询");
-    assert.equal(h.calls.filter(x=>x.id==="rimworld_consult").at(-1).args.report_id,undefined);
+    assert.deepEqual(JSON.parse(JSON.stringify(h.calls.filter(x=>x.id==="rimworld_consult").at(-1).args)),{question:"解释原报告的细节"});
   }finally{await h.close()}
 });
 
@@ -259,3 +265,86 @@ test("late report reply cannot replace a newly selected report",async()=>{
     assert.match(h.root.textContent,/第二份正文/);assert.doesNotMatch(h.root.textContent,/第一份正文/);
   }finally{await h.close()}
 });
+
+function workFixture(id, owner, question) {
+  const turn = `${id}-turn`
+  const workspace = {workspace_id:id,owner,colony_id:`${id}-colony`,work_state:"waiting",last_question:question,turn_count:1}
+  return {workspace, history:{workspace_id:id,workspace,turns:[{turn_id:turn,sequence:1,question,status:"ok"}],total:1,next_offset:null},
+    exchange:{workspace_id:id,turn_id:turn,question,status:"ok",history_saved:true,audit_available:true,
+      result:{status:"ok",answer:question+" 完整结果末尾",agent_text:"旧内核摘要"},handoff:{summary:"最终宿主摘要",prepared_at:"2026-10-03"},
+      evidence:[{observation_id:"source",sha256:"original-hash"}]}}
+}
+
+test("persistent work remains visible offline with no volatile runs or consultation calls",async()=>{
+ const h=setup();try{
+  const a=workFixture("work-a","小天","患者历史调查")
+  h.setInvoke(async(id,args)=>{
+   assert.equal(id,"workspace_view")
+   if(args.action==="list")return {result:{workspaces:[a.workspace],total:1,next_offset:null}}
+   if(args.action==="work")return {result:a.history}
+   if(args.action==="turn")return {result:a.exchange}
+   if(args.action==="observation")return {result:{workspace_id:"work-a",turn_id:"work-a-turn",observation_id:"source",sha256:"original-hash",observation:{response:{payload:{data:{flag:false,value:null}}}}}}
+  })
+  await h.click("刷新工作");await flush()
+  assert.match(h.root.textContent,/游戏当前离线/)
+  assert.match(h.root.textContent,/患者历史调查 完整结果末尾/)
+  assert.match(h.root.textContent,/最终宿主摘要/)
+  assert.doesNotMatch(h.root.textContent,/旧内核摘要/)
+  await h.click("读取证据 source")
+  assert.match(h.root.textContent,/original-hash/)
+  assert.match(h.root.textContent,/false/)
+  assert.ok(h.calls.every(c=>c.id==="workspace_view"))
+ }finally{await h.close()}
+})
+
+test("late work response cannot replace another role's selected work",async()=>{
+ const h=setup();try{
+  const a=workFixture("a","角色甲","甲的调查"), b=workFixture("b","角色乙","乙的调查")
+  let finishA
+  h.setInvoke(async(id,args)=>{
+   if(args.action==="list")return {result:{workspaces:[a.workspace,b.workspace],total:2,next_offset:null}}
+   if(args.action==="work" && args.workspace_id==="a")return await new Promise(resolve=>{finishA=resolve})
+   if(args.action==="work")return {result:b.history}
+   return {result:b.exchange}
+  })
+  await h.click("刷新工作");await flush()
+  const row=[...h.root.querySelectorAll("tr")].find(x=>x.textContent.includes("角色乙"));row.click();await flush()
+  assert.match(h.root.textContent,/乙的调查 完整结果末尾/)
+  finishA({result:a.history});await flush()
+  assert.doesNotMatch(h.root.textContent,/甲的调查 完整结果末尾/)
+  assert.match(h.root.textContent,/乙的调查 完整结果末尾/)
+ }finally{await h.close()}
+})
+
+test("saved work audit opens after volatile run history has been cleared",async()=>{
+ const h=setup();try{
+  const a=workFixture("a","小天","持久调查")
+  h.setInvoke(async(id,args)=>{
+   if(args.action==="list")return {result:{workspaces:[a.workspace],total:1,next_offset:null}}
+   if(args.action==="work")return {result:a.history}
+   if(args.action==="turn")return {result:a.exchange}
+   if(args.action==="audit")return {result:{...detail("saved-run","保存的执行审计"),workspace_id:"a",turn_id:"a-turn"}}
+   throw new Error("Unexpected call")
+  })
+  await h.click("刷新工作");await flush()
+  await h.click("查看保存的执行诊断")
+  assert.match(h.root.textContent,/保存的执行审计 full/)
+  assert.match(h.root.textContent,/工作中保存的执行审计/)
+  assert.equal(h.calls.filter(c=>c.id==="get_agent_run_details").length,0)
+ }finally{await h.close()}
+})
+
+test("work refresh failure preserves the selected historical answer and save uncertainty",async()=>{
+ const h=setup();try{
+  const a=workFixture("a","小天","完整但未保存")
+  a.exchange.history_saved=false
+  h.setInvoke(async(id,args)=>({result:args.action==="list"?{workspaces:[a.workspace],total:1,next_offset:null}:args.action==="work"?a.history:a.exchange}))
+  await h.click("刷新工作");await flush()
+  assert.match(h.root.textContent,/历史保存尚未确认/)
+  h.setInvoke(async()=>{throw new Error("Offline read failure")})
+  await h.click("刷新工作")
+  assert.match(h.root.textContent,/完整但未保存 完整结果末尾/)
+  assert.match(h.root.textContent,/Offline read failure/)
+  assert.ok(h.calls.every(c=>c.id==="workspace_view"))
+ }finally{await h.close()}
+})

@@ -12,12 +12,12 @@ export function RunResult({ result, draft, failureSummary, onOpenReport }: { res
     {status !== "ok" ? <FailureNotice summary={failureSummary} observationCount={Array.isArray(result.observations) ? result.observations.length : 0} /> : null}
     {result.report?.saved ? <Stack><Field label="报告 ID"><CodeBlock>{result.report.report_id}</CodeBlock></Field>{onOpenReport ? <Button onClick={() => onOpenReport(result.report.report_id)}>打开保存的完整报告</Button> : null}</Stack> : result.report?.saved === false ? <Alert tone="warning">报告持久保存尚未确认，请复制当前正文。重载可能清空运行记录。</Alert> : null}
     <Field label="完整回答"><TextBlock text={text(result.answer, "没有返回完整回答。", 12000)} /></Field>
-    <Field label="交给 NEKO 的文本"><TextBlock text={text(result.summary, "没有可交付的文本。", 4000)} /></Field>
+    <Field label="执行内核生成的摘要"><TextBlock text={text(result.summary, "没有可交付的文本。", 4000)} /></Field>
     {Array.isArray(result.caveats) && result.caveats.length ? <TextBlock text={result.caveats.map((x: any) => text(x)).join("\n")} /> : null}
     <KeyValue items={[
       { key: "mode", label: "提交方式", value: text(result.delivery?.submission_mode) },
       { key: "full", label: "完整回答文本 token", value: text(result.delivery?.full_answer_tokens) },
-      { key: "handoff", label: "交接文本 token / 上限", value: `${text(result.delivery?.handoff_tokens)} / ${text(result.delivery?.token_budget)}` },
+      { key: "handoff", label: "交接文本 token / 传输上限", value: `${text(result.delivery?.handoff_tokens)} / ${text(result.delivery?.transport_token_budget)}` },
     ]} />
   </Stack>
 }

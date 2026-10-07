@@ -10,11 +10,11 @@ two thirds fewer tokens.
 It is a replacement, not an extra: the model does not see `query`, and the
 directory is dropped from the prompt. A closed enum cannot express every possible
 request, so `semantic_surface_available()` is the single place that decides
-whether to engage, and the runtime keeps the Mod's own interface when it declines.
+    whether the connection is supported. Unsupported connections fail before any model request.
 
-Results are rendered as plain text with their scope, coverage, not_read and
-native semantics. Nothing is interned or replaced by a code word, and unknown is
-never lowered to zero.
+Results use request-scoped ordinary JSON with scope, coverage, unknown states
+and native semantics. Same-read identities may refer to their retained native
+ID; there is no numbered fact vocabulary. Raw evidence remains in the audit.
 
 The contract is the one `agent.loop` already calls on `session.interaction`:
 prompt, tools, attach_result, request_messages, accept_text, snapshot, aclose,
@@ -24,19 +24,18 @@ plus `finalizing` and `supports_finalization`.
 from __future__ import annotations
 
 import copy
-
-import os
 from typing import Any
 
-from .handoff import attach_agent_handoff, make_submission_tool
-from .prompt import build_finalization_prompt, build_system_prompt
+from .activity import make_activity_tool
+from .object_tools import OBJECT_GUIDE, ObjectReader, extend_look_schema, observed_id_reference, state_contract
 from .query_surface import Surface, SurfaceError
+from .research_surface import ReadOnlyResearchSurface, ResearchGuidance
 from .semantic_surface import (
-    TOOL_GUIDE,
     DEF_KINDS,
     THING_KINDS,
-    capability_values,
+    TOOL_GUIDE,
     apply_lookup,
+    capability_values,
     interpret_lookup,
     lookup_spec,
     normalize_object,
@@ -45,23 +44,19 @@ from .semantic_surface import (
     plan_look,
     render,
     render_blocked,
-    tool_schemas,
     spatial_tool_schema,
+    tool_schemas,
     validate_aspects,
     validate_by,
     validate_detail,
     validate_metric,
 )
-from .tools import ToolExecutionError, ToolSpec, WORLD_OBSERVATION_VERSIONS
-from .wiki_tools import WIKI_GUIDANCE
+from .tool_contracts import WORLD_OBSERVATION_VERSIONS, ToolExecutionError, ToolSpec
 from .world_order import order_world_fields
-from .object_tools import ObjectReader, state_contract, extend_look_schema, OBJECT_GUIDE, observed_id_reference
-from .activity import make_activity_tool
 
 # Only this explicitly approved non-observation tool survives the adapter.
-PASSTHROUGH_TOOLS = frozenset({"wiki"})
+PASSTHROUGH_TOOLS = frozenset({"wiki", "inspect_actions", "inspect_threats"})
 
-ENVIRONMENT_SWITCH = "NEKO_SEMANTIC_SURFACE"
 
 
 def _with_field_semantics(result):
@@ -72,30 +67,30 @@ def _with_field_semantics(result):
         summary = facts.get("health", {}).get("summary")
         if isinstance(summary, dict) and summary.get("state") != "unavailable":
             meanings = {
-                "health_percent": {"unit": "fraction", "meaning": "Overall game health summary, not blood volume or proof of no injuries."},
-                "bleed_rate": {"unit": "blood_loss_fraction_per_game_day", "ticks_per_game_day": 60000,
-                               "meaning": "Multiply by 100 for percentage points of blood loss per game day; not per second or an ETA."},
-                "pain": {"unit": "fraction", "meaning": "Game pain total, separate from injury severity and blood loss."},
+                "health_percent": {
+                    "unit": "fraction",
+                    "meaning": "Overall game health summary, not blood volume or proof of no injuries.",
+                },
+                "bleed_rate": {
+                    "unit": "blood_loss_fraction_per_game_day",
+                    "ticks_per_game_day": 60000,
+                    "meaning": "Multiply by 100 for percentage points of blood loss per game day; not per second or an ETA.",
+                },
+                "pain": {
+                    "unit": "fraction",
+                    "meaning": "Game pain total, separate from injury severity and blood loss.",
+                },
             }
             summary["field_semantics"] = {key: value for key, value in meanings.items() if key in summary}
         traits = facts.get("profile", {}).get("traits")
         if isinstance(traits, dict) and traits.get("state") != "unavailable":
-            traits["field_semantics"] = {"degree": "Trait variant code, not a numeric speed or stat bonus.",
-                                         "description": "Game-generated trait tooltip, including effects when available. Respect suppressed; a trait effect is not the pawn's final stat value."}
+            traits["field_semantics"] = {
+                "degree": "Trait variant code, not a numeric speed or stat bonus.",
+                "description": "Game-generated trait tooltip, including effects when available. Respect suppressed; a trait effect is not the pawn's final stat value.",
+            }
     return result
 
 
-def semantic_surface_requested() -> bool:
-    """Whether this deployment wants the semantic surface.
-
-    On by default: the paired study is what promoted it. Setting the environment
-    variable to a false value is the supported way back to the Mod's own query
-    interface without a code change.
-    """
-    override = os.environ.get(ENVIRONMENT_SWITCH)
-    if override is None:
-        return True
-    return override.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def semantic_surface_available(setup: Any) -> bool:
@@ -112,8 +107,6 @@ def semantic_surface_available(setup: Any) -> bool:
       directory that lacks the per-root argument branches pass here and then raise
       while the run was already under way.
     """
-    if not semantic_surface_requested():
-        return False
     directory = getattr(setup, "directory", None)
     if directory is None:
         return False
@@ -128,7 +121,7 @@ def semantic_surface_available(setup: Any) -> bool:
     return True
 
 
-class SemanticInteraction:
+class SemanticInteraction(ReadOnlyResearchSurface):
     """Expose look/count and render their native results as plain text."""
 
     supports_finalization = True
@@ -142,62 +135,46 @@ class SemanticInteraction:
     references_supported = False
 
     def __init__(self, setup: Any, session: Any, update: Any) -> None:
-        self.setup = setup
-        self.session = session
-        self.update = update
+        super().__init__(setup, session, update)
         self.original = {tool.name: tool for tool in setup.tools}
-        self.finalizing = False
         self.surface = Surface(setup.directory)
         self.surface.add_query_schema(self.original["query"].parameters)
         self.sample_identity: tuple[Any, Any, Any] | None = None
         directory = setup.directory if isinstance(getattr(setup, "directory", None), dict) else {}
         self.object_contract = state_contract(directory)
         self.object_reader = ObjectReader(self) if self.object_contract else None
-        self.spatial_supported = (directory.get("spatial_query", {}).get("version") == "spatial_query.v1" and "spatial_query" in self.original)
+        self.spatial_supported = (
+            directory.get("spatial_query", {}).get("version") == "spatial_query.v1" and "spatial_query" in self.original
+        )
         self._def_name_resolver = None
 
     # -- runtime contract -------------------------------------------------
 
-    def prompt(self, preferred_cycles: int) -> str:
-        """The authored prompt plus the interface guide, and nothing else.
-
-        `setup.context` is deliberately not appended: that is the field catalogue
-        this interface exists to remove. The guide states the closed vocabulary
-        the model may use instead.
-        """
-        build = build_finalization_prompt if self.finalizing else build_system_prompt
-        guide = OBJECT_GUIDE if self.object_reader else TOOL_GUIDE
-        prompt = build(preferred_cycles, references_supported=self.references_supported) + "\n\n" + guide
-        from .model_context import enabled
-        if enabled():
-            from .context_tools import query_guide, task_prompt
-            prompt = task_prompt(preferred_cycles, finalizing=self.finalizing, references_supported=self.references_supported)
-            if not self.finalizing:
-                activity = os.environ.get('NEKO_ACTIVITY', '').strip().lower() in {'1','true','yes','on'} and 'inspect_route' in self.original
-                prompt += '\n\n' + query_guide(native_state=self.object_reader is not None, activity=activity)
-        if not self.finalizing and "wiki" in self.original:
-            prompt += "\n\n" + WIKI_GUIDANCE
-        if not self.object_reader and not self.finalizing and self.setup.directory.get("world_observation", {}).get("version") in WORLD_OBSERVATION_VERSIONS:
-            prompt += "\nUse survey_space for a neighborhood/region, inspect_route for a path AND its environment, and inspect_state for object state/occupancy/reservations. Resolve names directly; no preliminary look is required. user is the intended user/recipient, actor performs interaction/travel. All checks are current and read-only. Distinguish target position from stopping cell, building type from settings, and existing reservations from physical occupancy. Safety conclusions require returned environmental coverage; native Danger is not comprehensive safety. Unsupported facets and hidden cells are unknown.\n"
-        return prompt
-
-    def submission(self) -> Any:
-        return make_submission_tool(
-            self.session.submission,
-            self.session.observations,
-            self.update,
-            references_supported=self.references_supported,
+    @property
+    def guidance(self):
+        compatibility = ""
+        if (
+            not self.object_reader
+            and self.setup.directory.get("world_observation", {}).get("version") in WORLD_OBSERVATION_VERSIONS
+        ):
+            compatibility = "\nUse survey_space for a neighborhood/region, inspect_route for a path AND its environment, and inspect_state for object state/occupancy/reservations. Resolve names directly; no preliminary look is required. user is the intended user/recipient, actor performs interaction/travel. All checks are current and read-only. Distinguish target position from stopping cell, building type from settings, and existing reservations from physical occupancy. Safety conclusions require returned environmental coverage; native Danger is not comprehensive safety. Unsupported facets and hidden cells are unknown.\n"
+        return ResearchGuidance(
+            read_guide=OBJECT_GUIDE if self.object_reader else TOOL_GUIDE,
+            native_state=self.object_reader is not None,
+            activity_route="inspect_route" in self.original,
+            definition_guide=self.original["wiki"].description if "wiki" in self.original else "",
+            compatibility_guide=compatibility,
         )
 
-    def tools(self) -> tuple[Any, ...]:
-        submit = self.submission()
-        if self.finalizing:
-            return (submit,)
+    def read_tools(self) -> tuple[Any, ...]:
         handlers = {"look": self.look, "count": self.count}
         specs = []
         semantic_specs = tool_schemas(self.setup.directory)
         if self.object_contract:
-            semantic_specs = [extend_look_schema(spec, self.object_contract) if spec["name"] == "look" else spec for spec in semantic_specs]
+            semantic_specs = [
+                extend_look_schema(spec, self.object_contract) if spec["name"] == "look" else spec
+                for spec in semantic_specs
+            ]
         if self.spatial_supported:
             semantic_specs.append(spatial_tool_schema(self.setup.directory))
             handlers["inspect_space"] = self.inspect_space
@@ -209,21 +186,22 @@ class SemanticInteraction:
                     continue
                 if name not in self.original:
                     continue
+
                 async def observe(args, operation=name):
                     return await self._world_read(args, operation)
+
                 handlers[name] = observe
                 semantic_specs.append(spec)
-        activity_enabled = os.environ.get("NEKO_ACTIVITY", "").strip().lower() in {"1", "true", "yes", "on"}
-        from .model_context import enabled
-        if enabled() and activity_enabled and self.object_reader and 'inspect_route' in self.original:
+
+        if (self.object_reader) and ("inspect_route" in self.original):
             # One batch-capable path tool covers the single-target case too.
             # Native readers remain internal; the model need not select between
             # three overlapping public path interfaces on every request.
-            semantic_specs = [s for s in semantic_specs if s['name'] not in ('inspect_space', 'inspect_route')]
+            semantic_specs = [s for s in semantic_specs if s["name"] not in ("inspect_space", "inspect_route")]
         for tool in semantic_specs:
-            from .model_context import enabled
-            if enabled() and tool['name'] in ('look', 'inspect_route', 'survey_space'):
+            if tool["name"] in ("look", "inspect_route", "survey_space"):
                 from .context_tools import configure_read_spec
+
                 tool = configure_read_spec(tool)
             handler = handlers[tool["name"]]
 
@@ -235,26 +213,13 @@ class SemanticInteraction:
 
             specs.append(ToolSpec(tool["name"], tool["description"], tool["parameters"], guarded))
         passthrough = tuple(self.original[name] for name in sorted(PASSTHROUGH_TOOLS) if name in self.original)
-        activity_capable = activity_enabled and self.object_reader is not None and (
-            "inspect_route" in self.original and
-            self.setup.directory.get("world_observation", {}).get("version") in WORLD_OBSERVATION_VERSIONS
+        activity_capable = (
+            (self.object_reader is not None) and ("inspect_route" in self.original
+                and self.setup.directory.get("world_observation", {}).get("version") in WORLD_OBSERVATION_VERSIONS)
         )
         if activity_capable:
             specs.append(make_activity_tool(self))
-        return (*specs, *passthrough, submit)
-
-    def review_contract(self):
-        from .stage_review import tool_contract
-        return tool_contract(self.tools())
-
-    def request_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return messages
-
-    def accept_text(self, text: str, finish_reason: Any) -> None:
-        return None
-
-    def attach_result(self, result: Any) -> Any:
-        return attach_agent_handoff(result)
+        return (*specs, *passthrough)
 
     def snapshot(self) -> dict[str, Any]:
         return dict(
@@ -266,23 +231,22 @@ class SemanticInteraction:
             references_suppressed=bool(getattr(self.setup, "references_supported", False)),
         )
 
-    async def aclose(self) -> None:
-        return None
-
     async def _world_read(self, args: dict[str, Any], operation: str) -> dict[str, Any]:
         """Read one catalog-advertised world operation for semantic and activity adapters."""
         if operation not in self.original:
             raise ToolExecutionError("unsupported", f"The connected Mod does not support {operation}.")
-        from .model_context import enabled
-        if enabled() and operation in ('inspect_route', 'survey_space'):
+        if operation in ("inspect_route", "survey_space"):
             args = dict(args)
-            include = args.pop('include', [])
-            if not isinstance(include, list) or any(v not in ('geometry', 'diagnostics', 'environment', 'objects') for v in include):
-                raise SurfaceError('spatial include accepts geometry, diagnostics, environment and objects')
-            if operation == 'inspect_route':
-                include_objects = args.pop('include_objects', False)
+            include_supplied = "include" in args
+            include = args.pop("include", [])
+            if not isinstance(include, list) or any(
+                v not in ("geometry", "environment", "objects") for v in include
+            ):
+                raise SurfaceError("spatial include accepts geometry, environment and objects")
+            if operation == "inspect_route":
+                include_objects = args.pop("include_objects", False)
                 if type(include_objects) is not bool:
-                    raise SurfaceError('include_objects must be a boolean')
+                    raise SurfaceError("include_objects must be a boolean")
                 if self.setup.directory.get("world_observation", {}).get("version") == "world_observation.v2.3":
                     # On-demand native generation: the route object listing the
                     # model view would discard is not generated in the first
@@ -290,7 +254,12 @@ class SemanticInteraction:
                     # objects requested. Environment, gases, threats, coverage
                     # and route segments are internal forensics of every native
                     # read and never depend on this flag.
-                    args['objects'] = bool(include_objects or 'objects' in include or args.get('cursor'))
+                    args["objects"] = bool(include_objects or "objects" in include or args.get("cursor"))
+            elif include_supplied and self.setup.directory.get("world_observation", {}).get("version") == "world_observation.v2.3":
+                # A survey without include retains the legacy discovery default.
+                # Explicit native objects and object-page cursors keep precedence.
+                if "objects" not in args:
+                    args["objects"] = bool("objects" in include or args.get("cursor"))
         native = await self.execute_native(args, tool_name=operation)
         data = native.get("data")
         if not isinstance(data, dict):
@@ -315,13 +284,18 @@ class SemanticInteraction:
         answering with a mixture.
         """
         if getattr(self.session, "invalidated_error", None):
-            raise ToolExecutionError("world_changed", "The loaded world changed; start a new consultation.", recoverable=False)
+            raise ToolExecutionError(
+                "world_changed", "The loaded world changed; start a new consultation.", recoverable=False
+            )
         observation = await self.original[tool_name].handler(request)
         value = observation.to_dict()
         response = value["response"]
         payload = response["payload"]
         identity = (response["colony_id"], response["load_epoch"], response.get("connection_epoch"))
-        if self.sample_identity is not None and identity != self.sample_identity:
+        expected_colony = getattr(self.session, "colony_id", None)
+        if (expected_colony is not None and response["colony_id"] != expected_colony) or (
+            self.sample_identity is not None and identity != self.sample_identity
+        ):
             self.session.invalidated_error = "world_changed"
             raise ToolExecutionError(
                 "world_changed",
@@ -344,7 +318,11 @@ class SemanticInteraction:
             status=payload["status"],
             data=pack(payload.get("data"), payload.get("issues", [])),
             issues=payload.get("issues", []),
-            pages=[copy.deepcopy(row.get("page")) for row in (payload.get("data") or {}).get("results", []) if isinstance(row, dict)],
+            pages=[
+                copy.deepcopy(row.get("page"))
+                for row in (payload.get("data") or {}).get("results", [])
+                if isinstance(row, dict)
+            ],
         )
 
     def _def_resolver(self):
@@ -353,15 +331,13 @@ class SemanticInteraction:
         A broken or unavailable index degrades to no resolver: recovery is an
         affordance, never a new failure path for ordinary lookups.
         """
-        from .def_names import recovery_enabled
-        if not recovery_enabled():
-            return None
-        view = getattr(self.setup, 'knowledge_view', None)
+        view = getattr(self.setup, "knowledge_view", None)
         if view is None:
             return None
         if self._def_name_resolver is None:
             from .def_names import DefNameResolver
-            self._def_name_resolver = DefNameResolver.try_from_knowledge_view(view) or False
+
+            self._def_name_resolver = DefNameResolver.try_from_knowledge_view(view)
         return self._def_name_resolver or None
 
     async def _resolve(self, obj: dict[str, Any]):
@@ -370,41 +346,42 @@ class SemanticInteraction:
         An ambiguous or incomplete lookup must never silently choose one object:
         the caller gets the candidates and the scope that produced them.
         """
-        if obj.get('kind') in ('pawn', 'thing') and len(obj.get('names', [])) == 1:
-            reference = {'kind': obj['kind'], 'name': obj['names'][0]}
-            if 'map' in obj:
-                reference['map'] = obj['map']
+        if obj.get("kind") in ("pawn", "thing") and len(obj.get("names", [])) == 1:
+            reference = {"kind": obj["kind"], "name": obj["names"][0]}
+            if "map" in obj:
+                reference["map"] = obj["map"]
             recovered = observed_id_reference(reference, self.session.observations)
-            if 'id' in recovered:
-                obj = {**obj, 'ids': [recovered['id']]}
-                obj.pop('names')
+            if "id" in recovered:
+                obj = {**obj, "ids": [recovered["id"]]}
+                obj.pop("names")
         resolver = self._def_resolver()
         name_resolution = None
         requested_term = None
-        if (resolver is not None and isinstance(obj.get('definition'), str)
-                and obj['kind'] in DEF_KINDS + THING_KINDS):
-            requested_term = obj['definition']
+        if resolver is not None and isinstance(obj.get("definition"), str) and obj["kind"] in DEF_KINDS + THING_KINDS:
+            requested_term = obj["definition"]
             advice = resolver.normalize(requested_term)
-            if advice['state'] == 'unique' and advice['auto_selection'] != requested_term:
+            if advice["state"] == "unique" and advice["auto_selection"] != requested_term:
                 # Deterministic word-order recovery only rewrites the requested
                 # name; the native exact lookup below stays the arbiter of what
                 # exists, so a stale index degrades to an ordinary miss.
-                name_resolution = {'requested': requested_term,
-                                   'resolved_as': advice['auto_selection'],
-                                   'method': 'token_normalization',
-                                   'catalog': resolver.source}
-                obj = {**obj, 'definition': advice['auto_selection']}
+                name_resolution = {
+                    "requested": requested_term,
+                    "resolved_as": advice["auto_selection"],
+                    "method": "token_normalization",
+                    "catalog": resolver.source,
+                }
+                obj = {**obj, "definition": advice["auto_selection"]}
         spec = lookup_spec(self.surface, obj)
         if spec is None:
             return obj, None, None
         native = await self.execute_native(spec["request"])
         resolution = interpret_lookup(spec, native["data"])
         if name_resolution is not None:
-            resolution['name_resolution'] = name_resolution
-        if resolver is not None and spec.get('kind') == 'definition' and resolution['status'] == 'missing_in_scope':
-            discovery = resolver.discovery(requested_term or spec['names'][0], *spec['names'])
+            resolution["name_resolution"] = name_resolution
+        if resolver is not None and spec.get("kind") == "definition" and resolution["status"] == "missing_in_scope":
+            discovery = resolver.discovery(requested_term or spec["names"][0], *spec["names"])
             if discovery is not None:
-                resolution['discovery'] = discovery
+                resolution["discovery"] = discovery
         return apply_lookup(obj, spec, resolution), resolution, native
 
     # -- tools ------------------------------------------------------------
@@ -414,23 +391,35 @@ class SemanticInteraction:
             return await self.object_reader.look(args)
         if any(key in args for key in ("stats", "actor", "user")):
             raise SurfaceError("This connection does not support unified state options")
-        from .model_context import enabled
-        if enabled():
-            include, focus = args.get('include', []), args.get('focus', {})
-            if not isinstance(include, list) or any(v not in ('body_parts', 'diagnostics') for v in include):
-                raise SurfaceError('look include accepts body_parts and diagnostics')
-            if not isinstance(focus, dict) or set(focus) - {'skills', 'work', 'capacities'} or any(
-                not isinstance(v, list) or not 1 <= len(v) <= 32 or any(not isinstance(n, str) or not n or len(n) > 256 for n in v)
+        include, focus = args.get("include", []), args.get("focus", {})
+        if not isinstance(include, list) or any(v not in ("body_parts",) for v in include):
+            raise SurfaceError("look include accepts body_parts")
+        if (
+            not isinstance(focus, dict)
+            or set(focus) - {"skills", "work", "capacities"}
+            or any(
+                not isinstance(v, list)
+                or not 1 <= len(v) <= 32
+                or any(not isinstance(n, str) or not n or len(n) > 256 for n in v)
                 for v in focus.values()
-            ):
-                raise SurfaceError('focus selects skills/work/capacities by exact names or labels')
-            args = {k: v for k, v in args.items() if k not in ('include', 'focus')}
-            args['aspects'] = list(dict.fromkeys([*args.get('aspects', []),
-                *({'skills':'skills','work':'work','capacities':'health'}[k] for k in focus)]))
-            if 'work' in focus:
-                result = await self._look_legacy(args)
-                result['focus_unavailable'] = {'work': 'This connection exposes current jobs/status, not work-type assignments. Repeating look.work cannot provide the assignments.'}
-                return result
+            )
+        ):
+            raise SurfaceError("focus selects skills/work/capacities by exact names or labels")
+        args = {k: v for k, v in args.items() if k not in ("include", "focus")}
+        args["aspects"] = list(
+            dict.fromkeys(
+                [
+                    *args.get("aspects", []),
+                    *({"skills": "skills", "work": "work", "capacities": "health"}[k] for k in focus),
+                ]
+            )
+        )
+        if "work" in focus:
+            result = await self._look_legacy(args)
+            result["focus_unavailable"] = {
+                "work": "This connection exposes current jobs/status, not work-type assignments. Repeating look.work cannot provide the assignments."
+            }
+            return result
         return await self._look_legacy(args)
 
     def _validate_capabilities(self, obj):
@@ -487,7 +476,7 @@ class SemanticInteraction:
             raise SurfaceError("to must be a reference or a bounded target list")
         detail = args.get("detail", "summary")
         if detail not in ("summary", "route"):
-            raise SurfaceError('detail must be summary or route')
+            raise SurfaceError("detail must be summary or route")
         capability = self.setup.directory.get("spatial_query", {})
         if "detail" in args and "detail" not in capability.get("parameters", {}).get("properties", {}):
             raise SurfaceError("This connection does not support detail; omit it for reachability only")
@@ -506,7 +495,10 @@ class SemanticInteraction:
             raise ToolExecutionError("spatial_invalid_result", "The game returned no spatial result.")
         resolved_target = data.get("target")
         if target["kind"] == "pawn" and isinstance(resolved_target, dict) and resolved_target.get("kind") != "pawn":
-            raise ToolExecutionError("spatial_target_kind_mismatch", "The resolved target is not a Pawn; use a Pawn ID or a more specific name.")
+            raise ToolExecutionError(
+                "spatial_target_kind_mismatch",
+                "The resolved target is not a Pawn; use a Pawn ID or a more specific name.",
+            )
         # Keep the result claim-shaped. Do not make the model reconstruct reachability
         # from transport/session metadata or unrelated Room/Region fields.
         rendered = {
@@ -535,14 +527,22 @@ class SemanticInteraction:
                 route["path_length"] = route["grid_distance"]
             route.pop("grid_distance", None)
             if isinstance(route.get("path_length"), dict):
-                route["path_length"]["meaning"] = "Sum of segment lengths along this returned path; not straight-line distance between its endpoints."
-            route["optimality"] = {'status':'not_evaluated', 'meaning':'Neither shortest nor non-shortest has been established. No shortest-path proof was performed.'}
-            route["endpoint_meaning"] = "end is the path stopping cell, not the target's position. Touch can stop beside the target. Use to.position for the actual target location when available; do not infer it when absent."
+                route["path_length"]["meaning"] = (
+                    "Sum of segment lengths along this returned path; not straight-line distance between its endpoints."
+                )
+            route["optimality"] = {
+                "status": "not_evaluated",
+                "meaning": "Neither shortest nor non-shortest has been established. No shortest-path proof was performed.",
+            }
+            route["endpoint_meaning"] = (
+                "end is the path stopping cell, not the target's position. Touch can stop beside the target. Use to.position for the actual target location when available; do not infer it when absent."
+            )
             rendered["route"] = route
         return rendered
 
     async def _inspect_many(self, args: dict[str, Any]) -> dict[str, Any]:
         from .spatial_ranking import rank_paths
+
         targets = args["to"]
         if not 1 <= len(targets) <= 8 or not all(isinstance(t, dict) for t in targets):
             raise SurfaceError("to requires 1..8 target references")
@@ -561,11 +561,12 @@ class SemanticInteraction:
         rows = []
         for i, target in enumerate(targets):
             try:
-                value = await self.inspect_space({"from":args["from"], "to":target, "detail":detail})
+                value = await self.inspect_space({"from": args["from"], "to": target, "detail": detail})
             except ToolExecutionError as error:
-                if not error.recoverable: raise
-                value = {"answer":"unknown", "error":{"code":error.code,"message":str(error)}}
-            rows.append({"input_index":i,"requested_target":copy.deepcopy(target),"result":value})
+                if not error.recoverable:
+                    raise
+                value = {"answer": "unknown", "error": {"code": error.code, "message": str(error)}}
+            rows.append({"input_index": i, "requested_target": copy.deepcopy(target), "result": value})
         return rank_paths(rows, by)
 
     @staticmethod
@@ -574,7 +575,9 @@ class SemanticInteraction:
         if unknown:
             raise SurfaceError(path + " contains unsupported fields: " + ", ".join(sorted(unknown)))
         for field in ("kind", "id", "name", "map"):
-            if field in value and (not isinstance(value[field], str) or not value[field].strip() or len(value[field]) > 256):
+            if field in value and (
+                not isinstance(value[field], str) or not value[field].strip() or len(value[field]) > 256
+            ):
                 raise SurfaceError(path + "." + field + " must be nonempty text (at most 256 characters)")
         kind = value.get("kind")
         if kind not in kinds:
@@ -590,22 +593,18 @@ class SemanticInteraction:
 
 
 def semantic_interaction_factory(setup: Any, session: Any, update: Any):
-    """Runtime factory: build the semantic surface, or decline.
-
-    Declining (returning None) is a supported outcome, not an error: the runtime
-    then keeps the Mod's own tools, prompt and directory. It happens when the
-    deployment switched the surface off, when the connected Mod does not
-    advertise a directory, or when the directory cannot compile.
-    """
+    """Require the look/count surface; never expose a fallback query vocabulary."""
     if not semantic_surface_available(setup):
-        return None
+        raise ToolExecutionError(
+            "semantic_surface_unavailable",
+            "This consultation requires a compilable public query directory and query handler. Update or reconnect the RimWorld Mod.",
+            recoverable=False,
+        )
     return SemanticInteraction(setup, session, update)
 
 
 __all__ = [
-    "ENVIRONMENT_SWITCH",
     "SemanticInteraction",
     "semantic_interaction_factory",
     "semantic_surface_available",
-    "semantic_surface_requested",
 ]

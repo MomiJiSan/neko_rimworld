@@ -10,7 +10,17 @@ from plugin.plugins.neko_rimworld.agent.handoff import (
     count_handoff_tokens,
     validate_agent_text,
     validate_submission,
+    rendered_authored_text,
 )
+
+
+def test_tool_parameter_tail_is_rendered_without_mutating_original_text():
+    raw='合理分工。 </answer>\n<parameter name="language">zh'
+    assert rendered_authored_text(raw,'zh')=='合理分工。'
+    assert raw.endswith('>zh')
+    quoted='角色名字是“</answer><parameter name="language">zh”。'
+    assert rendered_authored_text(quoted,'zh')==quoted
+    assert rendered_authored_text(raw,'en')==raw
 
 
 def test_submission_preserves_both_agent_authored_texts() -> None:
@@ -170,7 +180,13 @@ async def test_text_mode_bad_parts_use_current_contract_in_real_registry(extra):
 
     registry = ToolRegistry()
     registry.register(make_submission_tool(SubmissionDraft(), [], references_supported=False))
-    prepared = registry.prepare(ToolCall(call_id="bad-part", name="submit_response", raw_arguments=json.dumps({"answer": [{"text": "结论", extra: "zh"}]})))
+    prepared = registry.prepare(
+        ToolCall(
+            call_id="bad-part",
+            name="submit_response",
+            raw_arguments=json.dumps({"answer": [{"text": "结论", extra: "zh"}]}),
+        )
+    )
     result = await registry.execute(prepared)
     error = result.value["error"]
     assert result.ok is False and error["code"] == "invalid_submission"
@@ -184,6 +200,7 @@ async def test_text_mode_bad_parts_use_current_contract_in_real_registry(extra):
 
 def test_text_fallback_applies_same_capability_and_token_feedback():
     from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft, SubmissionPatchError
+
     draft = SubmissionDraft()
     with pytest.raises(SubmissionPatchError) as rejected:
         draft.apply({"answer": [{"text": "长结论。" * 200}], "detail": "保留完整报告"}, references_supported=False)
@@ -200,42 +217,54 @@ def test_text_fallback_applies_same_capability_and_token_feedback():
 async def test_text_submission_string_and_legacy_shapes_share_validation():
     from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft, make_submission_tool
     from plugin.plugins.neko_rimworld.agent.tools import ToolExecutionError
-    conclusion='可达，150步；终点是可触及位置，并非站入目标格。'
-    outputs=[]
-    for value in (conclusion, {'text':conclusion}, [{'text':conclusion}]):
-        draft=SubmissionDraft();tool=make_submission_tool(draft,[],references_supported=False)
-        assert tool.parameters['properties']['answer']['type']=='string'
-        await tool.handler({'answer':value,'detail':'完整路径及范围。'})
-        outputs.append((draft.agent_text,draft.full_text))
-    assert outputs[0]==outputs[1]==outputs[2]
-    assert outputs[0][0]==conclusion
+
+    conclusion = "可达，150步；终点是可触及位置，并非站入目标格。"
+    outputs = []
+    for value in (conclusion, {"text": conclusion}, [{"text": conclusion}]):
+        draft = SubmissionDraft()
+        tool = make_submission_tool(draft, [], references_supported=False)
+        assert tool.parameters["properties"]["answer"]["type"] == "string"
+        await tool.handler({"answer": value, "detail": "完整路径及范围。"})
+        outputs.append((draft.agent_text, draft.full_text))
+    assert outputs[0] == outputs[1] == outputs[2]
+    assert outputs[0][0] == conclusion
     with pytest.raises(ToolExecutionError) as error:
-        await make_submission_tool(SubmissionDraft(),[],references_supported=False).handler({'answer':'这是很长的结论。'*300})
-    assert error.value.code=='handoff_over_budget'
+        await make_submission_tool(SubmissionDraft(), [], references_supported=False).handler(
+            {"answer": "这是很长的结论。" * 300}
+        )
+    assert error.value.code == "handoff_over_budget"
 
 
 def test_handoff_guidance_separates_main_conclusion_and_complete_report():
-    from plugin.plugins.neko_rimworld.agent.prompt import build_system_prompt,build_finalization_prompt
-    for prompt in (build_system_prompt(4,references_supported=False),build_finalization_prompt(4,references_supported=False)):
-        assert 'cover the question' in prompt and 'standalone conclusion' in prompt
-        assert 'one concise text string' in prompt
-        assert '180 tokens' in prompt and '12000 characters' in prompt
+    from plugin.plugins.neko_rimworld.agent.prompt import build_finalization_prompt, build_system_prompt
+
+    for prompt in (
+        build_system_prompt(4, references_supported=False),
+        build_finalization_prompt(4, references_supported=False),
+    ):
+        assert "cover the question" in prompt and "standalone conclusion" in prompt
+        assert "one concise text string" in prompt
+        assert "180 tokens" in prompt and "12000 characters" in prompt
 
 
 @pytest.mark.asyncio
 async def test_invalid_text_submission_feedback_matches_public_string_schema():
     from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft, make_submission_tool
     from plugin.plugins.neko_rimworld.agent.tools import ToolExecutionError
-    tool=make_submission_tool(SubmissionDraft(),[],references_supported=False)
+
+    tool = make_submission_tool(SubmissionDraft(), [], references_supported=False)
     with pytest.raises(ToolExecutionError) as error:
-        await tool.handler({'answer':42})
-    assert 'nonempty text string' in str(error.value)
-    assert 'ordered parts' not in str(error.value)
+        await tool.handler({"answer": 42})
+    assert "nonempty text string" in str(error.value)
+    assert "ordered parts" not in str(error.value)
 
 
 @pytest.mark.asyncio
 async def test_legacy_single_object_does_not_drop_extra_fields():
     from plugin.plugins.neko_rimworld.agent.handoff import SubmissionDraft, make_submission_tool
     from plugin.plugins.neko_rimworld.agent.tools import ToolExecutionError
+
     with pytest.raises(ToolExecutionError):
-        await make_submission_tool(SubmissionDraft(),[],references_supported=False).handler({'answer':{'text':'结论','language':'zh'}})
+        await make_submission_tool(SubmissionDraft(), [], references_supported=False).handler(
+            {"answer": {"text": "结论", "language": "zh"}}
+        )

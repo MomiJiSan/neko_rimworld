@@ -56,7 +56,6 @@ class AgentModelSettings:
     stream_idle_timeout_seconds: float = 20.0
     finalization_reserve_seconds: float = 15.0
     stream_include_usage: bool = True
-    review_before_delivery: bool = False
 
     @property
     def configured(self) -> bool:
@@ -88,7 +87,6 @@ class AgentModelSettings:
             "stream_idle_timeout_seconds": self.stream_idle_timeout_seconds,
             "finalization_reserve_seconds": self.finalization_reserve_seconds,
             "stream_include_usage": self.stream_include_usage,
-            "review_before_delivery": self.review_before_delivery,
         }
 
 
@@ -127,7 +125,6 @@ def build_agent_model_settings(
     stream_idle_timeout_seconds: object = 20.0,
     finalization_reserve_seconds: object = 15.0,
     stream_include_usage: object = True,
-    review_before_delivery: object = False,
 ) -> AgentModelSettings:
     if not isinstance(api_key, str):
         raise AgentConfigurationError("Agent API key must be text.")
@@ -181,8 +178,6 @@ def build_agent_model_settings(
         extra[name] = float(value)
     if not isinstance(stream_include_usage, bool):
         raise AgentConfigurationError("stream_include_usage must be a boolean.")
-    if not isinstance(review_before_delivery, bool):
-        raise AgentConfigurationError("review_before_delivery must be a boolean.")
 
     return AgentModelSettings(
         base_url=normalized_base,
@@ -194,7 +189,6 @@ def build_agent_model_settings(
         max_output_tokens=max_output_tokens,
         temperature=normalized_temperature,
         stream_include_usage=stream_include_usage,
-        review_before_delivery=review_before_delivery,
         **extra,
     )
 
@@ -213,6 +207,8 @@ def parse_agent_model_settings(config: object) -> tuple[AgentModelSettings, list
     if all(isinstance(value, str) and not value.strip() for value in (base_value, model_value, key_value)):
         return AgentModelSettings(), []
     try:
+        if agent.get("review_before_delivery") not in (None, False):
+            raise AgentConfigurationError("review_before_delivery is retired; use bench evaluation with frozen source.")
         return (
             build_agent_model_settings(
                 base_url=base_value,
@@ -228,7 +224,6 @@ def parse_agent_model_settings(config: object) -> tuple[AgentModelSettings, list
                 stream_idle_timeout_seconds=agent.get("stream_idle_timeout_seconds", 20.0),
                 finalization_reserve_seconds=agent.get("finalization_reserve_seconds", 15.0),
                 stream_include_usage=agent.get("stream_include_usage", True),
-                review_before_delivery=agent.get("review_before_delivery", False),
             ),
             [],
         )
@@ -424,14 +419,24 @@ class OpenAICompatibleModelClient:
                                     diagnostics.setdefault("first_useful_delta_ms", elapsed())
                                     diagnostics["last_useful_delta_ms"] = elapsed()
                                 if assembler.meaningful_bytes > MAX_EFFECTIVE_RESPONSE_BYTES:
-                                    raise ModelClientError("model_response_too_large", "The model's text/tool content exceeded its byte limit.")
+                                    raise ModelClientError(
+                                        "model_response_too_large",
+                                        "The model's text/tool content exceeded its byte limit.",
+                                    )
                         if assembler.meaningful_bytes > MAX_EFFECTIVE_RESPONSE_BYTES:
-                            raise ModelClientError("model_response_too_large", "The model's text/tool content exceeded its byte limit.")
+                            raise ModelClientError(
+                                "model_response_too_large", "The model's text/tool content exceeded its byte limit."
+                            )
                         payload = assembler.payload()
                     finally:
                         await response.aclose()
             turn = self._parse_response(payload)
-            diagnostics.update(phase="completed", total_ms=elapsed(), response_bytes=bytes_read, effective_response_bytes=assembler.meaningful_bytes)
+            diagnostics.update(
+                phase="completed",
+                total_ms=elapsed(),
+                response_bytes=bytes_read,
+                effective_response_bytes=assembler.meaningful_bytes,
+            )
             return replace(turn, diagnostics=diagnostics, reasoning_metadata=assembler.reasoning_metadata())
         except asyncio.CancelledError:
             diagnostics.update(exception_type="CancelledError", total_ms=elapsed(), response_bytes=bytes_read)
@@ -529,7 +534,9 @@ class OpenAICompatibleModelClient:
             tool_calls=tuple(tool_calls),
             usage=usage,
             reasoning_metadata=reasoning_metadata,
-            reasoning_content=message.get("reasoning_content") if isinstance(message.get("reasoning_content"), str) else None,
+            reasoning_content=message.get("reasoning_content")
+            if isinstance(message.get("reasoning_content"), str)
+            else None,
         )
 
     @staticmethod

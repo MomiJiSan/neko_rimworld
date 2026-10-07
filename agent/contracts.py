@@ -86,7 +86,11 @@ class ToolResult:
             "role": "tool",
             "tool_call_id": self.call_id,
             "name": self.name,
-            "content": content if content is not None else self.model_content if self.model_content is not None else json.dumps(self.value, ensure_ascii=False, allow_nan=False, separators=(",", ":")),
+            "content": content
+            if content is not None
+            else self.model_content
+            if self.model_content is not None
+            else json.dumps(self.value, ensure_ascii=False, allow_nan=False, separators=(",", ":")),
         }
 
 

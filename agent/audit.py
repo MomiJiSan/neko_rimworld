@@ -2,12 +2,6 @@
 
 from __future__ import annotations
 
-_REQUEST_OUTCOMES = frozenset({
-    "model_response_received", "model_request_attempt_failed", "model_request_failed",
-    "model_request_cancelled", "research_request_expired", "research_request_failed",
-})
-
-
 import copy
 import hashlib
 import json
@@ -21,6 +15,17 @@ from typing import Any
 
 from ..state import redact_text, utc_now
 from .usage import combine_run_summaries, summarize_usage
+
+_REQUEST_OUTCOMES = frozenset(
+    {
+        "model_response_received",
+        "model_request_attempt_failed",
+        "model_request_failed",
+        "model_request_cancelled",
+        "research_request_expired",
+        "research_request_failed",
+    }
+)
 
 MAX_RECENT_RUNS = 20
 MAX_EVENTS_PER_RUN = 512
@@ -54,12 +59,19 @@ def private_protocol_redacted(value: Any) -> Any:
     if isinstance(value, Mapping):
         result = {}
         for key, item in value.items():
-            if key in _PRIVATE_PROTOCOL_KEYS and isinstance(item, Mapping) and item.get("private_protocol_redacted") is True:
+            if (
+                key in _PRIVATE_PROTOCOL_KEYS
+                and isinstance(item, Mapping)
+                and item.get("private_protocol_redacted") is True
+            ):
                 result[key] = dict(item)
             elif key in _PRIVATE_PROTOCOL_KEYS:
                 encoded = json.dumps(item, ensure_ascii=False, separators=(",", ":")).encode()
-                result[key] = {"private_protocol_redacted": True, "bytes": len(encoded),
-                               "sha256": hashlib.sha256(encoded).hexdigest()}
+                result[key] = {
+                    "private_protocol_redacted": True,
+                    "bytes": len(encoded),
+                    "sha256": hashlib.sha256(encoded).hexdigest(),
+                }
             else:
                 result[key] = private_protocol_redacted(item)
         return result
@@ -224,8 +236,10 @@ def _progress_summary(event: Mapping[str, Any]) -> str:
 class AgentAuditLedger:
     """One run's immutable event sequence plus a derived current state."""
 
-    def __init__(self, question: str) -> None:
+    def __init__(self, question: str, *, workspace_id=None, turn_id=None) -> None:
         self.run_id = uuid.uuid4().hex
+        self.workspace_id = workspace_id
+        self.turn_id = turn_id
         self._question_preview = redact_text(question, 300)
         self._lock = threading.RLock()
         self._state = AgentRunState.CREATED
@@ -362,6 +376,11 @@ class AgentAuditLedger:
             )
             return {
                 "run_id": self.run_id,
+                **(
+                    {"workspace_id": self.workspace_id, "turn_id": self.turn_id}
+                    if self.workspace_id is not None
+                    else {}
+                ),
                 "question": self._question_preview,
                 "draft_available": bool(self._draft and self._draft.get("full_text")),
                 "result_status": self._result.get("status") if self._result else None,
@@ -386,20 +405,13 @@ class AgentAuditLedger:
                 "research_expirations": event_counts.get("research_request_expired", 0),
                 "usage": summarize_usage(
                     event_counts.get("model_request_started", 0),
-                    (
-                        event["data"].get("usage")
-                        for event in self._events
-                        if event["event"]
-                        in _REQUEST_OUTCOMES
-                    ),
+                    (event["data"].get("usage") for event in self._events if event["event"] in _REQUEST_OUTCOMES),
                 ),
                 "latest_request": next(
                     (
                         event["data"].get("diagnostics")
                         for event in reversed(self._events)
-                        if event["event"]
-                        in _REQUEST_OUTCOMES
-                        and event["data"].get("diagnostics")
+                        if event["event"] in _REQUEST_OUTCOMES and event["data"].get("diagnostics")
                     ),
                     None,
                 ),

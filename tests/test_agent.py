@@ -19,11 +19,12 @@ from plugin.plugins.neko_rimworld.agent import (
     OpenAICompatibleModelClient,
     ToolCall,
     build_agent_model_settings,
+    model_requests,
     parse_agent_model_settings,
 )
-from plugin.plugins.neko_rimworld.agent import loop as agent_loop
 from plugin.plugins.neko_rimworld.agent.audit import MAX_EVENTS_PER_RUN
 from plugin.plugins.neko_rimworld.agent.tools import ToolSpec
+from plugin.plugins.neko_rimworld.agent.tools import ToolExecutionError
 from plugin.plugins.neko_rimworld.observation import Observation
 
 
@@ -129,6 +130,31 @@ def digest_view() -> Observation:
             },
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_connection_change_preserves_answer_but_reports_degraded_delivery() -> None:
+    model = ScriptedModel([
+        turn("", ToolCall("read-1", "query_game", "{}")),
+        turn("The connection changed; current colonist tasks are unknown."),
+    ])
+
+    async def interrupted(_args):
+        raise ToolExecutionError("connection_changed", "The game connection changed.")
+
+    runtime = AgentRuntime(
+        allow_text_completion=True,
+        observation_tools=[query_tool(interrupted)],
+        audit_registry=AgentAuditRegistry(),
+        logger=FakeLogger(),
+        model_factory=lambda _settings: model,
+    )
+    result = await runtime.run("What can my colonists do?", settings())
+    assert result["status"] == "degraded"
+    assert result["audit"]["error_code"] == "connection_changed"
+    assert result["answer"] == "The connection changed; current colonist tasks are unknown."
+    assert result["summary"] == result["answer"]
+    assert any("connection changed" in text for text in result["caveats"])
 
 
 @pytest.mark.asyncio
@@ -240,10 +266,18 @@ async def test_agent_reuses_summary_and_appends_detail() -> None:
 async def test_over_budget_submission_is_returned_to_the_model_for_revision() -> None:
     over_budget = "这是一段应由内部Agent重新组织的自然语言。" * 100
     final_text = "已重新组织为可直接使用的简短回答。"
-    model = ScriptedModel(
+    class RevisionModel(ScriptedModel):
+        async def complete(self, messages, tools, *, timeout):
+            assert timeout > 0
+            names = [tool["function"]["name"] for tool in tools]
+            assert names[0] == "query_game" if not self.requests else names == ["submit_response"]
+            self.requests.append([dict(message) for message in messages])
+            return self.turns.pop(0)
+
+    model = RevisionModel(
         [
             turn("", submission_call("完整报告", over_budget, "submit-too-long")),
-            turn("", submission_call("完整报告", final_text, "submit-valid")),
+            turn("", ToolCall("submit-valid", "submit_response", json.dumps({"answer": final_text}))),
         ]
     )
 
@@ -259,8 +293,10 @@ async def test_over_budget_submission_is_returned_to_the_model_for_revision() ->
     )
     result = await runtime.run("Answer with detail.", settings())
 
-    tool_message = next(message for message in model.requests[1] if message.get("role") == "tool")
-    assert json.loads(tool_message["content"])["error"]["code"] == "handoff_over_budget"
+    assert model.requests[1][1] == {"role": "user", "content": "Answer with detail."}
+    assert model.requests[1][2] == {"role": "assistant", "content": over_budget}
+    assert "完整报告" not in json.dumps(model.requests[1], ensure_ascii=False)
+    assert "完整报告" in result["answer"]
     assert result["summary"] == final_text
     assert result["audit"]["cycles"] == 2
 
@@ -523,7 +559,7 @@ async def test_non_retryable_http_failure_is_not_retried() -> None:
 
 @pytest.mark.asyncio
 async def test_transient_retries_are_bounded_and_usage_is_accumulated(monkeypatch) -> None:
-    monkeypatch.setattr(agent_loop, "MODEL_RETRY_DELAYS_SECONDS", (0.0, 0.0))
+    monkeypatch.setattr(model_requests, "MODEL_RETRY_DELAYS_SECONDS", (0.0, 0.0))
 
     def overloaded(request_id: str, tokens: int) -> ModelClientError:
         return ModelClientError(
@@ -553,7 +589,7 @@ async def test_transient_retries_are_bounded_and_usage_is_accumulated(monkeypatc
     result = await runtime.run("How is the colony?", settings(run_budget_seconds=30))
 
     assert result["status"] == "degraded"
-    assert len(model.requests) == agent_loop.MAX_MODEL_ATTEMPTS == 3
+    assert len(model.requests) == model_requests.MAX_MODEL_ATTEMPTS == 3
     latest = registry.snapshot()["latest_run"]
     assert latest["model_calls"] == 3
     assert latest["model_failures"] == 3
@@ -961,7 +997,10 @@ async def test_cancellation_at_audit_limit_still_propagates(monkeypatch):
     registry = AgentAuditRegistry()
     runtime = AgentRuntime(
         allow_text_completion=True,  # This legacy loop fixture explicitly tests natural-text completion.
-        observation_tools=[], audit_registry=registry, logger=FakeLogger(), model_factory=lambda _: Model()
+        observation_tools=[],
+        audit_registry=registry,
+        logger=FakeLogger(),
+        model_factory=lambda _: Model(),
     )
     task = asyncio.create_task(runtime.run("Cancel", settings()))
     await started.wait()

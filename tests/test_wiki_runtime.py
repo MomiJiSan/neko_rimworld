@@ -1,4 +1,5 @@
 """Definition knowledge survives delivery without becoming live evidence."""
+
 from __future__ import annotations
 
 import copy
@@ -8,7 +9,8 @@ from dataclasses import replace
 import pytest
 
 from plugin.plugins.neko_rimworld.agent import AgentAuditLedger, AgentAuditRegistry, AgentRuntime, ToolCall
-from plugin.plugins.neko_rimworld.agent.semantic_tools import ENVIRONMENT_SWITCH, semantic_interaction_factory
+from plugin.plugins.neko_rimworld.agent.semantic_tools import semantic_interaction_factory
+
 from plugin.plugins.neko_rimworld.agent.session import AgentRunSession
 from plugin.plugins.neko_rimworld.agent.tools import ToolRegistry, ToolSetup, ToolSpec
 from plugin.plugins.neko_rimworld.agent.wiki_tools import WIKI_GUIDANCE
@@ -38,11 +40,15 @@ def definition():
         "knowledge_kind": "definition",
         "snapshot": {"format": "neko.defs.v1", "sha256": "a" * 64},
         "applicability": {"status": "unverified", "current_game_match_verified": False},
-        "entries": [{
-            "key": "Verse.ThingDef/Steel", "def_name": "Steel", "label": "steel",
-            "description": "Definition data only.",
-            "facts": [{"name": "stackLimit", "value": "75"}],
-        }],
+        "entries": [
+            {
+                "key": "Verse.ThingDef/Steel",
+                "def_name": "Steel",
+                "label": "steel",
+                "description": "Definition data only.",
+                "facts": [{"name": "stackLimit", "value": "75"}],
+            }
+        ],
     }
 
 
@@ -54,19 +60,23 @@ def wiki_tool(data, after_read=None):
         return copy.deepcopy(data)
 
     return ToolSpec(
-        "wiki", WIKI_GUIDANCE,
-        {"type": "object", "properties": {"query": {"type": "string"}},
-         "required": ["query"], "additionalProperties": False},
+        "wiki",
+        WIKI_GUIDANCE,
+        {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+            "additionalProperties": False,
+        },
         read,
     )
 
 
-@pytest.fixture(params=["offline", "semantic"])
+@pytest.fixture(params=["semantic"])
 def runtime_factory(request, monkeypatch):
-    monkeypatch.delenv(ENVIRONMENT_SWITCH, raising=False)
 
     def create(model, tool):
-        setup = setup_for() if request.param == "semantic" else ToolSetup((), context=WIKI_GUIDANCE)
+        setup = setup_for()
         setup = replace(setup, tools=(*setup.tools, tool))
         store = ReportStore()
         audit = AgentAuditRegistry()
@@ -78,9 +88,13 @@ def runtime_factory(request, monkeypatch):
             return store.save(record)
 
         runtime = AgentRuntime(
-            observation_tools=[], tools_provider=provide_tools,
-            audit_registry=audit, logger=FakeLogger(), model_factory=lambda _: model,
-            interaction_factory=semantic_interaction_factory, report_sink=save,
+            observation_tools=[],
+            tools_provider=provide_tools,
+            audit_registry=audit,
+            logger=FakeLogger(),
+            model_factory=lambda _: model,
+            interaction_factory=semantic_interaction_factory,
+            report_sink=save,
         )
         return runtime, store, audit
 
@@ -90,10 +104,12 @@ def runtime_factory(request, monkeypatch):
 @pytest.mark.asyncio
 async def test_wiki_then_submit_retains_knowledge_in_result_and_report(runtime_factory):
     data = definition()
-    model = ScriptedModel([
-        turn("", ToolCall("wiki-1", "wiki", '{"query":"Steel"}')),
-        turn("", submission_call("Steel 的定义堆叠上限为 75；当前存档状态未读取。", "已查到 Steel 的定义。")),
-    ])
+    model = ScriptedModel(
+        [
+            turn("", ToolCall("wiki-1", "wiki", '{"query":"Steel"}')),
+            turn("", submission_call("Steel 的定义堆叠上限为 75；当前存档状态未读取。", "已查到 Steel 的定义。")),
+        ]
+    )
     runtime, store, audit = runtime_factory(model, wiki_tool(data))
     result = await runtime.run("查询 Steel 的定义。", settings())
 
@@ -128,11 +144,13 @@ async def test_research_close_removes_wiki_and_keeps_obtained_knowledge(runtime_
     def close_research():
         elapsed[0] = 6.0
 
-    model = ScriptedModel([
-        turn("", ToolCall("wiki-1", "wiki", '{"query":"Steel"}')),
-        turn("", ToolCall("wiki-closed", "wiki", '{"query":"Gold"}')),
-        turn("", submission_call("已读取 Steel 定义。", "当前存档状态未读取。")),
-    ])
+    model = ScriptedModel(
+        [
+            turn("", ToolCall("wiki-1", "wiki", '{"query":"Steel"}')),
+            turn("", ToolCall("wiki-closed", "wiki", '{"query":"Gold"}')),
+            turn("", submission_call("已读取 Steel 定义。", "当前存档状态未读取。")),
+        ]
+    )
     runtime, store, audit = runtime_factory(model, wiki_tool(definition(), close_research))
     result = await runtime.run("查询定义。", replace(settings(), finalization_reserve_seconds=5.0))
 
@@ -149,20 +167,24 @@ async def test_research_close_removes_wiki_and_keeps_obtained_knowledge(runtime_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("claim,code", [
-    ("Alice 是殖民者。", "identity_claim"),
-    ("Steel 是我们的物资。", "ownership_claim"),
-])
+@pytest.mark.parametrize(
+    "claim,code",
+    [
+        ("Alice 是殖民者。", "identity_claim"),
+        ("Steel 是我们的物资。", "ownership_claim"),
+    ],
+)
 async def test_wiki_does_not_license_identity_or_ownership(runtime_factory, claim, code):
     data = definition()
     # Even evidence-shaped fields in a definition cannot grant live claims.
-    data["entries"][0].update(is_free_colonist=True, faction={"is_player": True},
-                              held_by_faction={"is_player": True})
-    model = ScriptedModel([
-        turn("", ToolCall("wiki-1", "wiki", '{"query":"Steel"}')),
-        turn("", submission_call(claim, claim, "unsupported")),
-        turn("", submission_call("仅查到定义，身份和归属未确认。", "当前存档未读取。", "corrected")),
-    ])
+    data["entries"][0].update(is_free_colonist=True, faction={"is_player": True}, held_by_faction={"is_player": True})
+    model = ScriptedModel(
+        [
+            turn("", ToolCall("wiki-1", "wiki", '{"query":"Steel"}')),
+            turn("", submission_call(claim, claim, "unsupported")),
+            turn("", submission_call("仅查到定义，身份和归属未确认。", "当前存档未读取。", "corrected")),
+        ]
+    )
     runtime, store, _ = runtime_factory(model, wiki_tool(data))
     result = await runtime.run("确认身份和归属。", settings())
 
@@ -195,7 +217,10 @@ async def test_session_retains_first_sixteen_knowledge_results_and_counts_omissi
     assert all(item["result"] == definition() for item in session.knowledge)
     assert session.observations == []
     failed = registry.error_result(
-        ToolCall("bad", "wiki", "{}"), "invalid_arguments", "missing query", recoverable=True,
+        ToolCall("bad", "wiki", "{}"),
+        "invalid_arguments",
+        "missing query",
+        recoverable=True,
     )
     session.retain_knowledge(failed)
     assert session.knowledge_omitted == 3
@@ -208,8 +233,10 @@ async def test_audit_capacity_on_wiki_completion_keeps_knowledge(monkeypatch):
     monkeypatch.setattr(audit, "MAX_EVENTS_PER_RUN", 8)
     model = ScriptedModel([turn("", ToolCall("wiki-1", "wiki", '{"query":"Steel"}'))])
     runtime = AgentRuntime(
-        observation_tools=[wiki_tool(definition())], audit_registry=AgentAuditRegistry(),
-        logger=FakeLogger(), model_factory=lambda _: model,
+        observation_tools=[wiki_tool(definition())],
+        audit_registry=AgentAuditRegistry(),
+        logger=FakeLogger(),
+        model_factory=lambda _: model,
     )
     result = await runtime.run("查询 Steel。", settings())
 

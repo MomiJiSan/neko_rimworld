@@ -24,6 +24,78 @@ def record(index=1, **extra):
     }
 
 
+@pytest.mark.asyncio
+async def test_internal_report_tool_preserves_historical_evidence_without_current_observations():
+    from plugin.plugins.neko_rimworld.agent.contracts import ToolCall
+    from plugin.plugins.neko_rimworld.workspace.history_tools import make_history_tool
+    from plugin.plugins.neko_rimworld.agent.tools import ToolRegistry
+
+    store = ReportStore()
+    observation = {
+        "observation_id": "old",
+        "received_at": "2026-10-02",
+        "request": {"operation": "query"},
+        "response": {
+            "colony_id": "old-colony",
+            "load_epoch": "old-load",
+            "game_tick": 10,
+            "snapshot_sequence": 1,
+            "payload": {
+                "status": "partial",
+                "data": {
+                    "actor": "Doctor",
+                    "user": "Patient",
+                    "stage": "transfer",
+                    "units": 28,
+                    "nullable": None,
+                    "flag": False,
+                },
+            },
+        },
+    }
+    store.save(record(workspace_id="current-work", observations=[observation]))
+    registry = ToolRegistry()
+    registry.register(make_history_tool(report_store=store, workspace_id="current-work"))
+
+    async def read(**args):
+        result = await registry.execute(registry.prepare(ToolCall("historical", "workspace_history", json.dumps(args))))
+        assert result.ok and result.observation is None
+        assert result.value["data"]["historical"] and not result.value["data"]["current_observation"]
+        return result.value["data"]
+
+    assert (await read(action="list"))["reports"][0]["report_id"] == f"{1:032x}"
+    assert (await read(action="read", report_id=f"{1:032x}"))["full_text"] == "A full historical report."
+    assert (await read(action="read", report_id=f"{1:032x}", index=0))["observation"] == observation
+
+
+@pytest.mark.asyncio
+async def test_explicit_report_reference_preserves_cross_work_and_unbound_ui_followups():
+    from plugin.plugins.neko_rimworld.workspace.history_tools import make_history_tool
+    from plugin.plugins.neko_rimworld.agent.tools import ToolExecutionError
+
+    store = ReportStore()
+    report_id = f"{1:032x}"
+    store.save(record(workspace_id="other-work", observations=[{"observation_id": "source"}]))
+    scoped = make_history_tool(report_store=store, workspace_id="current-work")
+    assert (await scoped.handler({"action": "list"}))["total"] == 0
+    for extra in ({}, {"index": 0}):
+        with pytest.raises(ToolExecutionError, match="not available in the current work"):
+            await scoped.handler({"action": "read", "report_id": report_id, **extra})
+    for workspace in (None, "current-work"):
+        explicit = make_history_tool(report_store=store, workspace_id=workspace, question=f"Explain historical report {report_id}")
+        result = await explicit.handler({"action": "read", "report_id": report_id})
+        assert result["full_text"] == "A full historical report."
+        assert result["reference_scope"] == "explicit_question_reference"
+        assert result["historical"] and not result["current_observation"]
+        evidence = await explicit.handler({"action": "read", "report_id": report_id, "index": 0})
+        assert evidence["workspace_id"] == "other-work" and evidence["observation"]["observation_id"] == "source"
+        by_id = await explicit.handler({"action": "read", "report_id": report_id, "observation_id": "source"})
+        assert by_id["observation"] == evidence["observation"]
+    # Administrative report browsing remains global; agent discovery does not.
+    assert store.list()["total"] == 1
+    assert (await make_history_tool(report_store=store).handler({"action": "list"}))["total"] == 0
+
+
 def test_length_patch_keeps_detail_without_retransmission():
     draft = SubmissionDraft()
     with pytest.raises(SubmissionPatchError) as caught:
@@ -217,25 +289,29 @@ async def test_report_storage_failure_keeps_complete_result():
 
 
 @pytest.mark.asyncio
-async def test_public_consult_requires_exact_explicit_reference():
+async def test_public_consult_accepts_only_question_and_reserved_host_context():
+    from plugin.sdk.shared.core.entry_runtime import prepare_entry_kwargs
+
     plugin, _ = make_plugin({})
-    plugin._agent_settings = settings()
-    plugin._reports.save(record())
-    received = []
-
-    class Runtime:
-        async def run(self, question, model_settings, **kwargs):
-            received.append(kwargs)
-            return {"status": "ok", "answer": "Answer"}
-
-    plugin._agent_runtime = Runtime()
-    await plugin.rimworld_consult(question="New question")
-    assert received[-1] == {}
-    await plugin.rimworld_consult(question="Old report detail", report_id=f"{1:032x}")
-    assert received[-1]["reference_report"]["full_text"] == "A full historical report."
-    failed = await plugin.rimworld_consult(question="Missing report", report_id=f"{42:032x}")
-    assert failed.is_err()
-    assert len(received) == 2
+    method = plugin.rimworld_consult
+    for name, value in (("report_id", f"{1:032x}"), ("mode", "single"), ("focus", "clinic")):
+        args = prepare_entry_kwargs(
+            plugin_id="neko_rimworld",
+            entry_id="rimworld_consult",
+            handler=method,
+            meta=method.__neko_event_meta__,
+            args={"question": "Investigate", name: value},
+        )
+        with pytest.raises(TypeError):
+            await method(**args)
+    args = prepare_entry_kwargs(
+        plugin_id="neko_rimworld",
+        entry_id="rimworld_consult",
+        handler=method,
+        meta=method.__neko_event_meta__,
+        args={"question": "Investigate", "_ctx": {"run_id": "host"}},
+    )
+    assert args == {"question": "Investigate", "_ctx": {"run_id": "host"}}
 
 
 @pytest.mark.asyncio

@@ -1,19 +1,33 @@
 import pytest
 
-from plugin.plugins.neko_rimworld.agent import model_context
+from plugin.plugins.neko_rimworld.agent.audit import AgentAuditLedger
+from plugin.plugins.neko_rimworld.agent.model_context import RETIRED_DEFAULTS, validate_deployment
+from plugin.plugins.neko_rimworld.agent.session import AgentRunSession
 
 
-def test_one_opt_in_and_retired_modes_fail_explicitly(monkeypatch):
-    monkeypatch.delenv('NEKO_EVIDENCE_COMPACT', raising=False)
-    monkeypatch.delenv('NEKO_CONTEXT_PRUNING', raising=False)
-    assert not model_context.enabled()
-    monkeypatch.setenv('NEKO_CONTEXT_PRUNING', '1')
-    assert model_context.enabled()
-    monkeypatch.setenv('NEKO_CONTEXT_PRUNING', '3')
-    with pytest.raises(ValueError, match='boolean'):
-        model_context.enabled()
-    monkeypatch.setenv('NEKO_CONTEXT_PRUNING', '1')
-    for mode in ['1', '2', '3', 'aggressive', 'pruned']:
-        monkeypatch.setenv('NEKO_EVIDENCE_COMPACT', mode)
-        with pytest.raises(ValueError, match='retired'):
-            model_context.enabled()
+def test_default_session_has_json_projection_without_environment(monkeypatch):
+    for name in (*RETIRED_DEFAULTS, "NEKO_EVIDENCE_COMPACT", "NEKO_PUBLIC_INPUT_TOKEN_LIMIT"):
+        monkeypatch.delenv(name, raising=False)
+    session = AgentRunSession.create(ledger=AgentAuditLedger("question"), system_prompt="system", question="question")
+    assert session.context_pruner is not None
+    assert not hasattr(session, "policy") and not hasattr(session, "input_budget")
+
+
+@pytest.mark.parametrize("name,expected", RETIRED_DEFAULTS.items())
+def test_retired_switch_cannot_select_an_old_variant(monkeypatch, name, expected):
+    monkeypatch.setenv(name, "0" if expected else "1")
+    with pytest.raises(ValueError, match="retired"):
+        validate_deployment()
+
+
+@pytest.mark.parametrize("name", ["NEKO_EVIDENCE_COMPACT", "NEKO_PUBLIC_INPUT_TOKEN_LIMIT"])
+def test_retired_codec_and_production_input_cap_fail_explicitly(monkeypatch, name):
+    monkeypatch.setenv(name, "1")
+    with pytest.raises(ValueError, match="retired"):
+        validate_deployment()
+
+
+def test_matching_old_value_is_a_migration_notice_not_an_option(monkeypatch):
+    monkeypatch.setenv("NEKO_CONTEXT_PRUNING", "1")
+    with pytest.warns(DeprecationWarning, match="redundant"):
+        validate_deployment()

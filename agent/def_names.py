@@ -16,12 +16,12 @@ candidates — never computed values and never an automatic replacement.
 Ambiguity and incompleteness refuse auto-selection exactly like the
 native identity contract does.
 
-Opt-in with `NEKO_DEF_NAME_RECOVERY=1`; unset keeps every lookup
-byte-identical to the previous behavior.
+The deployed default uses recovery when a complete, ready index is available.
+Missing or unusable indexes retain the native exact lookup.
 """
+
 from __future__ import annotations
 
-import os
 import re
 import sqlite3
 import unicodedata
@@ -29,27 +29,22 @@ import unicodedata
 MAX_CANDIDATES = 8
 
 DISCOVERY_MEANING = (
-    'Definition-name discovery matches from the local Def knowledge index; '
-    'names only, not computed values or automatic replacements. '
-    'The index may lag the loaded game; an exact definition lookup stays the arbiter.'
+    "Definition-name discovery matches from the local Def knowledge index; "
+    "names only, not computed values or automatic replacements. "
+    "The index may lag the loaded game; an exact definition lookup stays the arbiter."
 )
 
-THING_DEF_TYPES = ('ThingDef',)
+THING_DEF_TYPES = ("ThingDef",)
 
 
-def recovery_enabled():
-    value = os.environ.get('NEKO_DEF_NAME_RECOVERY', '').strip().lower()
-    if value not in {'', '0', 'false', 'off', '1', 'true', 'on'}:
-        raise ValueError('NEKO_DEF_NAME_RECOVERY must be a boolean')
-    return value in {'1', 'true', 'on'}
 
 
 def tokens(text):
     """Word-order/size-insensitive token key. Ported unchanged from the audit."""
-    text = unicodedata.normalize('NFKC', text)
-    text = re.sub(r'([a-z0-9])([A-Z])', r'\1 \2', text)
-    text = re.sub(r'([A-Z])([A-Z][a-z])', r'\1 \2', text)
-    return tuple(sorted(re.findall(r'[^\W_]+', text.casefold())))
+    text = unicodedata.normalize("NFKC", text)
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
+    text = re.sub(r"([A-Z])([A-Z][a-z])", r"\1 \2", text)
+    return tuple(sorted(re.findall(r"[^\W_]+", text.casefold())))
 
 
 def _thing_def_rows(view):
@@ -60,14 +55,14 @@ def _thing_def_rows(view):
     """
     rows = []
     for row in view.search_rows():
-        key = row.get('key') if isinstance(row, dict) else None
-        if not isinstance(key, str) or '/' not in key:
+        key = row.get("key") if isinstance(row, dict) else None
+        if not isinstance(key, str) or "/" not in key:
             continue
-        type_name, def_name = key.rsplit('/', 1)
-        base = type_name.rsplit('.', 1)[-1]
+        type_name, def_name = key.rsplit("/", 1)
+        base = type_name.rsplit(".", 1)[-1]
         if base not in THING_DEF_TYPES or not def_name:
             continue
-        names = row.get('names') if isinstance(row.get('names'), list) else []
+        names = row.get("names") if isinstance(row.get("names"), list) else []
         rows.append((def_name, [n for n in names if isinstance(n, str) and n]))
     return rows
 
@@ -87,15 +82,20 @@ class DefNameResolver:
 
     @classmethod
     def from_knowledge_view(cls, view):
-        metadata = getattr(view, 'metadata', None)
+        metadata = getattr(view, "metadata", None)
         if not isinstance(metadata, dict):
-            raise ValueError('knowledge view has no snapshot metadata')
-        complete = metadata.get('complete') is True and not metadata.get('issues')
-        return cls(_thing_def_rows(view), complete=complete,
-                   source={'kind': 'def_knowledge_index',
-                           'sha256': metadata.get('sha256'),
-                           'generated_at': metadata.get('generated_at'),
-                           'complete': complete})
+            raise ValueError("knowledge view has no snapshot metadata")
+        complete = metadata.get("complete") is True and not metadata.get("issues")
+        return cls(
+            _thing_def_rows(view),
+            complete=complete,
+            source={
+                "kind": "def_knowledge_index",
+                "sha256": metadata.get("sha256"),
+                "generated_at": metadata.get("generated_at"),
+                "complete": complete,
+            },
+        )
 
     @classmethod
     def try_from_knowledge_view(cls, view):
@@ -116,15 +116,14 @@ class DefNameResolver:
         is left to the native exact lookup untouched.
         """
         if not isinstance(term, str) or not term:
-            return {'state': 'invalid', 'candidates': [], 'auto_selection': None}
+            return {"state": "invalid", "candidates": [], "auto_selection": None}
         if term.casefold() in self._exact:
-            return {'state': 'known', 'candidates': [], 'auto_selection': None}
+            return {"state": "known", "candidates": [], "auto_selection": None}
         if not self.complete:
-            return {'state': 'incomplete', 'candidates': [], 'auto_selection': None}
+            return {"state": "incomplete", "candidates": [], "auto_selection": None}
         matches = sorted(self._normalized.get(tokens(term), ()))
-        state = 'missing' if not matches else 'ambiguous' if len(matches) > 1 else 'unique'
-        return {'state': state, 'candidates': matches,
-                'auto_selection': matches[0] if state == 'unique' else None}
+        state = "missing" if not matches else "ambiguous" if len(matches) > 1 else "unique"
+        return {"state": state, "candidates": matches, "auto_selection": matches[0] if state == "unique" else None}
 
     def discovery(self, *terms):
         """Names-only candidates for terms native reported missing.
@@ -149,8 +148,11 @@ class DefNameResolver:
         candidates = sorted(found)
         if not candidates:
             return None
-        return {'definition_kind': 'ThingDef',
-                'matches': [{'definition': name} for name in candidates[:MAX_CANDIDATES]],
-                'truncated': len(candidates) > MAX_CANDIDATES,
-                'requested': [t for t in terms if isinstance(t, str) and t],
-                'source': dict(self.source), 'meaning': DISCOVERY_MEANING}
+        return {
+            "definition_kind": "ThingDef",
+            "matches": [{"definition": name} for name in candidates[:MAX_CANDIDATES]],
+            "truncated": len(candidates) > MAX_CANDIDATES,
+            "requested": [t for t in terms if isinstance(t, str) and t],
+            "source": dict(self.source),
+            "meaning": DISCOVERY_MEANING,
+        }

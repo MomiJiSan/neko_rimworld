@@ -1,7 +1,9 @@
 """The Wort pilot: exact reads, complete sibling groups, no intent aliases."""
+
 import json
 
 from plugin.plugins.neko_rimworld.agent.wiki_tools import WikiStore
+
 from .test_wiki_tools import entry, write_snapshot
 
 RECIPE = "Verse.RecipeDef/Make_Wort"
@@ -9,21 +11,36 @@ RECIPE = "Verse.RecipeDef/Make_Wort"
 
 def recipe():
     noise = [{"name": f"noise{i}.count", "value": "0"} for i in range(40)]
-    return entry("Make_Wort", "制作麦芽汁", key=RECIPE, type="Verse.RecipeDef",
-                 description="使用啤酒花制作麦芽汁。", facts=noise + [
-                     {"name": "workAmount", "value": "1000", "type": "System.Single"},
-                     {"name": "products.count", "value": "1"},
-                     {"name": "products[0].thingDef", "value": "Verse.ThingDef/Wort", "type": "Verse.ThingDef"},
-                     {"name": "products[0].count", "value": "5", "type": "System.Int32"},
-                     {"name": "products[0].quality", "value": "Normal"},
-                     {"name": "recipeUsers", "value": "null", "type": "null"},
-                     {"name": "workSpeedStat", "value": "RimWorld.StatDef/DrugCookingSpeed", "type": "RimWorld.StatDef"}], related=[])
+    return entry(
+        "Make_Wort",
+        "制作麦芽汁",
+        key=RECIPE,
+        type="Verse.RecipeDef",
+        description="使用啤酒花制作麦芽汁。",
+        facts=noise
+        + [
+            {"name": "workAmount", "value": "1000", "type": "System.Single"},
+            {"name": "products.count", "value": "1"},
+            {"name": "products[0].thingDef", "value": "Verse.ThingDef/Wort", "type": "Verse.ThingDef"},
+            {"name": "products[0].count", "value": "5", "type": "System.Int32"},
+            {"name": "products[0].quality", "value": "Normal"},
+            {"name": "recipeUsers", "value": "null", "type": "null"},
+            {"name": "workSpeedStat", "value": "RimWorld.StatDef/DrugCookingSpeed", "type": "RimWorld.StatDef"},
+        ],
+        related=[],
+    )
 
 
 def store(tmp_path):
-    write_snapshot(tmp_path, [recipe(), entry("Wort", "麦芽汁"),
-                             entry("Count", "总督", type="RimWorld.RoyalTitleDef", key="RimWorld.RoyalTitleDef/Count"),
-                             entry("DrugCookingSpeed", "酿酒速度", type="RimWorld.StatDef", key="RimWorld.StatDef/DrugCookingSpeed")])
+    write_snapshot(
+        tmp_path,
+        [
+            recipe(),
+            entry("Wort", "麦芽汁"),
+            entry("Count", "总督", type="RimWorld.RoyalTitleDef", key="RimWorld.RoyalTitleDef/Count"),
+            entry("DrugCookingSpeed", "酿酒速度", type="RimWorld.StatDef", key="RimWorld.StatDef/DrugCookingSpeed"),
+        ],
+    )
     return WikiStore(tmp_path)
 
 
@@ -56,7 +73,11 @@ def test_missing_field_not_replaced_with_arbitrary_summary(tmp_path):
 def test_prefix_read_returns_all_product_fields(tmp_path):
     e = store(tmp_path).query(RECIPE + " products")["entries"][0]
     assert {f["name"] for f in e["facts"]} == {
-        "products.count", "products[0].thingDef", "products[0].count", "products[0].quality"}
+        "products.count",
+        "products[0].thingDef",
+        "products[0].count",
+        "products[0].quality",
+    }
     assert e["read_complete"]
 
 
@@ -98,18 +119,19 @@ def test_explicit_null_is_not_marked_missing(tmp_path):
 
 
 def test_large_parent_group_falls_back_to_explicit_leaf_fields(tmp_path):
-    facts = [{"name": "plant." + ("noise" + str(i)), "value": "说明" * 400}
-             for i in range(40)]
-    facts.extend([
-        {"name": "plant.growDays", "value": "3", "type": "System.Single"},
-        {"name": "plant.harvestYield", "value": "6", "type": "System.Int32"},
-        {"name": "plant.harvestedThingDef", "value": "Verse.ThingDef/Rice"},
-    ])
-    source = entry("Plant_Rice", "水稻", type="Verse.ThingDef",
-                   key="Verse.ThingDef/Plant_Rice", facts=facts, related=[])
+    facts = [{"name": "plant." + ("noise" + str(i)), "value": "说明" * 400} for i in range(40)]
+    facts.extend(
+        [
+            {"name": "plant.growDays", "value": "3", "type": "System.Single"},
+            {"name": "plant.harvestYield", "value": "6", "type": "System.Int32"},
+            {"name": "plant.harvestedThingDef", "value": "Verse.ThingDef/Rice"},
+        ]
+    )
+    source = entry(
+        "Plant_Rice", "水稻", type="Verse.ThingDef", key="Verse.ThingDef/Plant_Rice", facts=facts, related=[]
+    )
     write_snapshot(tmp_path, [source])
-    result = WikiStore(tmp_path).query(
-        "Verse.ThingDef/Plant_Rice plant.growDays plant.harvestYield")
+    result = WikiStore(tmp_path).query("Verse.ThingDef/Plant_Rice plant.growDays plant.harvestYield")
     detail = result["entries"][0]
     assert {row["name"] for row in detail["facts"]} == {"plant.growDays", "plant.harvestYield"}
     assert {row["value"] for row in detail["facts"]} == {"3", "6"}
@@ -147,12 +169,14 @@ def test_explicit_leaves_survive_other_groups_and_parent_requests(tmp_path):
 
 
 def test_small_requested_groups_precede_large_groups_regardless_of_query_order(tmp_path):
-    facts = [{"name": "large.a", "value": "x" * 4000},
-             {"name": "large.b", "value": "x" * 1800},
-             {"name": "products[0].thingDef", "value": "Verse.ThingDef/Wort"},
-             {"name": "products[0].count", "value": "5"},
-             {"name": "stats[0].stat", "value": "speed"},
-             {"name": "stats[0].value", "value": "2"}]
+    facts = [
+        {"name": "large.a", "value": "x" * 4000},
+        {"name": "large.b", "value": "x" * 1800},
+        {"name": "products[0].thingDef", "value": "Verse.ThingDef/Wort"},
+        {"name": "products[0].count", "value": "5"},
+        {"name": "stats[0].stat", "value": "speed"},
+        {"name": "stats[0].value", "value": "2"},
+    ]
     write_snapshot(tmp_path, [entry(facts=facts, related=[])])
     for suffix in ["large products stats", "stats large products"]:
         detail = WikiStore(tmp_path).query("Verse.ThingDef/Steel " + suffix)["entries"][0]
@@ -164,8 +188,7 @@ def test_small_requested_groups_precede_large_groups_regardless_of_query_order(t
 
 
 def test_oversized_exact_leaf_is_omitted_without_hiding_other_requests(tmp_path):
-    facts = [{"name": "data.huge", "value": "x" * 10000},
-             {"name": "data.small", "value": "6"}]
+    facts = [{"name": "data.huge", "value": "x" * 10000}, {"name": "data.small", "value": "6"}]
     write_snapshot(tmp_path, [entry(facts=facts, related=[])])
     result = WikiStore(tmp_path).query("Verse.ThingDef/Steel data.huge data.small")
     detail = result["entries"][0]

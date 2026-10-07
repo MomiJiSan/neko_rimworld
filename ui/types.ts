@@ -71,6 +71,8 @@ export type UsageTotals = {
 }
 
 export type AgentRun = {
+  workspace_id?: string | null
+  turn_id?: string | null
   draft?: Record<string, any> | null
   run_id?: string
   question?: string
@@ -110,6 +112,8 @@ export type AgentRuntimeState = {
 }
 
 export type DashboardState = {
+  consultations_in_progress?: number
+  workspaces?: { revision?: number; active_count?: number }
   action_nonce?: string
   status?: string
   endpoint?: string | null
@@ -136,7 +140,7 @@ export type DashboardState = {
   updated_at?: string
 }
 
-export type PageId = "home" | "sessions" | "debug" | "settings"
+export type PageId = "work" | "diagnostics" | "settings"
 export type RunView = "result" | "events" | "observations" | "model"
 export type BudgetValues = Record<string, number | "">
 export const BUDGET_FIELDS = [

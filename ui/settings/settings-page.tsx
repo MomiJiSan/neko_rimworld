@@ -1,9 +1,9 @@
 import { Alert, Button, Card, Field, Grid, InlineError, Input, NumberInput, PasswordInput, Stack, TextBlock } from "@neko/plugin-ui"
-import type { PanelController } from "../controller"
+import type { SettingsController } from "./useSettings"
 import { BUDGET_FIELDS } from "../types"
 import { budgetError } from "../format"
 
-export function SettingsPage({ c }: { c: PanelController }) {
+export function SettingsPage({ c }: { c: SettingsController }) {
   const busy = c.savingBridge || c.savingAgent
   const invalidBudget = budgetError(c.budgets, BUDGET_FIELDS)
   return <Stack>

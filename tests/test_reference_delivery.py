@@ -3,6 +3,7 @@
 Only the model/game/network boundaries are scripted. These are offline transport
 regressions, not a claim about a live host, game, or the persona model's answer.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -76,13 +77,25 @@ async def test_accepted_reference_survives_runtime_and_host_projection(host_tran
     # Independently chosen text puts this reference handoff in (180, 200]. It
     # must preserve both interpretation and the explicit unknown/lower bound.
     conclusion = "结论：" + "判断。" * 80
-    model = ScriptedModel([
-        turn("", ToolCall("read", "query_game", "{}")),
-        turn("", ToolCall("submit", "submit_response", json.dumps({
-            "answer": [{"text": conclusion}, part()],
-            "detail": "这是完整报告的额外说明，不应投影给宿主。",
-        }, ensure_ascii=False))),
-    ])
+    model = ScriptedModel(
+        [
+            turn("", ToolCall("read", "query_game", "{}")),
+            turn(
+                "",
+                ToolCall(
+                    "submit",
+                    "submit_response",
+                    json.dumps(
+                        {
+                            "answer": [{"text": conclusion}, part()],
+                            "detail": "这是完整报告的额外说明，不应投影给宿主。",
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            ),
+        ]
+    )
     observation = observed()
     observation["received_at"] = "2026-09-19T00:00:00Z"
     observation["request"] = {"operation": "query", "arguments": {}}
@@ -93,9 +106,14 @@ async def test_accepted_reference_survives_runtime_and_host_projection(host_tran
     async def setup():
         return ToolSetup((query_tool(read),), references_supported=True)
 
-    runtime = AgentRuntime(allow_text_completion=True, observation_tools=[], tools_provider=setup,
-                           audit_registry=AgentAuditRegistry(), logger=FakeLogger(),
-                           model_factory=lambda _: model)
+    runtime = AgentRuntime(
+        allow_text_completion=True,
+        observation_tools=[],
+        tools_provider=setup,
+        audit_registry=AgentAuditRegistry(),
+        logger=FakeLogger(),
+        model_factory=lambda _: model,
+    )
     result = await runtime.run("报告读数及其限制。", settings())
 
     assert result["status"] == "ok"
@@ -111,23 +129,32 @@ async def test_accepted_reference_survives_runtime_and_host_projection(host_tran
 
     emitter, renderer, events = host_transport
     # user_plugin passes the projected text as BOTH summary and detail.
-    await emitter._emit_task_result("小天", channel="user_plugin", task_id="test",
-                                    success=True, summary=projected, detail=projected,
-                                    source_kind="plugin", source_name="RimWorld")
-    event, = events
+    await emitter._emit_task_result(
+        "小天",
+        channel="user_plugin",
+        task_id="test",
+        success=True,
+        summary=projected,
+        detail=projected,
+        source_kind="plugin",
+        source_name="RimWorld",
+    )
+    (event,) = events
     assert event["summary"] == event["detail"] == projected
     callback = {**event, "origin": "task_result"}
     from config import AGENT_CALLBACK_TEXT_MAX_TOKENS, AGENT_CALLBACK_TOTAL_MAX_TOKENS
+
     assert count_handoff_tokens(projected)[0] <= AGENT_CALLBACK_TEXT_MAX_TOKENS
-    selected, deferred = renderer._select_callbacks_within_token_budget(
-        [callback], AGENT_CALLBACK_TOTAL_MAX_TOKENS)
+    selected, deferred = renderer._select_callbacks_within_token_budget([callback], AGENT_CALLBACK_TOTAL_MAX_TOKENS)
     assert not deferred
-    prompt = renderer._build_callback_instruction(selected, lang="zh", lanlan_name="小天",
-                                                    master_name="测试者", passive=True)
+    prompt = renderer._build_callback_instruction(
+        selected, lang="zh", lanlan_name="小天", master_name="测试者", passive=True
+    )
     assert projected in prompt
     assert "额外说明" not in prompt and "callback-safe response" not in prompt
     voice = renderer._render_pending_extra_replies_by_origin(
-        selected, lang="zh", lanlan_name="小天", master_name="测试者")
+        selected, lang="zh", lanlan_name="小天", master_name="测试者"
+    )
     assert projected in voice
 
 
@@ -139,15 +166,35 @@ async def test_oversized_reference_is_repaired_before_host_delivery():
     payload = observation["response"]["payload"]
     payload["data"]["extra"] = "background " * 250
     payload["execution"]["evidence"]["nodes"]["/extra"] = {"kind": "scalar", "name": "Extra"}
-    model = ScriptedModel([
-        turn("", ToolCall("read", "query_game", "{}")),
-        turn("", ToolCall("too-wide", "submit_response", json.dumps({
-            "answer": [part(paths=["/reading", "/extra"])],
-        }))),
-        turn("", ToolCall("narrow", "submit_response", json.dumps({
-            "answer": [part()],
-        }))),
-    ])
+    model = ScriptedModel(
+        [
+            turn("", ToolCall("read", "query_game", "{}")),
+            turn(
+                "",
+                ToolCall(
+                    "too-wide",
+                    "submit_response",
+                    json.dumps(
+                        {
+                            "answer": [part(paths=["/reading", "/extra"])],
+                        }
+                    ),
+                ),
+            ),
+            turn(
+                "",
+                ToolCall(
+                    "narrow",
+                    "submit_response",
+                    json.dumps(
+                        {
+                            "answer": [part()],
+                        }
+                    ),
+                ),
+            ),
+        ]
+    )
 
     async def read(_):
         return Observation(observation)
@@ -155,14 +202,18 @@ async def test_oversized_reference_is_repaired_before_host_delivery():
     async def setup():
         return ToolSetup((query_tool(read),), references_supported=True)
 
-    runtime = AgentRuntime(allow_text_completion=True, observation_tools=[], tools_provider=setup,
-                           audit_registry=AgentAuditRegistry(), logger=FakeLogger(),
-                           model_factory=lambda _: model)
+    runtime = AgentRuntime(
+        allow_text_completion=True,
+        observation_tools=[],
+        tools_provider=setup,
+        audit_registry=AgentAuditRegistry(),
+        logger=FakeLogger(),
+        model_factory=lambda _: model,
+    )
     result = await runtime.run("报告读数及其限制，无需背景字段。", settings())
 
     assert len(model.requests) == 3, "oversized reference must reach the model as a repairable rejection"
-    feedback = json.loads(next(m["content"] for m in model.requests[2]
-                               if m.get("tool_call_id") == "too-wide"))
+    feedback = json.loads(next(m["content"] for m in model.requests[2] if m.get("tool_call_id") == "too-wide"))
     assert feedback["error"]["code"] == "handoff_transport_over_budget"
     assert "200" in feedback["error"]["message"]
     assert result["status"] == "ok"
@@ -177,9 +228,7 @@ def scalar_observation():
     value = observed()
     payload = value["response"]["payload"]
     payload["data"] = {chr(97 + i): 0 for i in range(17)}
-    payload["execution"]["evidence"]["nodes"] = {
-        "/" + key: {"kind": "scalar", "name": key} for key in payload["data"]
-    }
+    payload["execution"]["evidence"]["nodes"] = {"/" + key: {"kind": "scalar", "name": key} for key in payload["data"]}
     return value
 
 
@@ -191,14 +240,28 @@ def test_reference_limit_applies_across_separated_parts_of_one_observation():
     assert reference_schema["properties"]["paths"]["maxItems"] == 16
     # One legal 16-path selection can be split/interleaved without changing the
     # per-observation limit. A seventeenth path cannot bypass it by adding text.
-    accepted = SubmissionDraft().apply({"answer": [
-        part(paths=paths[:8]), {"text": "说明。"}, part(paths=paths[8:16]),
-    ]}, observations=[observation])
+    accepted = SubmissionDraft().apply(
+        {
+            "answer": [
+                part(paths=paths[:8]),
+                {"text": "说明。"},
+                part(paths=paths[8:16]),
+            ]
+        },
+        observations=[observation],
+    )
     assert "p=0" in accepted["agent_text"]
     with pytest.raises(SubmissionPatchError, match="16"):
-        SubmissionDraft().apply({"answer": [
-            part(paths=paths[:8]), {"text": "说明。"}, part(paths=paths[8:]),
-        ]}, observations=[observation])
+        SubmissionDraft().apply(
+            {
+                "answer": [
+                    part(paths=paths[:8]),
+                    {"text": "说明。"},
+                    part(paths=paths[8:]),
+                ]
+            },
+            observations=[observation],
+        )
 
 
 @pytest.mark.asyncio
@@ -206,15 +269,29 @@ async def test_plain_text_detail_repair_preserves_saved_reference_share():
     observation = observed()
     observation["received_at"] = "2026-09-19T00:00:00Z"
     observation["request"] = {"operation": "query", "arguments": {}}
-    observation["response"]["payload"]["execution"]["evidence"]["nodes"]["/reading"]["context"]["scope"] = "scope " * 160
+    observation["response"]["payload"]["execution"]["evidence"]["nodes"]["/reading"]["context"]["scope"] = (
+        "scope " * 160
+    )
     detail = "补充说明。" * 100
-    model = ScriptedModel([
-        turn("", ToolCall("read", "query_game", "{}")),
-        turn("", ToolCall("draft", "submit_response", json.dumps({
-            "answer": [part()], "detail": "x" * 12001,
-        }))),
-        turn(detail),
-    ])
+    model = ScriptedModel(
+        [
+            turn("", ToolCall("read", "query_game", "{}")),
+            turn(
+                "",
+                ToolCall(
+                    "draft",
+                    "submit_response",
+                    json.dumps(
+                        {
+                            "answer": [part()],
+                            "detail": "x" * 12001,
+                        }
+                    ),
+                ),
+            ),
+            turn(detail),
+        ]
+    )
 
     async def read(_):
         return Observation(observation)
@@ -222,9 +299,14 @@ async def test_plain_text_detail_repair_preserves_saved_reference_share():
     async def setup():
         return ToolSetup((query_tool(read),), references_supported=True)
 
-    runtime = AgentRuntime(allow_text_completion=True, observation_tools=[], tools_provider=setup,
-                           audit_registry=AgentAuditRegistry(), logger=FakeLogger(),
-                           model_factory=lambda _: model)
+    runtime = AgentRuntime(
+        allow_text_completion=True,
+        observation_tools=[],
+        tools_provider=setup,
+        audit_registry=AgentAuditRegistry(),
+        logger=FakeLogger(),
+        model_factory=lambda _: model,
+    )
     result = await runtime.run("报告读数及其限制。", settings())
     assert result["status"] == "ok"
     assert result["submission_mode"] == "text_repair"
@@ -239,12 +321,14 @@ async def test_plain_text_detail_repair_preserves_saved_reference_share():
 @pytest.mark.parametrize("paths", [[], ["/a"] * 17])
 def test_reference_part_rejects_paths_outside_its_public_schema(paths):
     with pytest.raises(SubmissionPatchError, match="1..16"):
-        SubmissionDraft().apply({"answer": [{"observation_id": "one", "paths": paths}]},
-                                observations=[scalar_observation()])
+        SubmissionDraft().apply(
+            {"answer": [{"observation_id": "one", "paths": paths}]}, observations=[scalar_observation()]
+        )
 
 
 def test_reference_prompt_and_tool_describe_actual_budget_layers():
     from plugin.plugins.neko_rimworld.agent.prompt import build_finalization_prompt, build_system_prompt
+
     tool = make_submission_tool(SubmissionDraft(), [], references_supported=True)
     for text in [tool.description, build_system_prompt(4), build_finalization_prompt(4)]:
         assert "180 tokens" in text and "200-token transport limit" in text
@@ -262,8 +346,7 @@ def test_host_transport_limit_matches_real_parser_without_weakening_text_budget(
     exact = " x" * 200
     assert count_handoff_tokens(exact.strip())[0] == 200
     accepted = validate_submission("完整报告", exact, fact_tokens=200)
-    projected = parse_plugin_result({"summary": accepted["agent_text"]},
-                                     llm_result_fields=["summary"], lang="zh")
+    projected = parse_plugin_result({"summary": accepted["agent_text"]}, llm_result_fields=["summary"], lang="zh")
     assert projected == accepted["agent_text"]
     with pytest.raises(HandoffValidationError) as rejected:
         validate_submission("完整报告", " x" * 201, fact_tokens=201)
@@ -274,9 +357,9 @@ def test_host_transport_limit_matches_real_parser_without_weakening_text_budget(
 
 
 def test_failed_final_projection_cannot_remain_successful():
-    result = attach_agent_handoff({"status": "ok", "answer": "完整报告",
-                                   "agent_text": " x" * 201,
-                                   "delivery": {"fact_tokens": 201}})
+    result = attach_agent_handoff(
+        {"status": "ok", "answer": "完整报告", "agent_text": " x" * 201, "delivery": {"fact_tokens": 201}}
+    )
     assert result["status"] == "degraded"
     assert result["delivery"]["submission_mode"] == "operational_fallback"
     assert result["delivery"]["error_code"] == "handoff_transport_over_budget"

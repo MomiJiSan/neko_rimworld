@@ -1,4 +1,5 @@
 """Experimental ordering of world observations; values and paths are unchanged."""
+
 from __future__ import annotations
 
 import copy
@@ -18,20 +19,29 @@ def order_world_fields(data):
     result = copy.deepcopy(data)
     if not isinstance(result, dict):
         return result
-    rows = result.get('objects')
+    rows = result.get("objects")
     if not isinstance(rows, list):
         return result
     for row in rows:
-        if not isinstance(row, dict) or not isinstance(row.get('facets'), dict):
+        if not isinstance(row, dict) or not isinstance(row.get("facets"), dict):
             continue
-        facets = row['facets']
-        if 'pawn' in facets:
-            facets['pawn'] = _ordered(
-                facets['pawn'],
-                ('status', 'downed', 'dead', 'conditions', 'conditions_scope',
-                 'damaged_present_parts', 'missing_parts', 'capacities',
-                 'pain_fraction', 'bleed_fraction_per_game_day'),
-                ('health_summary_fraction',),
+        facets = row["facets"]
+        if "pawn" in facets:
+            facets["pawn"] = _ordered(
+                facets["pawn"],
+                (
+                    "status",
+                    "downed",
+                    "dead",
+                    "conditions",
+                    "conditions_scope",
+                    "damaged_present_parts",
+                    "missing_parts",
+                    "capacities",
+                    "pain_fraction",
+                    "bleed_fraction_per_game_day",
+                ),
+                ("health_summary_fraction",),
             )
-        row['facets'] = _ordered(facets, ('pawn', 'stats', 'work', 'bed', 'door', 'reservations', 'condition'))
+        row["facets"] = _ordered(facets, ("pawn", "stats", "work", "bed", "door", "reservations", "condition"))
     return result

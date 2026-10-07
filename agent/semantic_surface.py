@@ -12,486 +12,650 @@ object 的选择器（kind/name/names/ids/definition/category/map/include_held/i
 结果全部明文内联：scope、coverage、not_read、语义说明。不使用 _meaning/_measure/
 _unavailable/provenance 这类代号，也不把 unknown 落成 0/null。
 """
+
 from __future__ import annotations
 
-import json
-
-from .prompt import PLAIN_FINISH_GUIDANCE
-
 import copy
+import json
 from dataclasses import dataclass, field
 
+from .prompt import PLAIN_FINISH_GUIDANCE
 from .query_surface import SurfaceError
 
 # --- 封闭枚举 -----------------------------------------------------------------
 
 ROOTS = {
-    'game': 'game',
-    'maps': 'maps',
-    'map': 'map',
-    'colony': 'colony',
-    'pawn': 'pawn',
-    'pawns': 'pawns',
-    'colonists': 'spawned_free_colonists',
-    'thing': 'thing',
-    'things': 'things',
-    'thing_def': 'thing_def',
-    'thing_defs': 'thing_defs',
+    "game": "game",
+    "maps": "maps",
+    "map": "map",
+    "colony": "colony",
+    "pawn": "pawn",
+    "pawns": "pawns",
+    "colonists": "spawned_free_colonists",
+    "thing": "thing",
+    "things": "things",
+    "thing_def": "thing_def",
+    "thing_defs": "thing_defs",
 }
 KINDS = tuple(ROOTS)
-ASPECTS = ('identity', 'health', 'skills', 'gear', 'work', 'mood', 'profile',
-           'resources', 'quantity', 'distribution')
-METRICS = ('units', 'records')
-GROUPINGS = ('definition', 'category', 'holder', 'map')
+ASPECTS = ("identity", "health", "skills", "gear", "work", "mood", "profile", "resources", "quantity", "distribution")
+METRICS = ("units", "records")
+GROUPINGS = ("definition", "category", "holder", "map")
 
 # object 是两工具共用的封闭结构；每个 kind 只接受其适用的选择器。
 OBJECT_SELECTORS = {
-    'game': (),
-    'maps': ('ids', 'names'),
-    'map': ('ids', 'names', 'map'),
-    'colony': (),
-    'pawn': ('ids', 'names', 'map'),
-    'pawns': ('ids', 'names', 'map'),
-    'colonists': ('ids', 'names', 'map'),
-    'thing': ('ids', 'names', 'map'),
-    'things': ('ids', 'names', 'definition', 'category', 'map', 'include_held', 'include_fogged', 'capabilities'),
-    'thing_def': ('definition', 'include_held', 'include_fogged'),
-    'thing_defs': ('definition', 'category', 'include_held', 'include_fogged'),
+    "game": (),
+    "maps": ("ids", "names"),
+    "map": ("ids", "names", "map"),
+    "colony": (),
+    "pawn": ("ids", "names", "map"),
+    "pawns": ("ids", "names", "map"),
+    "colonists": ("ids", "names", "map"),
+    "thing": ("ids", "names", "map"),
+    "things": ("ids", "names", "definition", "category", "map", "include_held", "include_fogged", "capabilities"),
+    "thing_def": ("definition", "include_held", "include_fogged"),
+    "thing_defs": ("definition", "category", "include_held", "include_fogged"),
 }
 # 主语寻址：不管模型要哪个 aspect，事实都必须能说清楚"这是谁/这是哪个"。
 # 少了这一层，就会出现「数字读对了、但没说清主语」的典型失败。
 SUBJECT_FIELDS = {
-    'game': (),
-    'colony': (),
-    'maps': ('id', 'name'),
-    'map': ('id', 'name'),
-    'pawn': ('id', 'name', 'map_id'),
-    'pawns': ('id', 'name', 'map_id'),
-    'colonists': ('id', 'name', 'map_id'),
-    'thing': ('id', 'definition.def_name', 'definition.label', 'map_held.id'),
-    'things': ('id', 'definition.def_name', 'definition.label', 'map_held.id'),
-    'thing_def': ('def_name', 'label'),
-    'thing_defs': ('def_name', 'label'),
+    "game": (),
+    "colony": (),
+    "maps": ("id", "name"),
+    "map": ("id", "name"),
+    "pawn": ("id", "name", "map_id"),
+    "pawns": ("id", "name", "map_id"),
+    "colonists": ("id", "name", "map_id"),
+    "thing": ("id", "definition.def_name", "definition.label", "map_held.id"),
+    "things": ("id", "definition.def_name", "definition.label", "map_held.id"),
+    "thing_def": ("def_name", "label"),
+    "thing_defs": ("def_name", "label"),
 }
 
-POPULATIONS = ('maps', 'pawns', 'colonists', 'things', 'thing_defs')
-PAWN_KINDS = ('pawn', 'pawns', 'colonists')
-THING_KINDS = ('thing', 'things')
-DEF_KINDS = ('thing_def', 'thing_defs')
-MAP_KINDS = ('map', 'maps')
+POPULATIONS = ("maps", "pawns", "colonists", "things", "thing_defs")
+PAWN_KINDS = ("pawn", "pawns", "colonists")
+THING_KINDS = ("thing", "things")
+DEF_KINDS = ("thing_def", "thing_defs")
+MAP_KINDS = ("map", "maps")
 # 多候选会落入一个**总体**根并逐个返回的 kind：pawn → pawns，thing → things。
 # 只有 `map` 没有总体根，路由会直接取 ids[0]，所以它必须由歧义守卫拦住。
-SINGLE_ONLY_KINDS = ('map',)
+SINGLE_ONLY_KINDS = ("map",)
 
 # 程序侧字段包：模型永远看不到这些原生路径。
 # 身份事实：原生派系成员关系与殖民者状态。这是"这是谁的人"的直接答案，
 # 不从种类、名字或容器关系推断。
-FACTION_FIELDS = ['faction.def_name', 'faction.name', 'faction.is_player', 'faction.player_relation']
+FACTION_FIELDS = ["faction.def_name", "faction.name", "faction.is_player", "faction.player_relation"]
 # 物品归属链：谁持有它、那个持有者的派系。沿真实持有关系合成，不是所有权推断。
-HOLDER_FIELDS = ['held_by.id', 'held_by.runtime_type',
-                 'held_by_faction.def_name', 'held_by_faction.is_player', 'held_by_faction.player_relation']
-PAWN_IDENTITY_FIELDS = ['status.position.map_id', 'status.position.x', 'status.position.z', 'is_free_colonist', 'is_colonist', 'is_prisoner_of_colony', 'is_slave_of_colony',
-                        'guest_status']
+HOLDER_FIELDS = [
+    "held_by.id",
+    "held_by.runtime_type",
+    "held_by_faction.def_name",
+    "held_by_faction.is_player",
+    "held_by_faction.player_relation",
+]
+PAWN_IDENTITY_FIELDS = [
+    "status.position.map_id",
+    "status.position.x",
+    "status.position.z",
+    "is_free_colonist",
+    "is_colonist",
+    "is_prisoner_of_colony",
+    "is_slave_of_colony",
+    "guest_status",
+]
 IDENTITY_FIELDS = {
-    'game': ['paused', 'current_map_id'],
-    'maps': ['id', 'name', 'is_current', 'is_player_home', 'colonist_count', 'has_visible_threat'],
-    'map': ['id', 'name', 'is_current', 'is_player_home', 'colonist_count', 'has_visible_threat'],
-    'pawn': ['id', 'name', 'map_id'] + PAWN_IDENTITY_FIELDS + FACTION_FIELDS,
-    'pawns': ['id', 'name', 'map_id'] + PAWN_IDENTITY_FIELDS + FACTION_FIELDS,
-    'colonists': ['id', 'name', 'map_id'] + PAWN_IDENTITY_FIELDS + FACTION_FIELDS,
-    'thing': ['id', 'runtime_type', 'label', 'spawned', 'destroyed', 'definition.def_name',
-              'definition.label', 'map_held.id', 'position.x', 'position.z'] + FACTION_FIELDS + HOLDER_FIELDS,
-    'things': ['id', 'runtime_type', 'label', 'spawned', 'destroyed', 'definition.def_name',
-               'definition.label', 'map_held.id', 'position.x', 'position.z'] + FACTION_FIELDS + HOLDER_FIELDS,
-    'thing_def': ['def_name', 'label', 'thing_class', 'category'],
-    'thing_defs': ['def_name', 'label', 'thing_class', 'category'],
+    "game": ["paused", "current_map_id"],
+    "maps": ["id", "name", "is_current", "is_player_home", "colonist_count", "has_visible_threat"],
+    "map": ["id", "name", "is_current", "is_player_home", "colonist_count", "has_visible_threat"],
+    "pawn": ["id", "name", "map_id"] + PAWN_IDENTITY_FIELDS + FACTION_FIELDS,
+    "pawns": ["id", "name", "map_id"] + PAWN_IDENTITY_FIELDS + FACTION_FIELDS,
+    "colonists": ["id", "name", "map_id"] + PAWN_IDENTITY_FIELDS + FACTION_FIELDS,
+    "thing": [
+        "id",
+        "runtime_type",
+        "label",
+        "spawned",
+        "destroyed",
+        "definition.def_name",
+        "definition.label",
+        "map_held.id",
+        "position.x",
+        "position.z",
+    ]
+    + FACTION_FIELDS
+    + HOLDER_FIELDS,
+    "things": [
+        "id",
+        "runtime_type",
+        "label",
+        "spawned",
+        "destroyed",
+        "definition.def_name",
+        "definition.label",
+        "map_held.id",
+        "position.x",
+        "position.z",
+    ]
+    + FACTION_FIELDS
+    + HOLDER_FIELDS,
+    "thing_def": ["def_name", "label", "thing_class", "category"],
+    "thing_defs": ["def_name", "label", "thing_class", "category"],
 }
 # count/look 明细行的最小身份列（仅为把读数对齐到对象）。
 LISTING_FIELDS = {
-    'game': ['paused'],
-    'maps': ['id', 'name'],
-    'map': ['id', 'name'],
-    'colonists': ['id', 'name', 'map_id'],
+    "game": ["paused"],
+    "maps": ["id", "name"],
+    "map": ["id", "name"],
+    "colonists": ["id", "name", "map_id"],
     # v1.10 capability repair: native item durability belongs to generic detail,
     # not a task-specific extra read. Null/unavailable still use the shared pack.
     # 实测（v1.10）：只给不透明的 `parent_holder.ref`，模型把“共享同一个父引用”读成
     # “在同一个容器里”，而真相是两堆白银都由**地图**持有（spawned）。父对象的原生类型
     # 才能区分 地图 / 人物库存 / 容器 / 建筑；`spawned` 直接回答“在不在图上”。
-    'things': ['id', 'spawned', 'stack_count', 'hit_points', 'max_hit_points',
-               'definition.def_name', 'definition.label', 'map_held.id',
-               'parent_holder.runtime_type'],
-    'thing_defs': ['def_name', 'label', 'category'],
+    "things": [
+        "id",
+        "spawned",
+        "stack_count",
+        "hit_points",
+        "max_hit_points",
+        "definition.def_name",
+        "definition.label",
+        "map_held.id",
+        "parent_holder.runtime_type",
+    ],
+    "thing_defs": ["def_name", "label", "category"],
 }
 # by → 原生分组路径（按 root 类型区分）。
 GROUP_PATHS = {
-    'things': {'definition': 'definition.def_name', 'category': 'definition.category',
-               'holder': 'parent_holder.ref', 'map': 'map_held.id'},
-    'colonists': {'map': 'map_id'},
+    "things": {
+        "definition": "definition.def_name",
+        "category": "definition.category",
+        "holder": "parent_holder.ref",
+        "map": "map_held.id",
+    },
+    "colonists": {"map": "map_id"},
     # `pawns` 的 map 分组已在 BY_KINDS 里公开允许，映射表却漏了这一项，
     # 合法调用会直接抛 KeyError。
-    'pawns': {'map': 'map_id'},
-    'thing_defs': {'category': 'category'},
-    'maps': {},
+    "pawns": {"map": "map_id"},
+    "thing_defs": {"category": "category"},
+    "maps": {},
 }
 BY_KINDS = {
-    'things': ('definition', 'category', 'holder', 'map'),
-    'pawns': ('map',),
-    'colonists': ('map',),
-    'maps': (),
-    'thing_defs': ('category',),
+    "things": ("definition", "category", "holder", "map"),
+    "pawns": ("map",),
+    "colonists": ("map",),
+    "maps": (),
+    "thing_defs": ("category",),
 }
 # look 的 distribution 默认分组。
-DEFAULT_GROUP = {'things': ('definition',), 'colonists': ('map',), 'thing_defs': ('category',)}
+DEFAULT_GROUP = {"things": ("definition",), "colonists": ("map",), "thing_defs": ("category",)}
 
 # 必须明文内联的语义句子（来自 Mod scope/字段说明；不能被压成代号）。
 SEMANTICS = {
-    'containment': 'Holder/container membership selects current containment; it is not faction or property '
-                   'ownership, and it does not establish usable, tradable or colony property.',
-    'pawn': 'Pawn includes humans, animals and mechanoids regardless of faction; Pawn is not a human, colonist '
-            'or ownership identity.',
-    'health': 'health_percent is "Game summaryHealth.SummaryHealthPercent: an overall game-computed health '
-              'indicator. Report it separately from conditions and body-part HP; this read is not a '
-              'blood-volume measurement. A value of 1 does not establish a cause or a general rule about '
-              'which conditions affect it." A value of 1 is therefore not "fully healthy".',
-    'holder': 'held_by is the nearest containing Pawn (containment, not ownership); null means no Pawn holds this '
-              'instance. held_by_faction is that Pawn\'s faction: null means the holder has no faction (or there is no '
-              'holder) - it does NOT mean the read failed. Use held_by_faction.is_player instead of inferring '
-              '"ours" from containment.',
-    'unknown': 'Unknown is not zero and not empty: an unavailable read, an incomplete scan and a legitimate zero '
-               'or empty collection are different facts.',
-    'lower_bound': 'An incomplete scan yields a lower bound (or unavailable), never an exact total.',
-    'units': 'records counts matching objects; units sums stack_count of those objects. A record is not '
-             'necessarily an item or a human.',
+    "containment": "Holder/container membership selects current containment; it is not faction or property "
+    "ownership, and it does not establish usable, tradable or colony property.",
+    "pawn": "Pawn includes humans, animals and mechanoids regardless of faction; Pawn is not a human, colonist "
+    "or ownership identity.",
+    "health": 'health_percent is "Game summaryHealth.SummaryHealthPercent: an overall game-computed health '
+    "indicator. Report it separately from conditions and body-part HP; this read is not a "
+    "blood-volume measurement. A value of 1 does not establish a cause or a general rule about "
+    'which conditions affect it." A value of 1 is therefore not "fully healthy".',
+    "holder": "held_by is the nearest containing Pawn (containment, not ownership); null means no Pawn holds this "
+    "instance. held_by_faction is that Pawn's faction: null means the holder has no faction (or there is no "
+    "holder) - it does NOT mean the read failed. Use held_by_faction.is_player instead of inferring "
+    '"ours" from containment.',
+    "unknown": "Unknown is not zero and not empty: an unavailable read, an incomplete scan and a legitimate zero "
+    "or empty collection are different facts.",
+    "lower_bound": "An incomplete scan yields a lower bound (or unavailable), never an exact total.",
+    "units": "records counts matching objects; units sums stack_count of those objects. A record is not "
+    "necessarily an item or a human.",
     # 父持有者必须能区分“地图”与“容器”，否则一个共享的不透明引用会被读成“同一个箱子”。
-    'parent_holder': 'parent_holder is this instance\'s immediate container, named by its native type: '
-                     'Verse.Map means the instance is spawned on that map rather than inside any container; '
-                     'a tracker/owner type (for example Verse.Pawn_InventoryTracker or Verse.ThingOwner) or a '
-                     'building type means it is inside that holder. Two instances sharing a parent_holder have '
-                     'the same immediate holder - containment, not ownership, and it never proves a location '
-                     'beyond what that type states.',
-    'durability': 'hit_points/max_hit_points are the native Thing getters for this instance. A null with no '
-                  'issue at its path is the game returning no value for this member (some definitions carry no '
-                  'durability); that is neither zero nor a failed read. An issue at the path means the read failed.',
+    "parent_holder": "parent_holder is this instance's immediate container, named by its native type: "
+    "Verse.Map means the instance is spawned on that map rather than inside any container; "
+    "a tracker/owner type (for example Verse.Pawn_InventoryTracker or Verse.ThingOwner) or a "
+    "building type means it is inside that holder. Two instances sharing a parent_holder have "
+    "the same immediate holder - containment, not ownership, and it never proves a location "
+    "beyond what that type states.",
+    "durability": "hit_points/max_hit_points are the native Thing getters for this instance. A null with no "
+    "issue at its path is the game returning no value for this member (some definitions carry no "
+    "durability); that is neither zero nor a failed read. An issue at the path means the read failed.",
 }
 
 # 接口说明：只说工具怎么用，不包含语义提醒。
 # study 臂在共享的 Architecture prompt 前缀之后只接这一段——语义提醒由工具结果内联给出，
 # 不靠额外提示词奖励，否则就不是接口对比而是提示词对比了。
 TOOL_GUIDE = (
-    'Read-only game evidence through two semantic tools. You never write field names, paths or native '
-    'arguments; the program routes kind/aspects/metric/by to the native query.\n'
-    'look(object, aspects, detail?) reads facts about one object or a population; aspects are a closed set: '
-    'identity, health, skills, gear, work, mood, profile, resources, quantity, distribution.\n'
-    'count(object, metric, by?, detail?) measures a population: metric units sums stack_count, records counts '
-    'objects; by groups the result.\n'
-    'object selectors are closed: kind, exact name/names or ids, exact definition, category, and scope map '
-    '(default current), include_held (default true = also count things inside holders), include_fogged (default true = also '
-    'include things under fog). Both flags are the same polarity: true means more inclusive, false means narrower. An exact display name that '
-    'matches more than one object returns candidates; never assume one.\n'
-    'detail is the number of detail rows: 0 means counts only. With by given, detail caps the listed groups '
-    '(0 = all groups up to the display bound).\n'
-    'Every result states scope, coverage and not_read plainly. Read them before interpreting facts.'
+    "Read-only game evidence through two semantic tools. You never write field names, paths or native "
+    "arguments; the program routes kind/aspects/metric/by to the native query.\n"
+    "look(object, aspects, detail?) reads facts about one object or a population; aspects are a closed set: "
+    "identity, health, skills, gear, work, mood, profile, resources, quantity, distribution.\n"
+    "count(object, metric, by?, detail?) measures a population: metric units sums stack_count, records counts "
+    "objects; by groups the result.\n"
+    "object selectors are closed: kind, exact name/names or ids, exact definition, category, and scope map "
+    "(default current), include_held (default true = also count things inside holders), include_fogged (default true = also "
+    "include things under fog). Both flags are the same polarity: true means more inclusive, false means narrower. An exact display name that "
+    "matches more than one object returns candidates; never assume one.\n"
+    "detail is the number of detail rows: 0 means counts only. With by given, detail caps the listed groups "
+    "(0 = all groups up to the display bound).\n"
+    "Every result states scope, coverage and not_read plainly. Read them before interpreting facts."
 )
 
 # 独立使用（不挂 Architecture）时的语义提醒。
 SEMANTIC_REMINDERS = (
-    'Unknown is not zero or empty; containment is not ownership; Pawn includes humans, animals and '
+    "Unknown is not zero or empty; containment is not ownership; Pawn includes humans, animals and "
     'mechanoids. health_percent cannot be read as "fully healthy". An incomplete scan is a lower bound, '
-    'not a total.'
+    "not a total."
 )
 
-INTRO = TOOL_GUIDE + '\n' + SEMANTIC_REMINDERS + '\nFinish with submit_response. Do not invent facts the tools did not return.'
+INTRO = (
+    TOOL_GUIDE
+    + "\n"
+    + SEMANTIC_REMINDERS
+    + "\nFinish with submit_response. Do not invent facts the tools did not return."
+)
 
 FINISH = PLAIN_FINISH_GUIDANCE
 
 
 # --- schema -------------------------------------------------------------------
 
+
 def capability_values(directory):
     if not isinstance(directory, dict):
         return ()
-    root = next((r for r in directory.get('roots', []) if r['from'] == 'things'), {})
-    if not any(a.get('name') == 'capabilities' for a in root.get('args', [])) or 'capabilities' not in directory.get('field_index', {}).get(root.get('type'), {}):
+    root = next((r for r in directory.get("roots", []) if r["from"] == "things"), {})
+    if not any(a.get("name") == "capabilities" for a in root.get("args", [])) or "capabilities" not in directory.get(
+        "field_index", {}
+    ).get(root.get("type"), {}):
         return ()
-    for tool in directory.get('world_observation', {}).get('tools', []):
-        if tool.get('name') == 'survey_space':
-            return tuple(tool.get('parameters', {}).get('properties', {}).get('select', {}).get('properties', {}).get('capabilities', {}).get('items', {}).get('enum', []))
+    for tool in directory.get("world_observation", {}).get("tools", []):
+        if tool.get("name") == "survey_space":
+            return tuple(
+                tool.get("parameters", {})
+                .get("properties", {})
+                .get("select", {})
+                .get("properties", {})
+                .get("capabilities", {})
+                .get("items", {})
+                .get("enum", [])
+            )
     return ()
 
 
 def _object_schema(directory=None):
     capability_names = capability_values(directory)
     schema = {
-        'type': 'object',
-        'description': 'Closed object selector. Supported selectors by kind: ' + '; '.join(
-            kind + ': ' + (', '.join(s for s in selectors if s != 'capabilities' or capability_names) if selectors else 'none')
-            for kind, selectors in OBJECT_SELECTORS.items()) + '. id aliases one ids entry; name aliases one names entry. No field names, paths or native argument keys.',
-        'properties': {
-            'kind': {'type': 'string', 'enum': list(KINDS)},
-            'name': {'type': 'string', 'description': 'Exact display name; ambiguity returns candidates, never a pick.'},
-            'names': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Exact display names.'},
-            'id': {'type': 'string', 'description': 'One exact native object ID; use id or ids, never both.'},
-            'ids': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1, 'description': 'Exact native object IDs. kind thing/pawn/map accepts one; use things/pawns/maps for a set.'},
-            'definition': {'type': 'string', 'description': 'Exact def_name or localized definition label.'},
-            'category': {'type': 'string', 'description': 'For things: native broad ThingCategory kind (e.g. Item, Building), not a gameplay use such as medicine. For thing_defs: exact ThingCategoryDef content-category name. These are distinct domains.'},
-            'map': {'type': 'string', 'default': 'current', 'description': 'Loaded map ID or current. For kind map this selects the map itself (alias for id); for Pawn/Thing populations it restricts their map scope.'},
-            'include_held': {'type': 'boolean', 'default': True,
-                             'description': 'true includes holder contents (inventory, containers, equipment); false keeps spawned map Things. '
-                                            'Default true; use false only for caller-requested ground/map scope. Ignored for definition kinds.'},
-            'include_fogged': {'type': 'boolean', 'default': True,
-                               'description': 'true includes fogged Things; false keeps visible Things. '
-                                              'Default true; use false only for caller-requested visible scope. Ignored for definition kinds.'},
+        "type": "object",
+        "description": "Closed object selector. Supported selectors by kind: "
+        + "; ".join(
+            kind
+            + ": "
+            + (", ".join(s for s in selectors if s != "capabilities" or capability_names) if selectors else "none")
+            for kind, selectors in OBJECT_SELECTORS.items()
+        )
+        + ". id aliases one ids entry; name aliases one names entry. No field names, paths or native argument keys.",
+        "properties": {
+            "kind": {"type": "string", "enum": list(KINDS)},
+            "name": {
+                "type": "string",
+                "description": "Exact display name; ambiguity returns candidates, never a pick.",
+            },
+            "names": {"type": "array", "items": {"type": "string"}, "description": "Exact display names."},
+            "id": {"type": "string", "description": "One exact native object ID; use id or ids, never both."},
+            "ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "description": "Exact native object IDs. kind thing/pawn/map accepts one; use things/pawns/maps for a set.",
+            },
+            "definition": {"type": "string", "description": "Exact def_name or localized definition label."},
+            "category": {
+                "type": "string",
+                "description": "For things: native broad ThingCategory kind (e.g. Item, Building), not a gameplay use such as medicine. For thing_defs: exact ThingCategoryDef content-category name. These are distinct domains.",
+            },
+            "map": {
+                "type": "string",
+                "default": "current",
+                "description": "Loaded map ID or current. For kind map this selects the map itself (alias for id); for Pawn/Thing populations it restricts their map scope.",
+            },
+            "include_held": {
+                "type": "boolean",
+                "default": True,
+                "description": "true includes holder contents (inventory, containers, equipment); false keeps spawned map Things. "
+                "Default true; use false only for caller-requested ground/map scope. Ignored for definition kinds.",
+            },
+            "include_fogged": {
+                "type": "boolean",
+                "default": True,
+                "description": "true includes fogged Things; false keeps visible Things. "
+                "Default true; use false only for caller-requested visible scope. Ignored for definition kinds.",
+            },
         },
-        'required': ['kind'],
-        'additionalProperties': False,
+        "required": ["kind"],
+        "additionalProperties": False,
     }
 
     values = capability_values(directory)
     if values:
-        schema['properties']['capabilities'] = {
-            'type': 'array', 'minItems': 1, 'maxItems': len(values),
-            'items': {'type': 'string', 'enum': list(values)},
-            'description': 'For kind things: match any listed native capability, intersected with other selectors. Same membership as survey_space, without reading environment. ' + json.dumps(directory.get('world_observation', {}).get('capability_meanings', {}), ensure_ascii=False, separators=(',', ':')),
+        schema["properties"]["capabilities"] = {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": len(values),
+            "items": {"type": "string", "enum": list(values)},
+            "description": "For kind things: match any listed native capability, intersected with other selectors. Same membership as survey_space, without reading environment. "
+            + json.dumps(
+                directory.get("world_observation", {}).get("capability_meanings", {}),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
         }
 
     # Preserve the existing content-category selector on thing_defs. Only the
     # physical things predicate uses the native ThingCategory enum.
-    domains = directory.get('value_domains', {}) if isinstance(directory, dict) else {}
-    values = domains.get('Verse.ThingCategory', {}).get('values')
+    domains = directory.get("value_domains", {}) if isinstance(directory, dict) else {}
+    values = domains.get("Verse.ThingCategory", {}).get("values")
     if isinstance(values, list) and values and all(isinstance(v, str) for v in values):
-        schema['allOf'] = [{
-            'if': {'properties': {'kind': {'const': 'things'}}, 'required': ['kind']},
-            'then': {'properties': {'category': {'enum': list(values)}}},
-        }]
+        schema["allOf"] = [
+            {
+                "if": {"properties": {"kind": {"const": "things"}}, "required": ["kind"]},
+                "then": {"properties": {"category": {"enum": list(values)}}},
+            }
+        ]
     return schema
 
 
 def _space_ref_schema(kind_enum):
     kinds = tuple(kind_enum)
     selector_forms = [
-        {'required': ['id'], 'not': {'required': ['name']}},
-        {'required': ['name'], 'not': {'required': ['id']}},
+        {"required": ["id"], "not": {"required": ["name"]}},
+        {"required": ["name"], "not": {"required": ["id"]}},
     ]
-    if 'cell' in kinds:
-        selector_forms.append({
-            'required': ['x', 'z'],
-            'properties': {'kind': {'const': 'cell'}},
-            'not': {'anyOf': [{'required': ['id']}, {'required': ['name']}]},
-        })
+    if "cell" in kinds:
+        selector_forms.append(
+            {
+                "required": ["x", "z"],
+                "properties": {"kind": {"const": "cell"}},
+                "not": {"anyOf": [{"required": ["id"]}, {"required": ["name"]}]},
+            }
+        )
     return {
-        'type': 'object',
-        'description': 'A Pawn/Thing name or ID, or a map cell. The tool resolves names and returns candidates on ambiguity.',
-        'properties': {
-            'kind': {'type': 'string', 'enum': list(kind_enum)},
-            'id': {'type': 'string', 'description': 'Exact native object ID when already known.'},
-            'name': {'type': 'string', 'description': 'Exact display name; ambiguity is returned, never guessed.'},
-            'map': {'type': 'string', 'default': 'current'},
-            'x': {'type': 'integer'},
-            'z': {'type': 'integer'},
+        "type": "object",
+        "description": "A Pawn/Thing name or ID, or a map cell. The tool resolves names and returns candidates on ambiguity.",
+        "properties": {
+            "kind": {"type": "string", "enum": list(kind_enum)},
+            "id": {"type": "string", "description": "Exact native object ID when already known."},
+            "name": {"type": "string", "description": "Exact display name; ambiguity is returned, never guessed."},
+            "map": {"type": "string", "default": "current"},
+            "x": {"type": "integer"},
+            "z": {"type": "integer"},
         },
-        'required': ['kind'],
-        'oneOf': selector_forms,
-        'additionalProperties': False,
+        "required": ["kind"],
+        "oneOf": selector_forms,
+        "additionalProperties": False,
     }
 
 
 def tool_schemas(directory=None):
     """模型可见读取工具；空间能力由连接 capability 决定。"""
     specs = [
-        dict(name='look',
-             description=('Read one object or a population through closed aspects: '
-                          'identity health skills gear work mood profile resources quantity distribution. '
-                          'No field names or native arguments; the program routes them. '
-                          'Pawn supports identity/health/skills/gear/work/mood/profile; Thing supports identity; '
-                          'map supports identity/resources. Populations also support quantity, and some distribution. '
-                          'detail controls nested detail; ordinary look always returns object facts. '
-                          'Results inline scope, coverage, not_read and meanings; unknown is not zero.'),
-             parameters={'type': 'object',
-                         'properties': {'object': _object_schema(directory),
-                                        'aspects': {'type': 'array', 'minItems': 1,
-                                                    'items': {'type': 'string', 'enum': list(ASPECTS)}},
-                                        'detail': {'type': 'integer', 'minimum': 0, 'maximum': 100, 'default': 0}},
-                         'required': ['object', 'aspects'], 'additionalProperties': False}),
-        dict(name='count',
-             description=('Measure a population. metric units sums stack_count; records counts objects. '
-                          'by groups the measurement by definition, category, holder or map. '
-                          'detail is the number of raw rows (0 = aggregate only); with by it caps listed groups. '
-                          'For kind things each detail row gives the instance id, spawned, stack_count, '
-                          'current/max hit_points and the immediate parent_holder type. '
-                          'The aggregate is complete or explicitly a lower bound/unavailable, never silently zero.'),
-             parameters={'type': 'object',
-                         'properties': {'object': _object_schema(directory),
-                                        'metric': {'type': 'string', 'enum': list(METRICS)},
-                                        'by': {'type': 'string', 'enum': list(GROUPINGS)},
-                                        'detail': {'type': 'integer', 'minimum': 0, 'maximum': 100, 'default': 0}},
-                         'required': ['object', 'metric'], 'additionalProperties': False}),
+        dict(
+            name="look",
+            description=(
+                "Read one object or a population through closed aspects: "
+                "identity health skills gear work mood profile resources quantity distribution. "
+                "No field names or native arguments; the program routes them. "
+                "Pawn supports identity/health/skills/gear/work/mood/profile; Thing supports identity; "
+                "map supports identity/resources. Populations also support quantity, and some distribution. "
+                "detail controls nested detail; ordinary look always returns object facts. "
+                "Results inline scope, coverage, not_read and meanings; unknown is not zero."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "object": _object_schema(directory),
+                    "aspects": {"type": "array", "minItems": 1, "items": {"type": "string", "enum": list(ASPECTS)}},
+                    "detail": {"type": "integer", "minimum": 0, "maximum": 100, "default": 0},
+                },
+                "required": ["object", "aspects"],
+                "additionalProperties": False,
+            },
+        ),
+        dict(
+            name="count",
+            description=(
+                "Measure a population. metric units sums stack_count; records counts objects. "
+                "by groups the measurement by definition, category, holder or map. "
+                "detail is the number of raw rows (0 = aggregate only); with by it caps listed groups. "
+                "For kind things each detail row gives the instance id, spawned, stack_count, "
+                "current/max hit_points and the immediate parent_holder type. "
+                "The aggregate is complete or explicitly a lower bound/unavailable, never silently zero."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "object": _object_schema(directory),
+                    "metric": {"type": "string", "enum": list(METRICS)},
+                    "by": {"type": "string", "enum": list(GROUPINGS)},
+                    "detail": {"type": "integer", "minimum": 0, "maximum": 100, "default": 0},
+                },
+                "required": ["object", "metric"],
+                "additionalProperties": False,
+            },
+        ),
     ]
 
-    specs[0]['parameters']['allOf'] = [
-        {'if': {'properties': {'object': {'properties': {'kind': {'const': kind}}}}},
-         'then': {'properties': {'aspects': {'items': {'enum': list(supported_aspects(kind))}}}}}
+    specs[0]["parameters"]["allOf"] = [
+        {
+            "if": {"properties": {"object": {"properties": {"kind": {"const": kind}}}}},
+            "then": {"properties": {"aspects": {"items": {"enum": list(supported_aspects(kind))}}}},
+        }
         for kind in KINDS
     ]
-    count = specs[1]['parameters']
-    count['properties']['by']['description'] = 'Allowed by kind: ' + '; '.join(
-        kind + ': ' + (', '.join(BY_KINDS[kind]) or 'no grouping') for kind in POPULATIONS)
-    count['allOf'] = [{'properties': {'object': {'properties': {'kind': {'enum': list(POPULATIONS)}}}}}, *[
-        {'if': {'properties': {'object': {'properties': {'kind': {'const': kind}}, 'required': ['kind']}}, 'required': ['object']},
-         'then': {'properties': {'metric': {'enum': ['records', 'units'] if kind == 'things' else ['records']},
-                                 'by': {'enum': list(BY_KINDS[kind])} if BY_KINDS[kind] else False}}}
-        for kind in POPULATIONS
-    ]]
+    count = specs[1]["parameters"]
+    count["properties"]["by"]["description"] = "Allowed by kind: " + "; ".join(
+        kind + ": " + (", ".join(BY_KINDS[kind]) or "no grouping") for kind in POPULATIONS
+    )
+    count["allOf"] = [
+        {"properties": {"object": {"properties": {"kind": {"enum": list(POPULATIONS)}}}}},
+        *[
+            {
+                "if": {
+                    "properties": {"object": {"properties": {"kind": {"const": kind}}, "required": ["kind"]}},
+                    "required": ["object"],
+                },
+                "then": {
+                    "properties": {
+                        "metric": {"enum": ["records", "units"] if kind == "things" else ["records"]},
+                        "by": {"enum": list(BY_KINDS[kind])} if BY_KINDS[kind] else False,
+                    }
+                },
+            }
+            for kind in POPULATIONS
+        ],
+    ]
     return specs
 
 
 def spatial_tool_schema(directory=None):
-    capability = directory.get('spatial_query') if isinstance(directory, dict) else None
-    parameters = copy.deepcopy(capability.get('parameters')) if isinstance(capability, dict) else None
+    capability = directory.get("spatial_query") if isinstance(directory, dict) else None
+    parameters = copy.deepcopy(capability.get("parameters")) if isinstance(capability, dict) else None
     if not isinstance(parameters, dict):
         parameters = {
-            'type': 'object',
-            'properties': {
-                'from': _space_ref_schema(('pawn',)),
-                'to': _space_ref_schema(('thing', 'pawn', 'cell')),
+            "type": "object",
+            "properties": {
+                "from": _space_ref_schema(("pawn",)),
+                "to": _space_ref_schema(("thing", "pawn", "cell")),
             },
-            'required': ['from', 'to'],
-            'additionalProperties': False,
+            "required": ["from", "to"],
+            "additionalProperties": False,
         }
     # Pawn targets use the same native Thing lookup; expose the natural alias
     # in the model schema without modifying the Mod-owned wire contract.
-    target = parameters.get('properties', {}).get('to', {})
-    target_kinds = target.get('properties', {}).get('kind', {}).get('enum')
-    if isinstance(target_kinds, list) and 'thing' in target_kinds and 'pawn' not in target_kinds:
-        target_kinds.append('pawn')
-    for form in target.get('oneOf', []):
-        kind_schema = form.get('properties', {}).get('kind', {})
-        if kind_schema.get('const') == 'thing':
-            kind_schema.pop('const')
-            kind_schema['enum'] = ['thing', 'pawn']
-    route_supported = isinstance(capability, dict) and capability.get('route_summary') == 'native_path_summary.v1'
-    description = ('Check reachability from the specified Pawn current position to a Thing or cell. '
-                   'Use names or IDs directly; do not call look first just to resolve them. '
-                   'Ambiguous names return candidates. No work eligibility, reservation, '
-                   'blocking-cause diagnosis or future-action guarantee. ')
-    world_tools = (directory or {}).get('world_observation', {}).get('tools', [])
-    if any(t.get('name') == 'inspect_route' for t in world_tools):
-        description += 'For a different origin or subsequent journey leg use inspect_route(actor=traveller, start=origin, to=destination); from here cannot override origin. '
+    target = parameters.get("properties", {}).get("to", {})
+    target_kinds = target.get("properties", {}).get("kind", {}).get("enum")
+    if isinstance(target_kinds, list) and "thing" in target_kinds and "pawn" not in target_kinds:
+        target_kinds.append("pawn")
+    for form in target.get("oneOf", []):
+        kind_schema = form.get("properties", {}).get("kind", {})
+        if kind_schema.get("const") == "thing":
+            kind_schema.pop("const")
+            kind_schema["enum"] = ["thing", "pawn"]
+    route_supported = isinstance(capability, dict) and capability.get("route_summary") == "native_path_summary.v1"
+    description = (
+        "Check reachability from the specified Pawn current position to a Thing or cell. "
+        "Use names or IDs directly; do not call look first just to resolve them. "
+        "Ambiguous names return candidates. No work eligibility, reservation, "
+        "blocking-cause diagnosis or future-action guarantee. "
+    )
+    world_tools = (directory or {}).get("world_observation", {}).get("tools", [])
+    if any(t.get("name") == "inspect_route" for t in world_tools):
+        description += "For a different origin or subsequent journey leg use inspect_route(actor=traveller, start=origin, to=destination); from here cannot override origin. "
     if route_supported:
-        target = parameters['properties']['to']
-        parameters['properties']['to'] = {'oneOf': [target, {'type':'array','items':copy.deepcopy(target),'minItems':1,'maxItems':8}],
-            'description':'One target, or up to eight targets for the same actor. Use a list for comparisons.'}
-        parameters['properties']['order_by'] = {'type':'string','enum':['path_length','steps','native_cost'],
-            'description':'For a target list, request routes and program-sort ascending by this metric. Equal values share rank. Unknown routes remain unranked. Do not manually reorder the returned ranks.'}
-        description += 'For comparisons use a target list with order_by; the program calculates ranks and ties. '
-        description += ('Use detail="route" to also get a native path summary in this call; '
-                        'do not call reachability first. Default summary computes no path. '
-                        'Steps, length summed along the returned path and native weighted cost are different; '
-                        'none is ETA, and the returned path is not guaranteed shortest.')
+        target = parameters["properties"]["to"]
+        parameters["properties"]["to"] = {
+            "oneOf": [target, {"type": "array", "items": copy.deepcopy(target), "minItems": 1, "maxItems": 8}],
+            "description": "One target, or up to eight targets for the same actor. Use a list for comparisons.",
+        }
+        parameters["properties"]["order_by"] = {
+            "type": "string",
+            "enum": ["path_length", "steps", "native_cost"],
+            "description": "For a target list, request routes and program-sort ascending by this metric. Equal values share rank. Unknown routes remain unranked. Do not manually reorder the returned ranks.",
+        }
+        description += "For comparisons use a target list with order_by; the program calculates ranks and ties. "
+        description += (
+            'Use detail="route" to also get a native path summary in this call; '
+            "do not call reachability first. Default summary computes no path. "
+            "Steps, length summed along the returned path and native weighted cost are different; "
+            "none is ETA, and the returned path is not guaranteed shortest."
+        )
     else:
-        description += 'This connection provides reachability only; no route or distance tool is available.'
-    return dict(name='inspect_space', description=description, parameters=parameters)
-
+        description += "This connection provides reachability only; no route or distance tool is available."
+    return dict(name="inspect_space", description=description, parameters=parameters)
 
 
 # --- 校验 ---------------------------------------------------------------------
 
+
 def _text(value, name):
     if not isinstance(value, str) or not value:
-        raise SurfaceError(name + ' must be a nonempty string')
+        raise SurfaceError(name + " must be a nonempty string")
     return value
 
 
 def _texts(value, name):
     if not isinstance(value, list) or not value or not all(isinstance(x, str) and x for x in value):
-        raise SurfaceError(name + ' must be a nonempty string array')
+        raise SurfaceError(name + " must be a nonempty string array")
     return list(value)
 
 
 def normalize_object(raw):
     """把模型输入变成规范化 object；未知 kind/选择器/类型一律拒绝。"""
     if not isinstance(raw, dict):
-        raise SurfaceError('object must be an object')
+        raise SurfaceError("object must be an object")
     raw = dict(raw)
-    if 'id' in raw:
-        if 'ids' in raw:
-            raise SurfaceError('use id or ids, not both')
-        raw['ids'] = [_text(raw.pop('id'), 'id')]
-    unknown = sorted(set(raw) - {'kind', 'name', 'names', 'ids', 'definition', 'category',
-                                 'map', 'include_held', 'include_fogged', 'capabilities'})
+    if "id" in raw:
+        if "ids" in raw:
+            raise SurfaceError("use id or ids, not both")
+        raw["ids"] = [_text(raw.pop("id"), "id")]
+    unknown = sorted(
+        set(raw)
+        - {
+            "kind",
+            "name",
+            "names",
+            "ids",
+            "definition",
+            "category",
+            "map",
+            "include_held",
+            "include_fogged",
+            "capabilities",
+        }
+    )
     if unknown:
-        raise SurfaceError('object does not accept: ' + ', '.join(unknown))
-    kind = raw.get('kind')
+        raise SurfaceError("object does not accept: " + ", ".join(unknown))
+    kind = raw.get("kind")
     if kind not in ROOTS:
-        raise SurfaceError('kind must be one of: ' + ', '.join(KINDS))
-    if 'name' in raw and 'names' in raw:
-        raise SurfaceError('use either name or names, not both')
-    if 'ids' in raw and ('name' in raw or 'names' in raw):
-        raise SurfaceError('use exact ids or an exact display name, not both')
+        raise SurfaceError("kind must be one of: " + ", ".join(KINDS))
+    if "name" in raw and "names" in raw:
+        raise SurfaceError("use either name or names, not both")
+    if "ids" in raw and ("name" in raw or "names" in raw):
+        raise SurfaceError("use exact ids or an exact display name, not both")
     allowed = OBJECT_SELECTORS[kind]
-    for key in ('name', 'names', 'ids', 'definition', 'category', 'map', 'include_held', 'include_fogged', 'capabilities'):
-        if key in raw and key not in allowed and not (key == 'name' and 'names' in allowed):
-            raise SurfaceError('kind ' + kind + ' does not accept ' + key)
-    obj = {'kind': kind}
-    if 'name' in raw:
-        obj['names'] = [_text(raw['name'], 'name')]
-    if 'names' in raw:
-        obj['names'] = _texts(raw['names'], 'names')
-    if 'ids' in raw:
-        obj['ids'] = _texts(raw['ids'], 'ids')
-    if 'definition' in raw:
-        obj['definition'] = _text(raw['definition'], 'definition')
-    if 'capabilities' in raw:
-        obj['capabilities'] = list(dict.fromkeys(_texts(raw['capabilities'], 'capabilities')))
-    if 'category' in raw:
-        obj['category'] = _text(raw['category'], 'category')
-    if 'map' in raw:
-        obj['map'] = _text(raw['map'], 'map')
+    for key in (
+        "name",
+        "names",
+        "ids",
+        "definition",
+        "category",
+        "map",
+        "include_held",
+        "include_fogged",
+        "capabilities",
+    ):
+        if key in raw and key not in allowed and not (key == "name" and "names" in allowed):
+            raise SurfaceError("kind " + kind + " does not accept " + key)
+    obj = {"kind": kind}
+    if "name" in raw:
+        obj["names"] = [_text(raw["name"], "name")]
+    if "names" in raw:
+        obj["names"] = _texts(raw["names"], "names")
+    if "ids" in raw:
+        obj["ids"] = _texts(raw["ids"], "ids")
+    if "definition" in raw:
+        obj["definition"] = _text(raw["definition"], "definition")
+    if "capabilities" in raw:
+        obj["capabilities"] = list(dict.fromkeys(_texts(raw["capabilities"], "capabilities")))
+    if "category" in raw:
+        obj["category"] = _text(raw["category"], "category")
+    if "map" in raw:
+        obj["map"] = _text(raw["map"], "map")
     # 两个范围标志同向：true = 包含更多。旧名 held/visible_only 极性相反、且未说明 false 的
     # 含义，实测导致模型写出 held=false 却把结果描述成"含被持有"（真实值 74，报 0）。
-    for key in ('include_held', 'include_fogged'):
+    for key in ("include_held", "include_fogged"):
         if key in raw:
             if type(raw[key]) is not bool:
-                raise SurfaceError(key + ' must be a boolean')
+                raise SurfaceError(key + " must be a boolean")
             # Definitions have no instances, holders or fog state. Accept an
             # otherwise valid shared selector without inventing a Def scope.
             if kind not in DEF_KINDS:
                 obj[key] = raw[key]
-    if kind == 'map' and 'map' in obj and ('ids' in obj or 'names' in obj):
-        raise SurfaceError('map reads one map: use map, id/ids, or name/names, not competing selectors')
-    if 'ids' in obj and ('definition' in obj or 'category' in obj):
-        raise SurfaceError('use exact ids or definition/category, not competing selectors')
-    if 'definition' in obj and 'category' in obj:
-        raise SurfaceError('use either definition or category, not both')
-    if kind in ('colonists', 'things', 'pawns'):
-        obj.setdefault('map', 'current')
-    if kind == 'things':
-        obj.setdefault('include_held', True)
-        obj.setdefault('include_fogged', True)
-    if 'ids' in obj:
-        if kind in ('pawn', 'thing', 'map') and len(obj['ids']) != 1:
-            raise SurfaceError('kind ' + kind + ' reads exactly one id')
+    if kind == "map" and "map" in obj and ("ids" in obj or "names" in obj):
+        raise SurfaceError("map reads one map: use map, id/ids, or name/names, not competing selectors")
+    if "ids" in obj and ("definition" in obj or "category" in obj):
+        raise SurfaceError("use exact ids or definition/category, not competing selectors")
+    if "definition" in obj and "category" in obj:
+        raise SurfaceError("use either definition or category, not both")
+    if kind in ("colonists", "things", "pawns"):
+        obj.setdefault("map", "current")
+    if kind == "things":
+        obj.setdefault("include_held", True)
+        obj.setdefault("include_fogged", True)
+    if "ids" in obj:
+        if kind in ("pawn", "thing", "map") and len(obj["ids"]) != 1:
+            raise SurfaceError("kind " + kind + " reads exactly one id")
     return obj
 
 
 def validate_aspects(kind, aspects):
     if not isinstance(aspects, list) or not aspects or not all(isinstance(x, str) for x in aspects):
-        raise SurfaceError('aspects must be a nonempty string array')
+        raise SurfaceError("aspects must be a nonempty string array")
     supported = supported_aspects(kind)
     for aspect in aspects:
         if aspect not in ASPECTS:
-            raise SurfaceError('unknown aspect: ' + aspect)
+            raise SurfaceError("unknown aspect: " + aspect)
         if aspect not in supported:
-            raise SurfaceError('kind ' + kind + ' supports: ' + ', '.join(supported))
+            raise SurfaceError("kind " + kind + " supports: " + ", ".join(supported))
     return tuple(dict.fromkeys(aspects))
 
 
 def validate_metric(kind, metric):
     if metric not in METRICS:
-        raise SurfaceError('metric must be one of: ' + ', '.join(METRICS))
+        raise SurfaceError("metric must be one of: " + ", ".join(METRICS))
     if kind not in POPULATIONS:
-        raise SurfaceError('count measures a population: ' + ', '.join(POPULATIONS) + ' (got ' + kind + ')')
-    if metric == 'units' and kind != 'things':
-        raise SurfaceError('units sums stack_count and is only defined for kind things')
+        raise SurfaceError("count measures a population: " + ", ".join(POPULATIONS) + " (got " + kind + ")")
+    if metric == "units" and kind != "things":
+        raise SurfaceError("units sums stack_count and is only defined for kind things")
     return metric
 
 
@@ -499,160 +663,196 @@ def validate_by(kind, by):
     if by is None:
         return None
     if by not in GROUPINGS:
-        raise SurfaceError('by must be one of: ' + ', '.join(GROUPINGS))
+        raise SurfaceError("by must be one of: " + ", ".join(GROUPINGS))
     if by not in BY_KINDS[kind]:
-        allowed = BY_KINDS[kind] or ('nothing',)
-        raise SurfaceError('kind ' + kind + ' cannot group by ' + by + '; allowed: ' + ', '.join(allowed))
+        allowed = BY_KINDS[kind] or ("nothing",)
+        raise SurfaceError("kind " + kind + " cannot group by " + by + "; allowed: " + ", ".join(allowed))
     return by
 
 
 def validate_detail(detail):
     if type(detail) is not int or not 0 <= detail <= 100:
-        raise SurfaceError('detail must be an integer 0..100')
+        raise SurfaceError("detail must be an integer 0..100")
     return detail
 
 
 def supported_aspects(kind):
     if kind in PAWN_KINDS:
-        base = ['identity', 'health', 'skills', 'gear', 'work', 'mood', 'profile']
+        base = ["identity", "health", "skills", "gear", "work", "mood", "profile"]
     elif kind in MAP_KINDS:
-        base = ['identity', 'resources']
+        base = ["identity", "resources"]
     else:
-        base = ['identity']
+        base = ["identity"]
     if kind in POPULATIONS:
-        base = base + ['quantity']
+        base = base + ["quantity"]
         if kind in DEFAULT_GROUP:
-            base = base + ['distribution']
+            base = base + ["distribution"]
     return tuple(base)
 
 
 # --- 原生路由 -----------------------------------------------------------------
 
+
 def route_object(obj):
     """kind + 精确选择器 → (native root, args, where)。"""
-    kind = obj['kind']
+    kind = obj["kind"]
     args, where = {}, None
-    if kind in ('game', 'colony'):
+    if kind in ("game", "colony"):
         return ROOTS[kind], args, where
-    if kind == 'maps':
-        if 'ids' in obj:
-            args['ids'] = list(obj['ids'])
+    if kind == "maps":
+        if "ids" in obj:
+            args["ids"] = list(obj["ids"])
         return ROOTS[kind], args, where
-    if kind == 'map':
-        args['id'] = obj['ids'][0] if 'ids' in obj else obj.get('map', 'current')
+    if kind == "map":
+        args["id"] = obj["ids"][0] if "ids" in obj else obj.get("map", "current")
         return ROOTS[kind], args, where
-    if kind in ('pawn', 'pawns'):
-        if kind == 'pawn' and 'ids' in obj and len(obj['ids']) == 1 and 'map' not in obj:
-            args['id'] = obj['ids'][0]
-            return 'pawn', args, where
+    if kind in ("pawn", "pawns"):
+        if kind == "pawn" and "ids" in obj and len(obj["ids"]) == 1 and "map" not in obj:
+            args["id"] = obj["ids"][0]
+            return "pawn", args, where
         # pawns 覆盖人类/动物/机械族；pawn 多 id 时也落到同一根，避免伪造单 id。
-        args['map_id'] = obj.get('map', 'current')
-        if 'ids' in obj:
-            where = {'id': {'in': list(obj['ids'])}}
-        return 'pawns', args, where
-    if kind == 'colonists':
-        if 'ids' in obj:
-            args['ids'] = list(obj['ids'])
-        args['map_id'] = obj.get('map', 'current')
+        args["map_id"] = obj.get("map", "current")
+        if "ids" in obj:
+            where = {"id": {"in": list(obj["ids"])}}
+        return "pawns", args, where
+    if kind == "colonists":
+        if "ids" in obj:
+            args["ids"] = list(obj["ids"])
+        args["map_id"] = obj.get("map", "current")
         return ROOTS[kind], args, where
-    if kind in ('thing', 'things'):
-        if kind == 'thing' and 'ids' in obj and len(obj['ids']) == 1 and 'names' not in obj:
-            args['id'] = obj['ids'][0]
-            if 'map' in obj:
-                args['map_id'] = obj['map']
-            return 'thing', args, where
-        args['map_id'] = obj.get('map', 'current')
-        args['include_held'] = bool(obj.get('include_held', True))
+    if kind in ("thing", "things"):
+        if kind == "thing" and "ids" in obj and len(obj["ids"]) == 1 and "names" not in obj:
+            args["id"] = obj["ids"][0]
+            if "map" in obj:
+                args["map_id"] = obj["map"]
+            return "thing", args, where
+        args["map_id"] = obj.get("map", "current")
+        args["include_held"] = bool(obj.get("include_held", True))
         # 原生参数是反向的 visible_only（true = 排除迷雾），由程序翻转，模型不必知道。
-        args['visible_only'] = not bool(obj.get('include_fogged', True))
-        if 'ids' in obj:
-            where = {'id': {'in': list(obj['ids'])}}
-        elif 'definition' in obj:
+        args["visible_only"] = not bool(obj.get("include_fogged", True))
+        if "ids" in obj:
+            where = {"id": {"in": list(obj["ids"])}}
+        elif "definition" in obj:
             # 解析后的精确定义名走 def_names，避免子串匹配。
-            args['def_names'] = [obj['definition']]
-        elif 'category' in obj:
-            where = {'definition.category': {'eq': obj['category']}}
-        if 'capabilities' in obj:
-            args['capabilities'] = list(obj['capabilities'])
-        return 'things', args, where
-    if kind == 'thing_def':
-        args['def_name'] = obj['definition']
-        return 'thing_def', args, where
-    if kind == 'thing_defs':
-        if 'category' in obj:
-            args['category_def_name'] = obj['category']
-        if 'definition' in obj:
-            where = {'def_name': {'eq': obj['definition']}}
-        return 'thing_defs', args, where
-    raise SurfaceError('unsupported kind: ' + kind)
+            args["def_names"] = [obj["definition"]]
+        elif "category" in obj:
+            where = {"definition.category": {"eq": obj["category"]}}
+        if "capabilities" in obj:
+            args["capabilities"] = list(obj["capabilities"])
+        return "things", args, where
+    if kind == "thing_def":
+        args["def_name"] = obj["definition"]
+        return "thing_def", args, where
+    if kind == "thing_defs":
+        if "category" in obj:
+            args["category_def_name"] = obj["category"]
+        if "definition" in obj:
+            where = {"def_name": {"eq": obj["definition"]}}
+        return "thing_defs", args, where
+    raise SurfaceError("unsupported kind: " + kind)
 
 
 # --- aspects → blocks ---------------------------------------------------------
 
+
 def _entry(aspect, at, key, fields=None, limit=None, listing=False):
-    value = {'aspect': aspect, 'at': at, 'key': key}
+    value = {"aspect": aspect, "at": at, "key": key}
     if fields is not None:
-        value['fields'] = list(fields)
+        value["fields"] = list(fields)
     if limit is not None:
-        value['limit'] = limit
+        value["limit"] = limit
     if listing:
-        value['listing'] = True
+        value["listing"] = True
     return value
 
 
 def _pawn_entries(surface, aspect, detail):
-    if aspect == 'identity':
-        return [_entry('identity', '', 'object', _supported(surface, 'pawn', IDENTITY_FIELDS['pawn']))]
-    if aspect == 'health':
+    if aspect == "identity":
+        return [_entry("identity", "", "object", _supported(surface, "pawn", IDENTITY_FIELDS["pawn"]))]
+    if aspect == "health":
         return [
-            _entry('health', 'health.summary', 'summary',
-                   ['health_percent', 'pain', 'bleed_rate', 'in_pain_shock', 'downed']),
-            _entry('health', 'health.conditions', 'conditions',
-                   ['id', 'def_name', 'label', 'severity', 'severity_label', 'visible'], detail),
-            _entry('health', 'health.body_parts', 'body_parts',
-                   ['key', 'def_name', 'label', 'index', 'health', 'max_health'], detail),
-            _entry('health', 'health.capacities', 'capacities',
-                   ['def_name', 'label', 'level'], detail),
+            _entry(
+                "health",
+                "health.summary",
+                "summary",
+                ["health_percent", "pain", "bleed_rate", "in_pain_shock", "downed"],
+            ),
+            _entry(
+                "health",
+                "health.conditions",
+                "conditions",
+                ["id", "def_name", "label", "severity", "severity_label", "visible"],
+                detail,
+            ),
+            _entry(
+                "health",
+                "health.body_parts",
+                "body_parts",
+                ["key", "def_name", "label", "index", "health", "max_health"],
+                detail,
+            ),
+            _entry("health", "health.capacities", "capacities", ["def_name", "label", "level"], detail),
         ]
-    if aspect == 'skills':
-        return [_entry('skills', 'profile.skills', 'skills',
-                       ['def_name', 'label', 'level', 'passion', 'aptitude', 'totally_disabled',
-                        'permanently_disabled'], detail)]
-    if aspect == 'gear':
-        fields = ['id', 'stack_count', 'label', 'definition.def_name', 'definition.label']
-        return [_entry('gear', rel, rel, fields, detail) for rel in
-                ('equipment', 'apparel', 'inventory', 'carried')]
-    if aspect == 'work':
+    if aspect == "skills":
         return [
-            _entry('work', 'status.current_job', 'current_job', ['id', 'def_name', 'report']),
-            _entry('work', 'status', 'status', ['drafted', 'in_mental_state', 'mental_state']),
+            _entry(
+                "skills",
+                "profile.skills",
+                "skills",
+                ["def_name", "label", "level", "passion", "aptitude", "totally_disabled", "permanently_disabled"],
+                detail,
+            )
         ]
-    if aspect == 'mood':
+    if aspect == "gear":
+        fields = ["id", "stack_count", "label", "definition.def_name", "definition.label"]
+        return [_entry("gear", rel, rel, fields, detail) for rel in ("equipment", "apparel", "inventory", "carried")]
+    if aspect == "work":
         return [
-            _entry('mood', 'mood', 'mood', ['level', 'instant']),
-            _entry('mood', 'mood.break_thresholds', 'break_thresholds', ['minor', 'major', 'extreme']),
-            _entry('mood', 'mood.thought_groups', 'thought_groups',
-                   ['def_name', 'label', 'stage_index', 'mood_offset', 'member_count'], detail),
-            _entry('mood', 'mood.memories', 'memories',
-                   ['ref', 'def_name', 'label', 'mood_offset', 'age_ticks'], detail),
+            _entry("work", "status.current_job", "current_job", ["id", "def_name", "report"]),
+            _entry("work", "status", "status", ["drafted", "in_mental_state", "mental_state"]),
         ]
-    if aspect == 'profile':
+    if aspect == "mood":
         return [
-            _entry('profile', 'profile', 'profile', ['gender', 'race_def_name', 'kind_def_name']),
-            _entry('profile', 'profile.age', 'age', ['biological_years', 'chronological_years', 'life_stage']),
-            _entry('profile', 'profile.backstories', 'backstories', ['slot', 'def_name', 'title'], detail),
-            _entry('profile', 'profile.traits', 'traits',
-                   ['def_name', 'label', 'degree', 'suppressed'] +
-                   (['description'] if _supported(surface, 'pawn', ['profile.traits.description']) else []), detail),
+            _entry("mood", "mood", "mood", ["level", "instant"]),
+            _entry("mood", "mood.break_thresholds", "break_thresholds", ["minor", "major", "extreme"]),
+            _entry(
+                "mood",
+                "mood.thought_groups",
+                "thought_groups",
+                ["def_name", "label", "stage_index", "mood_offset", "member_count"],
+                detail,
+            ),
+            _entry(
+                "mood", "mood.memories", "memories", ["ref", "def_name", "label", "mood_offset", "age_ticks"], detail
+            ),
         ]
-    raise SurfaceError('unsupported aspect for this kind: ' + aspect)
+    if aspect == "profile":
+        return [
+            _entry("profile", "profile", "profile", ["gender", "race_def_name", "kind_def_name"]),
+            _entry("profile", "profile.age", "age", ["biological_years", "chronological_years", "life_stage"]),
+            _entry("profile", "profile.backstories", "backstories", ["slot", "def_name", "title"], detail),
+            _entry(
+                "profile",
+                "profile.traits",
+                "traits",
+                ["def_name", "label", "degree", "suppressed"]
+                + (["description"] if _supported(surface, "pawn", ["profile.traits.description"]) else []),
+                detail,
+            ),
+        ]
+    raise SurfaceError("unsupported aspect for this kind: " + aspect)
 
 
 def _resource_entries(kind, detail):
     return [
-        _entry('resources', 'resource_counter.all_counted_amounts', 'all_counted_amounts',
-               ['key.def_name', 'key.label', 'value'], detail),
-        _entry('resources', 'resource_counter', 'resource_counter', ['total_human_edible_nutrition']),
+        _entry(
+            "resources",
+            "resource_counter.all_counted_amounts",
+            "all_counted_amounts",
+            ["key.def_name", "key.label", "value"],
+            detail,
+        ),
+        _entry("resources", "resource_counter", "resource_counter", ["total_human_edible_nutrition"]),
     ]
 
 
@@ -674,18 +874,26 @@ def _supported(surface, kind, fields):
 
 
 def _entries_for(surface, kind, aspect, detail):
-    if aspect in ('quantity', 'distribution'):
-        return [_entry(aspect, '', aspect, LISTING_FIELDS.get(kind), listing=True)]
+    if aspect in ("quantity", "distribution"):
+        return [_entry(aspect, "", aspect, LISTING_FIELDS.get(kind), listing=True)]
     if kind in PAWN_KINDS:
         return _pawn_entries(surface, aspect, detail)
-    if aspect == 'identity':
-        if kind == 'colony':
-            return [_entry('identity', 'game', 'game', ['paused', 'current_map_id']),
-                    _entry('identity', 'maps', 'maps', _supported(surface, 'maps', ['id', 'name', 'is_current', 'colonist_count']), detail)]
-        return [_entry('identity', '', 'object', _supported(surface, kind, IDENTITY_FIELDS[kind]))]
-    if aspect == 'resources' and kind in MAP_KINDS:
+    if aspect == "identity":
+        if kind == "colony":
+            return [
+                _entry("identity", "game", "game", ["paused", "current_map_id"]),
+                _entry(
+                    "identity",
+                    "maps",
+                    "maps",
+                    _supported(surface, "maps", ["id", "name", "is_current", "colonist_count"]),
+                    detail,
+                ),
+            ]
+        return [_entry("identity", "", "object", _supported(surface, kind, IDENTITY_FIELDS[kind]))]
+    if aspect == "resources" and kind in MAP_KINDS:
         return _resource_entries(kind, detail)
-    raise SurfaceError('unsupported aspect for kind ' + kind + ': ' + aspect)
+    raise SurfaceError("unsupported aspect for kind " + kind + ": " + aspect)
 
 
 def _identity_fields(surface, obj, entries):
@@ -699,29 +907,30 @@ def _identity_fields(surface, obj, entries):
     模型读 gear 时拿不到 faction、读单件时拿不到 held_by，于是只能靠推。
     把这两项归到**寻址**而不是某个 aspect，才能让后面的事实有依据。
     """
-    fields = list(SUBJECT_FIELDS.get(obj['kind'], ()))
-    if obj['kind'] in PAWN_KINDS:
+    fields = list(SUBJECT_FIELDS.get(obj["kind"], ()))
+    if obj["kind"] in PAWN_KINDS:
         fields += [f for f in FACTION_FIELDS if f not in fields]
-    if obj['kind'] == 'thing':
+    if obj["kind"] == "thing":
         fields += [f for f in HOLDER_FIELDS if f not in fields]
     for entry in entries:
-        if not entry['at'] and entry.get('fields') and not entry.get('listing'):
-            fields += [f for f in entry['fields'] if f not in fields]
-    return tuple(_supported(surface, obj['kind'], fields))
+        if not entry["at"] and entry.get("fields") and not entry.get("listing"):
+            fields += [f for f in entry["fields"] if f not in fields]
+    return tuple(_supported(surface, obj["kind"], fields))
 
 
 def _covers(entries):
     covered = set()
     for entry in entries:
-        if entry['at']:
-            covered.add(entry['at'])
-        if entry.get('fields'):
-            for name in entry['fields']:
-                covered.add('.'.join(filter(None, [entry['at'], name])))
+        if entry["at"]:
+            covered.add(entry["at"])
+        if entry.get("fields"):
+            for name in entry["fields"]:
+                covered.add(".".join(filter(None, [entry["at"], name])))
     return covered
 
 
 # --- plan ---------------------------------------------------------------------
+
 
 @dataclass
 class Plan:
@@ -764,59 +973,74 @@ def plan_look(surface, obj, aspects, detail):
     """构造 look 的原生请求；未知组合已在 normalize/validate 阶段拒绝。"""
     entries = []
     for aspect in aspects:
-        entries.extend(_entries_for(surface, obj['kind'], aspect, detail))
+        entries.extend(_entries_for(surface, obj["kind"], aspect, detail))
     metrics, grouping = {}, ()
-    if 'quantity' in aspects or 'distribution' in aspects:
-        metrics = _measures_for(obj['kind'])
-    if 'distribution' in aspects:
-        grouping = DEFAULT_GROUP[obj['kind']]
+    if "quantity" in aspects or "distribution" in aspects:
+        metrics = _measures_for(obj["kind"])
+    if "distribution" in aspects:
+        grouping = DEFAULT_GROUP[obj["kind"]]
     # look 是"看这些东西"，不是"数这些东西"：只要请求里有任何非计量 aspect，
     # 就必须返回被寻址对象本身。否则模型问"殖民者是谁"只会得到"有 3 个"。
     # detail 只控制嵌套关系（conditions/body_parts/skills）的展开深度，
     # 不应该成为"能不能看到主语"的隐藏开关。
-    rows_wanted = any(aspect not in ('quantity', 'distribution') for aspect in aspects)
-    needs_rows = ((obj['kind'] not in POPULATIONS) or detail > 0 or rows_wanted
-                  # 按定义寻址就是"读这个定义"，默认只回计数会让"定义存在吗"无法回答。
-                  or (obj['kind'] in DEF_KINDS and 'definition' in obj))
-    return _assemble(surface, 'look', obj, aspects, detail, entries, metrics, grouping, needs_rows)
+    rows_wanted = any(aspect not in ("quantity", "distribution") for aspect in aspects)
+    needs_rows = (
+        (obj["kind"] not in POPULATIONS)
+        or detail > 0
+        or rows_wanted
+        # 按定义寻址就是"读这个定义"，默认只回计数会让"定义存在吗"无法回答。
+        or (obj["kind"] in DEF_KINDS and "definition" in obj)
+    )
+    return _assemble(surface, "look", obj, aspects, detail, entries, metrics, grouping, needs_rows)
 
 
 def plan_count(surface, obj, metric, by, detail):
-    aspects = ('quantity',) if by is None else ('distribution',)
-    entries = [_entry('quantity', '', 'quantity', LISTING_FIELDS.get(obj['kind']), listing=True)]
-    metrics = _measures_for(obj['kind'], metric)
+    aspects = ("quantity",) if by is None else ("distribution",)
+    entries = [_entry("quantity", "", "quantity", LISTING_FIELDS.get(obj["kind"]), listing=True)]
+    metrics = _measures_for(obj["kind"], metric)
     grouping = (by,) if by else ()
     # Group output is selected independently by _root_limit. An ungrouped
     # count must not read instance fields unless the caller requested detail.
-    return _assemble(surface, 'count', obj, aspects, detail, entries, metrics, grouping, detail > 0)
+    return _assemble(surface, "count", obj, aspects, detail, entries, metrics, grouping, detail > 0)
 
 
-def _measures_for(kind, metric='units'):
-    measures = {'records': {'op': 'count'}}
-    if kind == 'things' and metric == 'units':
-        measures['units'] = {'op': 'sum', 'field': 'stack_count'}
+def _measures_for(kind, metric="units"):
+    measures = {"records": {"op": "count"}}
+    if kind == "things" and metric == "units":
+        measures["units"] = {"op": "sum", "field": "stack_count"}
     return measures
 
 
 def _assemble(surface, tool, obj, aspects, detail, entries, metrics, grouping, needs_rows):
     root, args, where = route_object(obj)
-    plan = Plan(tool=tool, kind=obj['kind'], root=root, object=dict(obj), aspects=tuple(aspects),
-                detail=detail, structure=entries, metrics=metrics, grouping=grouping,
-                args=args, where=where, surface=surface)
-    root_limit = _root_limit(obj['kind'], detail, grouping, needs_rows)
-    if needs_rows and obj.get('ids'):
+    plan = Plan(
+        tool=tool,
+        kind=obj["kind"],
+        root=root,
+        object=dict(obj),
+        aspects=tuple(aspects),
+        detail=detail,
+        structure=entries,
+        metrics=metrics,
+        grouping=grouping,
+        args=args,
+        where=where,
+        surface=surface,
+    )
+    root_limit = _root_limit(obj["kind"], detail, grouping, needs_rows)
+    if needs_rows and obj.get("ids"):
         # 一次寻址到 N 个对象（含同名解析出的多个）时必须都能返回，
         # 否则明细/事实会静静丢掉其余候选。
-        root_limit = max(root_limit, len(obj['ids']))
+        root_limit = max(root_limit, len(obj["ids"]))
     blocks = []
-    root_block = {'at': ''}
+    root_block = {"at": ""}
     if args:
-        root_block['args'] = copy.deepcopy(args)
+        root_block["args"] = copy.deepcopy(args)
     if where:
-        root_block['where'] = copy.deepcopy(where)
-    fields = [e for e in entries if e['at'] == '' and e.get('fields') and not e.get('listing')]
-    listing = [e for e in entries if e.get('fields') and e.get('listing')]
-    selected = [f for e in fields for f in e['fields']]
+        root_block["where"] = copy.deepcopy(where)
+    fields = [e for e in entries if e["at"] == "" and e.get("fields") and not e.get("listing")]
+    listing = [e for e in entries if e.get("fields") and e.get("listing")]
+    selected = [f for e in fields for f in e["fields"]]
     # 主语只算一次：同一个列表既用于**请求 select** 也用于**渲染**。
     # 两者分开算过一次错：渲染读了没被请求的字段，于是全是 null（“读了一个人的健康却不知
     # 道是谁”就是这类 bug）。这里把 subject 提前到请求构造之前，从结构上消掉分歧。
@@ -826,92 +1050,114 @@ def _assemble(surface, tool, obj, aspects, detail, entries, metrics, grouping, n
     # partial，而输出根本不用这些值（实测 v1.10：该题 21 条无谓 issue）。
     selected += [f for f in plan.subject if f not in selected]
     if listing and not grouping and root_limit > 0:
-        selected += [f for e in listing for f in e['fields']]
+        selected += [f for e in listing for f in e["fields"]]
     if selected:
-        root_block['fields'] = list(dict.fromkeys(selected))
+        root_block["fields"] = list(dict.fromkeys(selected))
     if metrics:
-        root_block['aggregate'] = copy.deepcopy(metrics)
+        root_block["aggregate"] = copy.deepcopy(metrics)
     if grouping:
-        root_block['group_by'] = [GROUP_PATHS[obj['kind']][g] for g in grouping]
-    root_block['limit'] = root_limit
+        root_block["group_by"] = [GROUP_PATHS[obj["kind"]][g] for g in grouping]
+    root_block["limit"] = root_limit
     blocks.append(root_block)
     for entry in entries:
-        if not entry['at']:
+        if not entry["at"]:
             continue
-        block = {'at': entry['at']}
-        if entry.get('fields'):
-            block['fields'] = list(entry['fields'])
-        if entry.get('limit') is not None:
-            block['limit'] = entry['limit']
+        block = {"at": entry["at"]}
+        if entry.get("fields"):
+            block["fields"] = list(entry["fields"])
+        if entry.get("limit") is not None:
+            block["limit"] = entry["limit"]
         blocks.append(block)
     plan.covers = _covers(entries)
-    plan.request = surface.compile({'source': root, 'blocks': blocks})
-    plan.root_limit = root_block['limit']
+    plan.request = surface.compile({"source": root, "blocks": blocks})
+    plan.root_limit = root_block["limit"]
     return plan
 
 
 # --- 解析（名称/定义） --------------------------------------------------------
 
+
 def lookup_spec(surface, obj):
     """需要二次原生解析时返回 lookup 描述，否则 None。"""
-    kind = obj['kind']
-    if 'names' in obj:
-        names = list(obj['names'])
-        if kind in ('pawn', 'pawns'):
-            root, field, args = 'pawns', 'name', ({'map_id': obj['map']} if 'map' in obj else {})
-        elif kind == 'colonists':
-            root, field, args = 'spawned_free_colonists', 'name', {'map_id': obj.get('map', 'current')}
-        elif kind in ('map', 'maps'):
-            root, field, args = 'maps', 'name', {}
-        elif kind in ('thing', 'things'):
-            root, field = 'things', 'label'
-            args = {'map_id': obj.get('map', 'current'), 'include_held': bool(obj.get('include_held', True)),
-                    'visible_only': not bool(obj.get('include_fogged', True))}
+    kind = obj["kind"]
+    if "names" in obj:
+        names = list(obj["names"])
+        if kind in ("pawn", "pawns"):
+            root, field, args = "pawns", "name", ({"map_id": obj["map"]} if "map" in obj else {})
+        elif kind == "colonists":
+            root, field, args = "spawned_free_colonists", "name", {"map_id": obj.get("map", "current")}
+        elif kind in ("map", "maps"):
+            root, field, args = "maps", "name", {}
+        elif kind in ("thing", "things"):
+            root, field = "things", "label"
+            args = {
+                "map_id": obj.get("map", "current"),
+                "include_held": bool(obj.get("include_held", True)),
+                "visible_only": not bool(obj.get("include_fogged", True)),
+            }
         else:
-            raise SurfaceError('kind ' + kind + ' has no display-name population to resolve')
-        block = {'at': '', 'fields': list(dict.fromkeys(['id', field] + (['map_id'] if kind in PAWN_KINDS else [])))}
+            raise SurfaceError("kind " + kind + " has no display-name population to resolve")
+        block = {"at": "", "fields": list(dict.fromkeys(["id", field] + (["map_id"] if kind in PAWN_KINDS else [])))}
         if args:
-            block['args'] = args
-        block['where'] = {field: {'in': names}}
-        if obj.get('capabilities'):
-            block.setdefault('args', {})['capabilities'] = list(obj['capabilities'])
-        block['limit'] = 100
-        return {'kind': 'names', 'field': field, 'names': names, 'match_fields': (field,),
-                'case_insensitive': False,
-                'request': surface.compile({'source': root, 'blocks': [block]})}
-    if 'definition' in obj and kind in DEF_KINDS + THING_KINDS:
-        text = obj['definition']
-        block = {'at': '', 'fields': ['def_name', 'label'], 'limit': 100,
-                 'where': {'any': [{'def_name': {'eq': text, 'case_sensitive': False}},
-                                   {'label': {'eq': text, 'case_sensitive': False}}]}}
+            block["args"] = args
+        block["where"] = {field: {"in": names}}
+        if obj.get("capabilities"):
+            block.setdefault("args", {})["capabilities"] = list(obj["capabilities"])
+        block["limit"] = 100
+        return {
+            "kind": "names",
+            "field": field,
+            "names": names,
+            "match_fields": (field,),
+            "case_insensitive": False,
+            "request": surface.compile({"source": root, "blocks": [block]}),
+        }
+    if "definition" in obj and kind in DEF_KINDS + THING_KINDS:
+        text = obj["definition"]
+        block = {
+            "at": "",
+            "fields": ["def_name", "label"],
+            "limit": 100,
+            "where": {
+                "any": [
+                    {"def_name": {"eq": text, "case_sensitive": False}},
+                    {"label": {"eq": text, "case_sensitive": False}},
+                ]
+            },
+        }
         # Negotiated native candidate narrowing preserves the same union of
         # canonical names and localized labels, including ambiguity. Older
         # directories keep the existing complete-scan path.
-        arguments = surface.argument_schemas.get('thing_defs', {}).get('properties', {})
-        if 'exact_names' in arguments:
-            block['args'] = {'exact_names': [text]}
-        return {'kind': 'definition', 'field': 'def_name', 'names': [text],
-                'match_fields': ('def_name', 'label'), 'case_insensitive': True,
-                'request': surface.compile({'source': 'thing_defs', 'blocks': [block]})}
+        arguments = surface.argument_schemas.get("thing_defs", {}).get("properties", {})
+        if "exact_names" in arguments:
+            block["args"] = {"exact_names": [text]}
+        return {
+            "kind": "definition",
+            "field": "def_name",
+            "names": [text],
+            "match_fields": ("def_name", "label"),
+            "case_insensitive": True,
+            "request": surface.compile({"source": "thing_defs", "blocks": [block]}),
+        }
     return None
 
 
 def interpret_lookup(lookup, packed):
     """把解析查询的结果翻成 resolution：绝不静默选一个。"""
-    result = packed['results'][0]
+    result = packed["results"][0]
     resolution = coverage_of(result)
-    rows = result.get('rows') or []
-    field = lookup['field']
-    match_fields = lookup.get('match_fields') or (field,)
-    complete = (resolution['scan'] == 'complete' and resolution['listing'] == 'complete'
-                and resolution['fields'] == 'complete')
-    wanted = lookup['names']
-    folder = str.casefold if lookup.get('case_insensitive') else (lambda text: text)
+    rows = result.get("rows") or []
+    field = lookup["field"]
+    match_fields = lookup.get("match_fields") or (field,)
+    complete = (
+        resolution["scan"] == "complete" and resolution["listing"] == "complete" and resolution["fields"] == "complete"
+    )
+    wanted = lookup["names"]
+    folder = str.casefold if lookup.get("case_insensitive") else (lambda text: text)
     matches, missing, ambiguous = [], [], []
 
     def equal(row, name):
-        return any(isinstance(row.get(key), str) and folder(row[key]) == folder(name)
-                   for key in match_fields)
+        return any(isinstance(row.get(key), str) and folder(row[key]) == folder(name) for key in match_fields)
 
     if not complete:
         rows = [dict(row) for row in rows if any(equal(row, name) for name in wanted)]
@@ -924,25 +1170,33 @@ def interpret_lookup(lookup, packed):
                 ambiguous.append(name)
             matches.extend(found)
     if not complete:
-        status = 'incomplete'
+        status = "incomplete"
     elif ambiguous:
-        status = 'ambiguous'
+        status = "ambiguous"
     elif missing:
-        status = 'missing_in_scope'
+        status = "missing_in_scope"
     else:
-        status = 'resolved'
-    return {'status': status, 'field': field, 'requested': wanted,
-            'source': result.get('from'), 'scope': copy.deepcopy(result.get('scope', {})),
-            'ids': [row.get('id') or row.get('def_name') for row in matches],
-            'candidates': [_candidate(row) for row in rows],
-            'ambiguous': ambiguous, 'missing': missing,
-            'coverage': resolution,
-            'note': ('Exact display names and definitions are resolved against a complete scan; an incomplete '
-                     'scan or several exact matches never resolves to one object.')}
+        status = "resolved"
+    return {
+        "status": status,
+        "field": field,
+        "requested": wanted,
+        "source": result.get("from"),
+        "scope": copy.deepcopy(result.get("scope", {})),
+        "ids": [row.get("id") or row.get("def_name") for row in matches],
+        "candidates": [_candidate(row) for row in rows],
+        "ambiguous": ambiguous,
+        "missing": missing,
+        "coverage": resolution,
+        "note": (
+            "Exact display names and definitions are resolved against a complete scan; an incomplete "
+            "scan or several exact matches never resolves to one object."
+        ),
+    }
 
 
 def _candidate(row):
-    return {k: row.get(k) for k in ('id', 'name', 'label', 'def_name', 'map_id') if row.get(k) is not None}
+    return {k: row.get(k) for k in ("id", "name", "label", "def_name", "map_id") if row.get(k) is not None}
 
 
 def apply_lookup(obj, lookup, resolution):
@@ -954,94 +1208,95 @@ def apply_lookup(obj, lookup, resolution):
     ids[0]，结果会同时声称“多义”又以 ok 回第一个），必须交回候选。
     只有缺失/扫描不完整才同样拒绝。
     """
-    if resolution['status'] not in ('resolved', 'ambiguous'):
+    if resolution["status"] not in ("resolved", "ambiguous"):
         return None
     resolved = dict(obj)
-    resolved.pop('names', None)
-    if lookup['field'] == 'def_name':
-        if resolution['status'] == 'ambiguous':
+    resolved.pop("names", None)
+    if lookup["field"] == "def_name":
+        if resolution["status"] == "ambiguous":
             return None
-        resolved['definition'] = resolution['ids'][0]
+        resolved["definition"] = resolution["ids"][0]
         return resolved
-    if resolution['status'] == 'ambiguous' and obj['kind'] in SINGLE_ONLY_KINDS:
+    if resolution["status"] == "ambiguous" and obj["kind"] in SINGLE_ONLY_KINDS:
         # 实测（v1.10）：名称解析已正确报 ambiguous 并回两个 id，`map` 路由却取第一个，
         # 以 status=ok 只回一个的事实。公开承诺是“同名返回候选，绝不擅自选一个”。
         # pawn/thing 有总体根，多候选逐个返回是**有意保留**的行为，不走这里。
         return None
-    resolved['ids'] = list(resolution['ids'])
+    resolved["ids"] = list(resolution["ids"])
     return resolved
 
 
 # --- 渲染（不 intern） --------------------------------------------------------
 
+
 def _measure_literal(value):
-    if value.get('complete') is True and value.get('value') is not None:
-        out = {'state': 'exact', 'value': value['value']}
-    elif value.get('complete') is True:
-        out = {'state': 'empty'}
-    elif 'known_value' in value:
-        out = {'state': 'lower_bound', 'minimum': value.get('known_value')}
+    if value.get("complete") is True and value.get("value") is not None:
+        out = {"state": "exact", "value": value["value"]}
+    elif value.get("complete") is True:
+        out = {"state": "empty"}
+    elif "known_value" in value:
+        out = {"state": "lower_bound", "minimum": value.get("known_value")}
     else:
-        out = {'state': 'unavailable',
-               'reason': 'the scan was incomplete and no partial value was reported'}
-    out['operation'] = value.get('op')
-    out['unit'] = value.get('unit')
-    if value.get('field') is not None:
-        out['field'] = value['field']
+        out = {"state": "unavailable", "reason": "the scan was incomplete and no partial value was reported"}
+    out["operation"] = value.get("op")
+    out["unit"] = value.get("unit")
+    if value.get("field") is not None:
+        out["field"] = value["field"]
     return out
 
 
 def _scope_literal(scope):
-    out = {k: copy.deepcopy(v) for k, v in scope.items()
-           if k not in ('description', 'argument_semantics')}
+    out = {k: copy.deepcopy(v) for k, v in scope.items() if k not in ("description", "argument_semantics")}
     notes = []
-    if scope.get('description'):
-        notes.append(scope['description'])
-    for key, text in (scope.get('argument_semantics') or {}).items():
+    if scope.get("description"):
+        notes.append(scope["description"])
+    for key, text in (scope.get("argument_semantics") or {}).items():
         if text:
-            notes.append(key + ': ' + text)
+            notes.append(key + ": " + text)
     if notes:
-        out['notes'] = notes
+        out["notes"] = notes
     return out
 
 
 def _collection_literal(value):
-    out = {'state': 'complete' if value.get('scan_complete') is True else 'partial'}
-    if value.get('scan_complete') is not True:
-        out['reason'] = 'the source scan was incomplete'
-    if 'from' in value:
-        out['from'] = value['from']
-    out['fields'] = 'complete' if value.get('fields_complete') else 'partial'
-    out['matched'] = value.get('matched_count')
-    out['known_matches'] = value.get('known_matches')
-    page = value.get('page')
+    out = {"state": "complete" if value.get("scan_complete") is True else "partial"}
+    if value.get("scan_complete") is not True:
+        out["reason"] = "the source scan was incomplete"
+    if "from" in value:
+        out["from"] = value["from"]
+    out["fields"] = "complete" if value.get("fields_complete") else "partial"
+    out["matched"] = value.get("matched_count")
+    out["known_matches"] = value.get("known_matches")
+    page = value.get("page")
     if page is None:
-        out['listing'] = 'not_requested'
+        out["listing"] = "not_requested"
     else:
-        out['listing'] = 'complete' if (value.get('scan_complete') is True
-                                        and page.get('offset', 0) == 0
-                                        and page.get('has_more') is False) else 'partial'
-        out['returned'] = page.get('returned')
-        out['has_more'] = page.get('has_more')
-        out['offset'] = page.get('offset')
-    if value.get('aggregates'):
-        out['aggregates'] = {k: _measure_literal(v) for k, v in value['aggregates'].items()}
-    if value.get('scope') is not None:
-        out['scope'] = _scope_literal(value['scope'])
-    rows = value.get('rows')
+        out["listing"] = (
+            "complete"
+            if (value.get("scan_complete") is True and page.get("offset", 0) == 0 and page.get("has_more") is False)
+            else "partial"
+        )
+        out["returned"] = page.get("returned")
+        out["has_more"] = page.get("has_more")
+        out["offset"] = page.get("offset")
+    if value.get("aggregates"):
+        out["aggregates"] = {k: _measure_literal(v) for k, v in value["aggregates"].items()}
+    if value.get("scope") is not None:
+        out["scope"] = _scope_literal(value["scope"])
+    rows = value.get("rows")
     if rows is not None:
-        out['rows'] = [_pack(row) for row in rows]
+        out["rows"] = [_pack(row) for row in rows]
     return out
 
 
 def _is_measure(value):
-    return (type(value.get('complete')) is bool and isinstance(value.get('op'), str)
-            and {'value', 'unit'} <= set(value))
+    return type(value.get("complete")) is bool and isinstance(value.get("op"), str) and {"value", "unit"} <= set(value)
 
 
 def _is_collection(value):
-    return (type(value.get('scan_complete')) is bool
-            and {'fields_complete', 'matched_count', 'known_matches'} <= set(value))
+    return type(value.get("scan_complete")) is bool and {"fields_complete", "matched_count", "known_matches"} <= set(
+        value
+    )
 
 
 def _pack(value):
@@ -1053,15 +1308,15 @@ def _pack(value):
         return _measure_literal(value)
     if _is_collection(value):
         return _collection_literal(value)
-    return {k: _pack(v) for k, v in value.items() if not k.startswith('_')}
+    return {k: _pack(v) for k, v in value.items() if not k.startswith("_")}
 
 
 def pack(data, issues=()):
     """把原生 payload 变成明文事实；不生成任何 handle。"""
     packed = _pack(copy.deepcopy(data))
     for issue in issues or ():
-        path = issue.get('path') or []
-        if len(path) < 2 or path[0] != 'results':
+        path = issue.get("path") or []
+        if len(path) < 2 or path[0] != "results":
             continue
         _mark(packed, path, issue)
     return packed
@@ -1085,7 +1340,7 @@ def _mark(root, path, issue):
         except (KeyError, IndexError, ValueError, TypeError):
             return
     last = path[-1]
-    marker = {'state': 'unavailable', 'reason': issue.get('code'), 'message': issue.get('message')}
+    marker = {"state": "unavailable", "reason": issue.get("code"), "message": issue.get("message")}
     try:
         if isinstance(current, list):
             index = int(last)
@@ -1115,17 +1370,19 @@ def _mark(root, path, issue):
 
 def coverage_of(result):
     """读取已 pack 的集合覆盖率明文（scan/fields/listing/matched）。"""
-    return {'scan': result.get('state', 'partial'),
-            'fields': result.get('fields', 'partial'),
-            'listing': result.get('listing', 'not_requested'),
-            'matched': result.get('matched'),
-            'known_matches': result.get('known_matches')}
+    return {
+        "scan": result.get("state", "partial"),
+        "fields": result.get("fields", "partial"),
+        "listing": result.get("listing", "not_requested"),
+        "matched": result.get("matched"),
+        "known_matches": result.get("known_matches"),
+    }
 
 
 def _subtree(row, at):
     node = row
     if at:
-        for segment in at.split('.'):
+        for segment in at.split("."):
             if not isinstance(node, dict):
                 return None
             if _is_unavailable(node):
@@ -1136,11 +1393,11 @@ def _subtree(row, at):
 
 
 def _is_unavailable(value):
-    return isinstance(value, dict) and value.get('state') == 'unavailable'
+    return isinstance(value, dict) and value.get("state") == "unavailable"
 
 
 def _merge(out, path, value):
-    parts = path.split('.')
+    parts = path.split(".")
     node = out
     for index, part in enumerate(parts[:-1]):
         current = node.get(part)
@@ -1156,10 +1413,10 @@ def _identity(row, fields):
     out = {}
     for name in fields:
         value = _subtree(row, name)
-        if _is_unavailable(value) and '.' in name:
+        if _is_unavailable(value) and "." in name:
             # 整个子树不可用（如 faction 未采集）：在顶层键上标一次，
             # 而不是拆成四个逐字段标记。
-            out[name.split('.')[0]] = value
+            out[name.split(".")[0]] = value
             continue
         _merge(out, name, value)
     return out
@@ -1168,7 +1425,7 @@ def _identity(row, fields):
 def _field_note(surface, root, at, name):
     kind = surface.path_type(root, at)
     note = None
-    for segment in name.split('.'):
+    for segment in name.split("."):
         candidate = surface.notes.get(kind, {}).get(segment)
         if candidate:
             note = candidate
@@ -1178,20 +1435,20 @@ def _field_note(surface, root, at, name):
 
 def unread_fields(surface, root, covered):
     """机械推导：本次没有读到的根字段（对被部分覆盖的字段展开一层）。"""
-    kind = surface.path_type(root, '')
+    kind = surface.path_type(root, "")
     index = surface.index.get(kind, {})
     out = []
     for name in index:
-        children = {p.split('.', 1)[1] for p in covered if p.startswith(name + '.') and '.' in p}
+        children = {p.split(".", 1)[1] for p in covered if p.startswith(name + ".") and "." in p}
         if name in covered and not children:
             continue
         if not children:
             out.append(name)
             continue
         child_kind = surface.child_type(kind, name)
-        for child in (surface.index.get(child_kind) or {}):
+        for child in surface.index.get(child_kind) or {}:
             if child not in children:
-                out.append(name + '.' + child)
+                out.append(name + "." + child)
     return out
 
 
@@ -1203,79 +1460,87 @@ def _not_read(plan, surface, result, issues=()):
     又把路径词汇重新灌回模型上下文。这里只保留会影响结论的项。
     """
     items = []
-    root_type = surface.path_type(plan.root, '')
+    root_type = surface.path_type(plan.root, "")
     # 收窄范围时必须把「被排除的东西」直接点名。实测中模型写了 include_held=false
     # （只算地图上生成的物），却把结果描述成“含被持有容器内容”——那就是范围被收窄而未被声明。
-    if root_type == 'Thing':
-        if plan.object.get('include_held') is False:
-            items.append('things inside holders (inventory, containers, equipment) are EXCLUDED by include_held=false; '
-                         'the totals below are map-spawned objects only')
-        if plan.object.get('include_fogged') is False:
-            items.append('things under fog are EXCLUDED by include_fogged=false; the totals below are currently visible only')
+    if root_type == "Thing":
+        if plan.object.get("include_held") is False:
+            items.append(
+                "things inside holders (inventory, containers, equipment) are EXCLUDED by include_held=false; "
+                "the totals below are map-spawned objects only"
+            )
+        if plan.object.get("include_fogged") is False:
+            items.append(
+                "things under fog are EXCLUDED by include_fogged=false; the totals below are currently visible only"
+            )
     # 未请求的 aspect 折叠成一行，不再每个占一行（那是噪音，不是信号）。
     missing = [a for a in supported_aspects(plan.kind) if a not in plan.aspects]
     if missing:
-        items.append('aspects not requested: ' + ', '.join(missing))
+        items.append("aspects not requested: " + ", ".join(missing))
     # 身份现在属于“寻址”的一部分（见 _identity_fields），所以这里要查 **主语字段**
     # 而不是条目覆盖；否则会在已经读到 faction 时仍然声称身份未读。
-    if root_type == 'Pawn' and plan.kind != 'colonists' and not any(f.startswith('faction.') for f in plan.subject):
-        items.append('faction/colonist-status (not read; the schema exposes no faction field; '
-                     'identity is never inferred from kind, name or container)')
+    if root_type == "Pawn" and plan.kind != "colonists" and not any(f.startswith("faction.") for f in plan.subject):
+        items.append(
+            "faction/colonist-status (not read; the schema exposes no faction field; "
+            "identity is never inferred from kind, name or container)"
+        )
     for entry in plan.structure:
-        if entry.get('limit') == 0 and entry['at']:
-            items.append(entry['at'] + ' detail rows (count only; detail=0)')
+        if entry.get("limit") == 0 and entry["at"]:
+            items.append(entry["at"] + " detail rows (count only; detail=0)")
     if plan.grouping:
-        items.append(root_type + ' per-instance rows (a grouped read returns group aggregates)')
+        items.append(root_type + " per-instance rows (a grouped read returns group aggregates)")
     coverage = coverage_of(result)
-    if coverage['scan'] == 'partial':
-        items.append(root_type + ' population remainder (scan incomplete: no exact total)')
-    if coverage['listing'] == 'partial' and not plan.grouping:
-        items.append(root_type + ' detail rows beyond the returned page')
-    if coverage['fields'] == 'partial':
-        items.append('selected fields that failed to read (see issues)')
+    if coverage["scan"] == "partial":
+        items.append(root_type + " population remainder (scan incomplete: no exact total)")
+    if coverage["listing"] == "partial" and not plan.grouping:
+        items.append(root_type + " detail rows beyond the returned page")
+    if coverage["fields"] == "partial":
+        items.append("selected fields that failed to read (see issues)")
     for issue in issues or ():
-        path = issue.get('path') or []
-        label = issue.get('code', 'issue')
-        items.append(('results.' + '.'.join(str(p) for p in path[2:]) if len(path) > 2 else 'result')
-                     + ' (' + label + ')')
+        path = issue.get("path") or []
+        label = issue.get("code", "issue")
+        items.append(
+            ("results." + ".".join(str(p) for p in path[2:]) if len(path) > 2 else "result") + " (" + label + ")"
+        )
     return sorted(dict.fromkeys(items))
 
 
 def _semantics(plan, surface, result, resolution=None):
     notes = []
     kind = plan.kind
-    if kind in PAWN_KINDS or kind in ('thing', 'things'):
-        notes.append(SEMANTICS['containment'])
+    if kind in PAWN_KINDS or kind in ("thing", "things"):
+        notes.append(SEMANTICS["containment"])
     # 字段是点分路径（held_by.id），必须用子串判断而不是全等。
-    if kind in ('thing', 'things') and any(
-            any(f.startswith('held_by') or f.startswith('faction') for f in (e.get('fields') or []))
-            for e in plan.structure):
-        notes.append(SEMANTICS['holder'])
+    if kind in ("thing", "things") and any(
+        any(f.startswith("held_by") or f.startswith("faction") for f in (e.get("fields") or [])) for e in plan.structure
+    ):
+        notes.append(SEMANTICS["holder"])
     if kind in PAWN_KINDS:
-        notes.append(SEMANTICS['pawn'])
-    if 'health' in plan.aspects:
-        notes.append(SEMANTICS['health'])
+        notes.append(SEMANTICS["pawn"])
+    if "health" in plan.aspects:
+        notes.append(SEMANTICS["health"])
     # 字段是点分路径（parent_holder.runtime_type），必须用子串判断而不是全等。
-    if any(any(f.startswith('parent_holder') for f in (entry.get('fields') or []))
-           for entry in plan.structure):
-        notes.append(SEMANTICS['parent_holder'])
-    if any(any(f.startswith('hit_points') or f.startswith('max_hit_points') for f in (entry.get('fields') or []))
-           for entry in plan.structure):
-        notes.append(SEMANTICS['durability'])
-    notes.append(SEMANTICS['unknown'])
+    if any(any(f.startswith("parent_holder") for f in (entry.get("fields") or [])) for entry in plan.structure):
+        notes.append(SEMANTICS["parent_holder"])
+    if any(
+        any(f.startswith("hit_points") or f.startswith("max_hit_points") for f in (entry.get("fields") or []))
+        for entry in plan.structure
+    ):
+        notes.append(SEMANTICS["durability"])
+    notes.append(SEMANTICS["unknown"])
     coverage = coverage_of(result)
     states = _states(result)
-    if coverage['scan'] == 'partial' or 'lower_bound' in states:
-        notes.append(SEMANTICS['lower_bound'])
-    if plan.metrics.get('units') or 'quantity' in plan.aspects:
-        notes.append(SEMANTICS['units'])
+    if coverage["scan"] == "partial" or "lower_bound" in states:
+        notes.append(SEMANTICS["lower_bound"])
+    if plan.metrics.get("units") or "quantity" in plan.aspects:
+        notes.append(SEMANTICS["units"])
     if resolution is not None:
-        notes.append(resolution['note'])
+        notes.append(resolution["note"])
     for entry in plan.structure:
-        for name in (entry.get('fields') or []):
-            note = _field_note(surface, plan.root, entry['at'], name)
+        for name in entry.get("fields") or []:
+            note = _field_note(surface, plan.root, entry["at"], name)
             if note:
-                notes.append(name.split('.')[-1] + ': ' + note)
+                notes.append(name.split(".")[-1] + ": " + note)
     return list(dict.fromkeys(notes))
 
 
@@ -1285,8 +1550,8 @@ def _states(value, found=None):
         for item in value:
             _states(item, found)
     elif isinstance(value, dict):
-        if value.get('state') in ('lower_bound', 'unavailable', 'empty', 'partial') and 'operation' in value:
-            found.add(value['state'])
+        if value.get("state") in ("lower_bound", "unavailable", "empty", "partial") and "operation" in value:
+            found.add(value["state"])
         for item in value.values():
             _states(item, found)
     return found
@@ -1295,63 +1560,64 @@ def _states(value, found=None):
 def _facts(plan, result):
     if plan.root_limit == 0:
         return []
-    rows = result.get('rows') or []
+    rows = result.get("rows") or []
     subject = list(plan.subject)
-    root_entries = [item for item in plan.structure if not item['at'] and item.get('fields')
-                    and not item.get('listing')]
+    root_entries = [
+        item for item in plan.structure if not item["at"] and item.get("fields") and not item.get("listing")
+    ]
     facts = []
     for row in rows:
         if not isinstance(row, dict):
             continue
-        entry = {'object': _identity(row, subject), 'facts': {}}
+        entry = {"object": _identity(row, subject), "facts": {}}
         # 根级别条目必须同样渲染：只请求 identity 时全部字段都在根上，
         # 早期实现只处理 at != '' 的条目，导致这类 look 返回空事实。
         for item in root_entries:
-            entry['facts'].setdefault(item['aspect'], {})[item['key']] = _identity(row, item['fields'])
+            entry["facts"].setdefault(item["aspect"], {})[item["key"]] = _identity(row, item["fields"])
         for item in plan.structure:
-            if item['at']:
-                entry['facts'].setdefault(item['aspect'], {})[item['key']] = _subtree(row, item['at'])
+            if item["at"]:
+                entry["facts"].setdefault(item["aspect"], {})[item["key"]] = _subtree(row, item["at"])
         facts.append(entry)
     return facts
 
 
 def _scope(plan, surface, result):
-    raw = result.get('scope') or {}
-    args = raw.get('args') or {}
+    raw = result.get("scope") or {}
+    args = raw.get("args") or {}
     resolved = {}
-    if 'map_id' in args:
-        resolved['map_id'] = args['map_id']
-    if 'id' in args:
-        resolved['id'] = args['id']
-    if 'def_name' in args:
-        resolved['definition'] = args['def_name']
-    if 'def_names' in args:
-        resolved['definitions'] = list(args['def_names'])
-    if 'ids' in args:
-        resolved['ids'] = list(args['ids'])
+    if "map_id" in args:
+        resolved["map_id"] = args["map_id"]
+    if "id" in args:
+        resolved["id"] = args["id"]
+    if "def_name" in args:
+        resolved["definition"] = args["def_name"]
+    if "def_names" in args:
+        resolved["definitions"] = list(args["def_names"])
+    if "ids" in args:
+        resolved["ids"] = list(args["ids"])
     # 回显模型侧的同一套名字与极性，另附原生参数以便审计；不让两种极性同时出现在结果里。
-    if 'include_held' in args:
-        resolved['include_held'] = args['include_held']
-    if 'visible_only' in args:
-        resolved['include_fogged'] = not args['visible_only']
-        resolved['native_visible_only'] = args['visible_only']
+    if "include_held" in args:
+        resolved["include_held"] = args["include_held"]
+    if "visible_only" in args:
+        resolved["include_fogged"] = not args["visible_only"]
+        resolved["native_visible_only"] = args["visible_only"]
     # 打包后的结果只带 `notes`（_scope_literal 已经把 description 与
     # argument_semantics 合并进去并删掉旧键）。旧实现只读被删掉的旧键，
     # 于是把原生范围/参数说明静默丢弃——实测：30 次工具结果、覆盖 12/12
     # 场候选咨询的 scope.notes 变成空列表。两种形状都要认。
-    notes = [note for note in (raw.get('notes') or []) if note]
-    if raw.get('description'):
-        notes.append(raw['description'])
-    for text in (raw.get('argument_semantics') or {}).values():
+    notes = [note for note in (raw.get("notes") or []) if note]
+    if raw.get("description"):
+        notes.append(raw["description"])
+    for text in (raw.get("argument_semantics") or {}).values():
         if text:
             notes.append(text)
     notes = list(dict.fromkeys(str(note) for note in notes))
     return {
-        'object': {k: v for k, v in plan.object.items() if v is not None},
-        'resolved': resolved,
-        'native_root': plan.root,
-        'native_type': surface.path_type(plan.root, ''),
-        'notes': notes,
+        "object": {k: v for k, v in plan.object.items() if v is not None},
+        "resolved": resolved,
+        "native_root": plan.root,
+        "native_type": surface.path_type(plan.root, ""),
+        "notes": notes,
     }
 
 
@@ -1360,74 +1626,95 @@ def render(plan, native, resolution=None):
     if plan.blocked is not None:
         return plan.blocked
     surface = plan.surface
-    result = native['data']['results'][0]
-    sample = native['data'].get('sample') or {}
+    result = native["data"]["results"][0]
+    sample = native["data"].get("sample") or {}
     out = {
-        'status': native['status'],
-        'tool': plan.tool,
-        'object': {k: v for k, v in plan.object.items() if v is not None},
-        'scope': _scope(plan, surface, result),
-        'sample': {'load_epoch': sample.get('load_epoch'), 'game_tick': sample.get('game_tick'),
-                   'sequence': sample.get('sequence')},
-        'coverage': coverage_of(result),
-        'not_read': _not_read(plan, surface, result, native.get('issues')),
-        'semantics': _semantics(plan, surface, result, resolution),
-        'issues': [{'reason': issue.get('code'), 'message': issue.get('message'),
-                    'path': list(issue.get('path') or [])} for issue in native.get('issues') or ()],
-        'observation_id': native.get('observation_id'),
+        "status": native["status"],
+        "tool": plan.tool,
+        "object": {k: v for k, v in plan.object.items() if v is not None},
+        "scope": _scope(plan, surface, result),
+        "sample": {
+            "load_epoch": sample.get("load_epoch"),
+            "game_tick": sample.get("game_tick"),
+            "sequence": sample.get("sequence"),
+        },
+        "coverage": coverage_of(result),
+        "not_read": _not_read(plan, surface, result, native.get("issues")),
+        "semantics": _semantics(plan, surface, result, resolution),
+        "issues": [
+            {"reason": issue.get("code"), "message": issue.get("message"), "path": list(issue.get("path") or [])}
+            for issue in native.get("issues") or ()
+        ],
+        "observation_id": native.get("observation_id"),
     }
-    if isinstance(resolution, dict) and 'name_resolution' in resolution:
+    if isinstance(resolution, dict) and "name_resolution" in resolution:
         # Deterministic Def-name recovery is disclosed on the delivered result:
         # the author and review see the requested term and the canonical term.
-        out['name_resolution'] = copy.deepcopy(resolution['name_resolution'])
+        out["name_resolution"] = copy.deepcopy(resolution["name_resolution"])
     if plan.metrics:
-        out['measures'] = dict(result.get('aggregates') or {})
+        out["measures"] = dict(result.get("aggregates") or {})
     if plan.grouping:
         by = plan.grouping[0]
         native = GROUP_PATHS[plan.kind][by]
-        out['groups'] = [{'key': {by: (row.get('key') or {}).get(native)},
-                          'measures': dict(row.get('aggregates') or {})}
-                         for row in (result.get('rows') or []) if isinstance(row, dict)]
+        out["groups"] = [
+            {"key": {by: (row.get("key") or {}).get(native)}, "measures": dict(row.get("aggregates") or {})}
+            for row in (result.get("rows") or [])
+            if isinstance(row, dict)
+        ]
     else:
-        out['facts'] = _facts(plan, result)
+        out["facts"] = _facts(plan, result)
         # detail>0 时明细也是根行；单独回一份，不混进 aspects 事实。
-        if any(item.get('listing') for item in plan.structure):
-            out['listing'] = _listing_rows(plan, result)
+        if any(item.get("listing") for item in plan.structure):
+            out["listing"] = _listing_rows(plan, result)
     if resolution is not None:
-        out['resolution'] = resolution
+        out["resolution"] = resolution
     return out
 
 
 def _listing_rows(plan, result):
-    rows = [row for row in (result.get('rows') or []) if isinstance(row, dict)]
+    rows = [row for row in (result.get("rows") or []) if isinstance(row, dict)]
     fields = list(LISTING_FIELDS.get(plan.kind) or ())
     return [_identity(row, fields) for row in rows]
 
 
 def render_blocked(tool, obj, resolution, native):
     """歧义/缺失/不完整时只回候选，绝不回事实。"""
-    result = (native['data']['results'] or [{}])[0]
+    result = (native["data"]["results"] or [{}])[0]
     return {
-        'status': 'unavailable',
-        'tool': tool,
-        'object': {k: v for k, v in obj.items() if v is not None},
-        'resolution': resolution,
-        'lookup': {'source': result.get('from'), 'scope': copy.deepcopy(result.get('scope', {})),
-                   'coverage': coverage_of(result)},
-        'coverage': {'scan': 'not_run', 'fields': 'not_run', 'listing': 'not_run',
-                     'matched': None, 'known_matches': None},
-        'execution': 'not_run',
-        'explanation': ('Definition lookup did not resolve the requested definition. Instance counting/reading was not executed; '
-                        'zero matching definitions does not establish absence of an instance ID or display name.'
-                        if resolution.get('field') == 'def_name' else
-                        'Object lookup did not resolve the requested identity. The requested reading/counting was not executed.'),
-        'measures': {},
-        'facts': [],
-        'not_read': ['object facts (the object was not resolved to exactly one match)'],
-        'semantics': [SEMANTICS['unknown'],
-                      'A display name or definition that is ambiguous, missing or only partially scanned is '
-                      'never resolved to a single object.'],
-        'issues': [{'reason': issue.get('code'), 'message': issue.get('message'),
-                    'path': list(issue.get('path') or [])} for issue in native.get('issues') or ()],
-        'observation_id': native.get('observation_id'),
+        "status": "unavailable",
+        "tool": tool,
+        "object": {k: v for k, v in obj.items() if v is not None},
+        "resolution": resolution,
+        "lookup": {
+            "source": result.get("from"),
+            "scope": copy.deepcopy(result.get("scope", {})),
+            "coverage": coverage_of(result),
+        },
+        "coverage": {
+            "scan": "not_run",
+            "fields": "not_run",
+            "listing": "not_run",
+            "matched": None,
+            "known_matches": None,
+        },
+        "execution": "not_run",
+        "explanation": (
+            "Definition lookup did not resolve the requested definition. Instance counting/reading was not executed; "
+            "zero matching definitions does not establish absence of an instance ID or display name."
+            if resolution.get("field") == "def_name"
+            else "Object lookup did not resolve the requested identity. The requested reading/counting was not executed."
+        ),
+        "measures": {},
+        "facts": [],
+        "not_read": ["object facts (the object was not resolved to exactly one match)"],
+        "semantics": [
+            SEMANTICS["unknown"],
+            "A display name or definition that is ambiguous, missing or only partially scanned is "
+            "never resolved to a single object.",
+        ],
+        "issues": [
+            {"reason": issue.get("code"), "message": issue.get("message"), "path": list(issue.get("path") or [])}
+            for issue in native.get("issues") or ()
+        ],
+        "observation_id": native.get("observation_id"),
     }

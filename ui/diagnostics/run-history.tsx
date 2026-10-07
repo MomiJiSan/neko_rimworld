@@ -1,13 +1,13 @@
 import { ReportsView } from "../components/reports-view"
 import { NavigationTabs } from "../components/navigation-tabs"
 import { Alert, Button, Card, DataTable, EmptyState, Field, Grid, InlineError, Input, JsonView, KeyValue, Stack, StatusBadge, TextBlock, Toolbar, ToolbarGroup } from "@neko/plugin-ui"
-import type { PanelController } from "../controller"
+import type { DiagnosticsController } from "./useDiagnostics"
 import { EventDetails } from "../components/event-details"
 import { RunResult } from "../components/run-result"
 import { UsageSummary } from "../components/usage-summary"
 import { levelTone, progressText, shortId, statusTone, text, timing } from "../format"
 
-export function SessionsPage({ c }: { c: PanelController }) {
+export function RunHistoryView({ c }: { c: DiagnosticsController }) {
   const detail = c.detail
   const events = Array.isArray(detail?.events) ? detail.events : []
   const visibleEvents = events.filter(event => (!c.eventFilter || text(event.event).toLowerCase().includes(c.eventFilter.toLowerCase())) && (c.runView !== "model" || text(event.event).startsWith("model_")))
@@ -55,7 +55,7 @@ export function SessionsPage({ c }: { c: PanelController }) {
           ]} />
         </Stack></Card>
         <Card title="会话详情"><Stack>
-          <Toolbar><ToolbarGroup><TextBlock text={shortId(c.selectedRunId)} /></ToolbarGroup><ToolbarGroup><Button disabled={!c.selectedRunId || c.detailLoading} onClick={c.loadDetail}>{c.detailLoading ? "读取中…" : "刷新详情"}</Button></ToolbarGroup></Toolbar>
+          <Toolbar><ToolbarGroup><TextBlock text={c.archive ? "工作中保存的执行审计" : shortId(c.selectedRunId)} /></ToolbarGroup><ToolbarGroup><Button disabled={(!c.selectedRunId && !c.archive) || c.detailLoading} onClick={c.loadDetail}>{c.detailLoading ? "读取中…" : "刷新详情"}</Button></ToolbarGroup></Toolbar>
           {c.detailError ? <InlineError title="详情刷新暂时失败" error={c.detailError} details="已保留上次成功读取的内容；运行跟踪不会停止，也不会自动切换到其他会话。" /> : null}
           {detail ? <Stack>
             <TextBlock text={text(detail.question, "咨询", 300)} />

@@ -4,75 +4,36 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
 from typing import Any
 
 from ..observation import Observation
 from .contracts import PreparedToolCall, ToolCall, ToolResult
-from .model_context import CONTEXT_TOOLS, MAX_SOURCE_CHARS, model_size, enabled
-
-MAX_TOOL_RESULT_CHARS = 131_072
-
-
-class ToolExecutionError(RuntimeError):
-    def __init__(
-        self, code: str, message: str, *, recoverable: bool = True, details: dict[str, Any] | None = None
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.recoverable = recoverable
-        self.details = details or {}
-
-
-ToolHandler = Callable[[dict[str, Any]], Awaitable[Mapping[str, Any] | Observation]]
-
-
-@dataclass(frozen=True, slots=True)
-class ToolSpec:
-    name: str
-    description: str
-    parameters: dict[str, Any]
-    handler: ToolHandler
-    terminal: bool = False
-    exclusive: bool = False
-    max_result_chars: int = MAX_TOOL_RESULT_CHARS
-
-    def schema(self) -> dict[str, Any]:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": dict(self.parameters),
-            },
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class ToolSetup:
-    tools: tuple[ToolSpec, ...]
-    context: str = ""
-    references_supported: bool = False
-    directory: dict[str, Any] | None = None
-    context_blocks: tuple[tuple[str, str], ...] = ()
-    #: Ready immutable Def-knowledge view for this consultation, attached by
-    #: compose_wiki_tools. Consumers (wiki tool, Def-name recovery) share one
-    #: frozen snapshot; None keeps every lookup on the native exact path.
-    knowledge_view: Any = None
-
-
-#: World observation contract versions this plugin serves. v2.3 adds the
-#: optional `objects` input (on-demand object detail; hazard/environment
-#: forensics stay unconditional). v2.2 connections keep full generation.
-WORLD_OBSERVATION_VERSIONS = frozenset({"world_observation.v2.2", "world_observation.v2.3"})
+from .model_context import CONTEXT_TOOLS, MAX_SOURCE_CHARS, model_size
+from .tool_contracts import (
+    MAX_TOOL_RESULT_CHARS as MAX_TOOL_RESULT_CHARS,
+)
+from .tool_contracts import (
+    WORLD_OBSERVATION_VERSIONS as WORLD_OBSERVATION_VERSIONS,
+)
+from .tool_contracts import (
+    ToolExecutionError as ToolExecutionError,
+)
+from .tool_contracts import (
+    ToolHandler as ToolHandler,
+)
+from .tool_contracts import (
+    ToolSetup as ToolSetup,
+)
+from .tool_contracts import (
+    ToolSpec as ToolSpec,
+)
 
 
 class ToolRegistry:
     def __init__(self, *, context_pruner=None, context_enabled=None) -> None:
         self._tools: dict[str, ToolSpec] = {}
         self._context_pruner = context_pruner
-        self._context_enabled = (enabled() or context_pruner is not None) if context_enabled is None else context_enabled
+        self._context_enabled = True if context_enabled is None else context_enabled
 
     def register(self, spec: ToolSpec) -> None:
         if type(spec.max_result_chars) is not int or not 1 <= spec.max_result_chars <= 32 * MAX_TOOL_RESULT_CHARS:
@@ -91,8 +52,9 @@ class ToolRegistry:
 
     def schemas(self) -> list[dict[str, Any]]:
         schemas = [self._tools[name].schema() for name in sorted(self._tools)]
-        if self._context_enabled and enabled():
+        if self._context_enabled:
             from .context_tools import model_tools
+
             return model_tools(schemas)
         return schemas
 
@@ -121,16 +83,20 @@ class ToolRegistry:
                 "Tool arguments must be a JSON object.",
                 recoverable=True,
             )
-        if enabled() and call.name in ('look', 'count') and isinstance(parsed.get('object'), dict):
+        if (call.name in ("look", "count")) and (isinstance(parsed.get("object"), dict)):
             # Preserve explicit selector intent without spending another model
             # round on an unambiguous nesting repair. Conflicts still fail.
-            for key in ('include_held', 'include_fogged', 'map'):
+            for key in ("include_held", "include_fogged", "map"):
                 if key not in parsed:
                     continue
-                if key in parsed['object'] and parsed['object'][key] != parsed[key]:
-                    return self.error_result(call, 'invalid_tool_arguments',
-                        'Conflicting selector values at object.' + key + ' and ' + key, recoverable=True)
-                parsed['object'] = {**parsed['object'], key: parsed.pop(key)}
+                if key in parsed["object"] and parsed["object"][key] != parsed[key]:
+                    return self.error_result(
+                        call,
+                        "invalid_tool_arguments",
+                        "Conflicting selector values at object." + key + " and " + key,
+                        recoverable=True,
+                    )
+                parsed["object"] = {**parsed["object"], key: parsed.pop(key)}
         properties = spec.parameters.get("properties")
         additional = spec.parameters.get("additionalProperties", True)
         if additional is False and isinstance(properties, dict):
@@ -207,19 +173,28 @@ class ToolRegistry:
 
         encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
         compact = self._context_enabled and spec.name in CONTEXT_TOOLS and not spec.terminal
-        over_source = len(encoded) > max(spec.max_result_chars, MAX_SOURCE_CHARS) if compact else len(encoded) > spec.max_result_chars
+        over_source = (
+            len(encoded) > max(spec.max_result_chars, MAX_SOURCE_CHARS)
+            if compact
+            else len(encoded) > spec.max_result_chars
+        )
         view = None
         over_view = False
         if compact and not over_source:
             if self._context_pruner is not None:
                 try:
-                    view = self._context_pruner.compile(value, max_view_chars=spec.max_result_chars,
-                        arguments=prepared.arguments)
+                    view = self._context_pruner.compile(
+                        value, max_view_chars=spec.max_result_chars, arguments=prepared.arguments
+                    )
                 except ValueError as error:
-                    if str(error) != 'evidence_view_limit':raise
+                    if str(error) != "evidence_view_limit":
+                        raise
                     over_view = True
             else:
-                over_view = model_size(value, arguments=prepared.arguments) > spec.max_result_chars
+                over_view = (
+                    model_size(value, arguments=prepared.arguments, context_enabled=True)
+                    > spec.max_result_chars
+                )
         if over_source or over_view:
             return ToolResult(
                 call_id=prepared.call.call_id,

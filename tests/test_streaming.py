@@ -102,9 +102,11 @@ async def test_truncated_stream_cannot_return_executable_tools(body):
 
 @pytest.mark.asyncio
 async def test_length_failure_retains_requested_limit_finish_reason_and_usage():
-    body = event({"content": "partial"}, "length") + event(usage={
-        "completion_tokens": 32768, "completion_tokens_details": {"reasoning_tokens": 32000}
-    }) + b"data: [DONE]\n\n"
+    body = (
+        event({"content": "partial"}, "length")
+        + event(usage={"completion_tokens": 32768, "completion_tokens_details": {"reasoning_tokens": 32000}})
+        + b"data: [DONE]\n\n"
+    )
     with pytest.raises(ModelClientError) as caught:
         await client_for(Chunks([body])).complete([], [], timeout=2)
     assert caught.value.code == "model_output_limit"

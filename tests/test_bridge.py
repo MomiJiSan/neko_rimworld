@@ -223,6 +223,82 @@ def test_pending_query_times_out_and_is_removed() -> None:
         assert server.stop(timeout=2)
 
 
+def test_late_timed_out_result_does_not_disconnect_or_complete_next_query() -> None:
+    store = BridgeStateStore(DiagnosticRing(max_events=50))
+    server = BridgeServer(TOKEN, store, port=0)
+    _, port = server.start()
+    client, hello, challenge = connect_and_challenge(port)
+    failures: list[BaseException] = []
+    result: dict[str, Any] = {}
+    requester = None
+    try:
+        finish_authentication(client, hello, challenge, TOKEN)
+        session = SessionDescriptor("5" * 32, "6" * 32, 1, 0)
+        write_frame(client, make_envelope(SESSION_OPEN, hello.connection_epoch, 2, session=session))
+        wait_until(lambda: server.session is not None)
+        with pytest.raises(BridgeQueryTimeout):
+            server.request("colony_snapshot", {}, timeout=0.15)
+        expired = read_until(client, QUERY_REQUEST)
+
+        def request() -> None:
+            try:
+                result.update(server.request("colony_snapshot", {}, timeout=2).to_dict())
+            except BaseException as exc:
+                failures.append(exc)
+
+        requester = threading.Thread(target=request)
+        requester.start()
+        active = read_until(client, QUERY_REQUEST)
+        write_frame(client, make_envelope(QUERY_RESULT, hello.connection_epoch, 3,
+            Payload(status=OK, data={"old": True}, issues=[]), session=session, request_id=expired.request_id))
+        write_frame(client, make_envelope(QUERY_RESULT, hello.connection_epoch, 4,
+            Payload(status=OK, data={"current": True}, issues=[]), session=session, request_id=active.request_id))
+        requester.join(timeout=3)
+        assert not requester.is_alive()
+        assert not failures
+        assert result["payload"]["data"] == {"current": True}
+        assert server.session == session
+        assert store.snapshot()["metrics"]["pending_requests"] == 0
+    finally:
+        client.close()
+        assert server.stop(timeout=2)
+        if requester is not None:
+            requester.join(timeout=3)
+
+
+@pytest.mark.parametrize("mismatch", ["unknown", "session", "waterline"])
+def test_expired_query_exception_does_not_accept_unrelated_results(mismatch) -> None:
+    from plugin.plugins.neko_rimworld.bridge import BridgeProtocolError
+    server = BridgeServer(TOKEN, port=0)
+    session = SessionDescriptor("5" * 32, "6" * 32, 3, 2)
+    request_id = "9" * 32
+    server._expired_requests[request_id] = ("1" * 32, session)
+    response_session = session
+    if mismatch == "unknown":
+        request_id = "8" * 32
+    elif mismatch == "session":
+        response_session = SessionDescriptor(session.colony_id, "7" * 32, 3, 2)
+    else:
+        response_session = SessionDescriptor(session.colony_id, session.load_epoch, 3, 1)
+    result = make_envelope(QUERY_RESULT, "1" * 32, 3,
+        Payload(status=OK, data={}, issues=[]), session=response_session, request_id=request_id)
+    with pytest.raises(BridgeProtocolError, match="matching pending request"):
+        server._handle_query_result(result)
+
+
+def test_session_stale_cancellation_retains_late_response_identity():
+    from plugin.plugins.neko_rimworld.bridge import BridgeNotConnected,_PendingQuery
+    server=BridgeServer(TOKEN,port=0)
+    session=SessionDescriptor("5"*32,"6"*32,3,2)
+    request_id="9"*32
+    item=_PendingQuery("1"*32,session,threading.Event(),time.monotonic())
+    server._pending[request_id]=item
+    server._fail_pending(BridgeNotConnected("Game session became stale"))
+    result=make_envelope(QUERY_RESULT,"1"*32,3,Payload(status=OK,data={},issues=[]),session=session,request_id=request_id)
+    server._handle_query_result(result)
+    assert item.error is not None and item.response is None
+
+
 def test_digest_capability_is_required_before_enqueue() -> None:
     from plugin.plugins.neko_rimworld.bridge import BridgeUnsupportedError
 

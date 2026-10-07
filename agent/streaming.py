@@ -137,7 +137,9 @@ class StreamAssembler:
                 if delta.get(key) is not None:
                     if key == "reasoning_content":
                         if not isinstance(delta[key], str):
-                            raise StreamProtocolError("model_invalid_stream", "Provider continuation content must be text.")
+                            raise StreamProtocolError(
+                                "model_invalid_stream", "Provider continuation content must be text."
+                            )
                         self.has_reasoning_content = True
                         self.reasoning_content.append(delta[key])
                     encoded = json.dumps(delta[key], ensure_ascii=False).encode("utf-8")
@@ -199,7 +201,9 @@ class StreamAssembler:
                 "Stream ended before complete finalization; no partial tool call was executed.",
             )
         if self.finish_reason == "length":
-            raise StreamProtocolError("model_output_limit", "The model reached the output token limit before completing its answer.")
+            raise StreamProtocolError(
+                "model_output_limit", "The model reached the output token limit before completing its answer."
+            )
         if self.finish_reason not in {"stop", "tool_calls"}:
             raise StreamProtocolError(
                 "model_output_incomplete", "The model output was truncated or could not finish normally."
@@ -226,10 +230,16 @@ class StreamAssembler:
             "model": self.model,
             "usage": self.usage,
             "choices": [
-                {"finish_reason": self.finish_reason, "message": {
-                    "content": "".join(self.text), "tool_calls": tools,
-                    **({"reasoning_content": "".join(self.reasoning_content)} if self.has_reasoning_content else {}),
-                }}
+                {
+                    "finish_reason": self.finish_reason,
+                    "message": {
+                        "content": "".join(self.text),
+                        "tool_calls": tools,
+                        **(
+                            {"reasoning_content": "".join(self.reasoning_content)} if self.has_reasoning_content else {}
+                        ),
+                    },
+                }
             ],
         }
 

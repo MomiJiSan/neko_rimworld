@@ -179,6 +179,9 @@ class BridgeServer:
         self._capabilities: frozenset[str] = frozenset()
         self._outbound: queue.Queue[_QueryRequest] = queue.Queue(maxsize=outbound_capacity)
         self._pending: dict[str, _PendingQuery] = {}
+        # A caller deadline does not cancel work already running in the game.
+        # Retain bounded correlation identities, never results or live waiters.
+        self._expired_requests: dict[str, tuple[str, SessionDescriptor]] = {}
         self._report_lock = threading.Lock()
         self._last_report: dict[str, Any] | None = None
         self._auth_failure_lock = threading.Lock()
@@ -198,6 +201,12 @@ class BridgeServer:
     @property
     def state_store(self) -> BridgeStateStore:
         return self._state
+
+    @property
+    def session(self) -> SessionDescriptor | None:
+        """Exact authenticated game identity, independent of the masked UI view."""
+        with self._connection_lock:
+            return self._session if self._client is not None and not self._session_stale else None
 
     @property
     def running(self) -> bool:
@@ -352,6 +361,10 @@ class BridgeServer:
         if not pending.event.wait(float(timeout)):
             with self._pending_lock:
                 timed_out = self._pending.pop(request_id, None) is pending
+                if timed_out:
+                    self._expired_requests[request_id] = (pending.connection_epoch, pending.session)
+                    if len(self._expired_requests) > self._pending_capacity:
+                        self._expired_requests.pop(next(iter(self._expired_requests)))
             self._update_metrics()
             if timed_out:
                 incident = self._record_issue(
@@ -669,7 +682,17 @@ class BridgeServer:
     def _handle_query_result(self, envelope: Envelope) -> None:
         with self._pending_lock:
             pending = self._pending.get(envelope.request_id)
+            expired = self._expired_requests.pop(envelope.request_id, None) if pending is None else None
         if pending is None:
+            if expired is not None:
+                epoch, session = expired
+                if (envelope.connection_epoch == epoch
+                    and self._same_session(envelope.session, session)
+                    and envelope.session is not None
+                    and envelope.session.snapshot_sequence >= session.snapshot_sequence):
+                    # Ignore exactly the expired response. Do not complete a
+                    # newer request or move the active session's waterline.
+                    return
             raise BridgeProtocolError(
                 "RimWorld returned a query result without a matching pending request.",
                 protocol_code="invalid_correlation",
@@ -727,9 +750,12 @@ class BridgeServer:
 
     def _fail_pending(self, error: BridgeError) -> None:
         with self._pending_lock:
-            pending = list(self._pending.values())
+            pending = list(self._pending.items())
             self._pending.clear()
-            for item in pending:
+            for request_id,item in pending:
+                self._expired_requests[request_id]=(item.connection_epoch,item.session)
+                if len(self._expired_requests)>self._pending_capacity:
+                    self._expired_requests.pop(next(iter(self._expired_requests)))
                 item.error = type(error)(str(error))
                 item.event.set()
         self._update_metrics()
@@ -809,6 +835,8 @@ class BridgeServer:
             self._session = None
             self._session_stale = False
             self._capabilities = frozenset()
+        with self._pending_lock:
+            self._expired_requests.clear()
 
     def _drain_outbound(self) -> None:
         while True:

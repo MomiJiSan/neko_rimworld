@@ -1,13 +1,13 @@
 import { Alert, Button, Card, CodeBlock, DataTable, EmptyState, Field, Grid, InlineError, JsonView, Markdown, useClipboard, Stack, StatusBadge, TextBlock, Toolbar, ToolbarGroup } from "@neko/plugin-ui"
-import type { PanelController } from "../controller"
+import type { DiagnosticsController } from "../diagnostics/useDiagnostics"
 import { text } from "../format"
 
-export function ReportsView({ c }: { c: PanelController }) {
+export function ReportsView({ c }: { c: DiagnosticsController }) {
   const clipboard = useClipboard()
   const report = c.report
   return <Grid cols={2}>
     <Card title="已保存的报告"><Stack>
-      <TextBlock text="完整报告与未完成草稿独立保存，插件重载后可取回；最多保留最近 100 份。只有明确引用才会进入新咨询。" />
+      <TextBlock text="完整报告与未完成草稿独立保存，插件重载后可取回；最多保留最近 100 份。同一工作的历史可按需检索；明确指定报告 ID 也可以追问。" />
       <Button disabled={c.reportLoading} onClick={c.loadReports}>{c.reportLoading ? "读取中…" : "刷新报告"}</Button>
       {c.reportError ? <InlineError title="报告读取失败" error={c.reportError} /> : null}
       <DataTable data={c.reportPage?.reports || []} rowKey="report_id" selectedKey={c.selectedReportId} onSelect={row => c.openReport(row.report_id)} maxRows={20} emptyText="尚无保存的报告。" columns={[

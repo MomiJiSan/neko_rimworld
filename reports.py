@@ -64,6 +64,7 @@ class ReportStore:
                 "question",
                 "source_run_id",
                 "reference_report_id",
+                "workspace_id",
                 "evidence_status",
                 "observation_count",
                 "samples",
@@ -177,10 +178,12 @@ class ReportStore:
                 return copy.deepcopy(record)
             return self._read_file(report_id)
 
-    def list(self, offset: int = 0, limit: int = 20) -> dict[str, Any]:
+    def list(self, offset: int = 0, limit: int = 20, *, workspace_id: str | None = None) -> dict[str, Any]:
         with self._lock:
             self._load_index()
             rows = sorted((self._index or {}).values(), key=lambda row: str(row.get("created_at")), reverse=True)
+            if workspace_id is not None:
+                rows = [row for row in rows if row.get("workspace_id") == workspace_id]
             return {
                 "reports": copy.deepcopy(rows[offset : offset + limit]),
                 "total": len(rows),

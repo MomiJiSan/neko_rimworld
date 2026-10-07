@@ -34,7 +34,14 @@ def summarize_usage(request_count: int, usages: Iterable[object]) -> dict[str, A
 
 def combine_run_summaries(summaries: list[dict[str, Any]]) -> dict[str, Any]:
     result = {"runs": len(summaries)}
-    for key in ("model_calls", "model_responses", "model_failures", "model_cancellations", "tool_calls", "tool_failures"):
+    for key in (
+        "model_calls",
+        "model_responses",
+        "model_failures",
+        "model_cancellations",
+        "tool_calls",
+        "tool_failures",
+    ):
         result[key] = sum(item.get(key, 0) for item in summaries)
     usage = {}
     coverage = {key: sum(item["usage"]["coverage"][key] for item in summaries) for key in TOKEN_FIELDS}

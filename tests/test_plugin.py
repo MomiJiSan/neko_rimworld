@@ -89,15 +89,19 @@ def make_plugin(config: object) -> tuple[NekoRimworldPlugin, list[dict[str, Any]
     plugin._state_store = BridgeStateStore(DiagnosticRing(max_events=20))
     plugin._bridge = None
     plugin._last_dashboard = {}
+    plugin._workspace_service = None
+    plugin._consultation_tasks = set()
     plugin._settings_action_nonce = "hosted-ui-action-nonce"
     plugin._reconfigure_lock = asyncio.Lock()
     plugin.get_logger = lambda _suffix=None: logger
     plugin.report_status = reports.append
     from plugin.plugins.neko_rimworld.reports import ReportStore
+
     plugin._reports = ReportStore()
     plugin._agent_audit = AgentAuditRegistry()
     plugin._catalog_tools = CatalogTools(lambda: plugin._bridge, plugin._agent_query_tool)
     from types import SimpleNamespace
+
     plugin._knowledge = SimpleNamespace(request_refresh=lambda: None, close=lambda: None, open_view=lambda: None)
     plugin._agent_runtime = AgentRuntime(
         observation_tools=[],
@@ -166,6 +170,10 @@ def test_only_consult_entry_is_visible_to_automatic_agent_routing() -> None:
     assert bridge_settings.metadata["agent_auto"] is False
     assert agent_settings.metadata["agent_auto"] is False
     assert probe.metadata["agent_auto"] is False
+    assert NekoRimworldPlugin.rimworld_report.__neko_event_meta__.metadata["agent_auto"] is False
+    assert set(consult.input_schema["properties"]) == {"question"}
+    assert consult.input_schema["required"] == ["question"]
+    assert consult.input_schema["additionalProperties"] is False
     assert agent_settings.input_schema["properties"]["api_key"]["writeOnly"] is True
     assert agent_settings.input_schema["properties"]["ui_nonce"]["writeOnly"] is True
 
@@ -180,6 +188,7 @@ def test_platform_agent_filter_sees_only_consult_entry() -> None:
         NekoRimworldPlugin.rimworld_consult,
         NekoRimworldPlugin.rimworld_report,
         NekoRimworldPlugin.probe_game_overview,
+        NekoRimworldPlugin.workspace_view,
     ):
         meta = method.__neko_event_meta__
         entries.append({"id": meta.id, "description": str(meta.description), "metadata": dict(meta.metadata)})
@@ -187,7 +196,7 @@ def test_platform_agent_filter_sees_only_consult_entry() -> None:
 
     visible = executor._agent_visible_plugin_entries({"id": "neko_rimworld", "entries": entries})
 
-    assert [entry["id"] for entry in visible] == ["rimworld_consult", "rimworld_report"]
+    assert [entry["id"] for entry in visible] == ["rimworld_consult"]
 
 
 def query_response(status="ok", data=None, error_code=None, message=None):
@@ -290,6 +299,26 @@ async def test_hosted_probe_uses_colony_object_overview_section() -> None:
     assert calls == [("template_query", {"requests": [{"target": {"type": "colony"}, "sections": ["overview"]}]}, 2.5)]
     assert result.value["response"] == observed.to_dict()
     assert result.value["status"] == "ok"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["inspect_state", "inspect_route", "survey_space", "inspect_actions", "inspect_threats", "query_catalog"])
+async def test_agent_transport_allows_native_cooperative_read_lifetime(operation) -> None:
+    from plugin.plugins.neko_rimworld.bridge import BridgeQueryTimeout
+    observed = query_response(data={"status": "partial", "read_ms": 8000})
+
+    class Bridge:
+        def request(self, operation, arguments, timeout):
+            # A valid eight-second partial read must reach the caller; the
+            # old 2.5-second deadline abandoned it before completion.
+            if timeout <= 8:
+                raise BridgeQueryTimeout("Native operation still running")
+            return observed
+
+    plugin, _reports = make_plugin({})
+    plugin._bridge = Bridge()
+    result = await plugin._agent_query_tool({"operation": operation, "arguments": {}})
+    assert result.value["response"]["payload"]["data"]["read_ms"] == 8000
 
 
 @pytest.mark.asyncio
@@ -672,11 +701,19 @@ async def test_consult_requires_model_configuration() -> None:
 async def test_output_budget_save_validate_and_context():
     plugin, _ = make_plugin({})
     for value in (True, 64.5, 131073):
-        result = await plugin.save_agent_settings(base_url="https://example.com/v1", model="test",
-            budgets={"max_output_tokens": value}, ui_nonce=plugin._settings_action_nonce)
+        result = await plugin.save_agent_settings(
+            base_url="https://example.com/v1",
+            model="test",
+            budgets={"max_output_tokens": value},
+            ui_nonce=plugin._settings_action_nonce,
+        )
         assert result.error.code == "invalid_agent_settings"
-    result = await plugin.save_agent_settings(base_url="https://example.com/v1", model="test",
-        budgets={"max_output_tokens": 32768}, ui_nonce=plugin._settings_action_nonce)
+    result = await plugin.save_agent_settings(
+        base_url="https://example.com/v1",
+        model="test",
+        budgets={"max_output_tokens": 32768},
+        ui_nonce=plugin._settings_action_nonce,
+    )
     assert result.is_ok()
     assert plugin.config.updates[-1]["neko_rimworld"]["agent"]["max_output_tokens"] == 32768
     context = await plugin.dashboard_ui_context()
@@ -689,8 +726,9 @@ async def test_consult_returns_only_independent_agent_result() -> None:
         def __init__(self) -> None:
             self.calls: list[tuple[str, AgentModelSettings]] = []
 
-        async def run(self, question: str, settings: AgentModelSettings) -> dict[str, Any]:
+        async def run(self, question: str, settings: AgentModelSettings, *, capabilities=()) -> dict[str, Any]:
             self.calls.append((question, settings))
+            assert [tool.name for tool in capabilities] == ["workspace_history"]
             return {
                 "status": "ok",
                 "answer": "The colony is stable.",
@@ -711,8 +749,9 @@ async def test_consult_returns_only_independent_agent_result() -> None:
     result = await plugin.rimworld_consult(question="  How is the colony?  ")
 
     assert result.value["answer"] == "The colony is stable."
-    assert result.value["summary"] == "The colony is stable."
-    assert result.value["reply"] == "The colony is stable."
+    assert result.value["summary"] == "Standalone consultation; no ongoing workspace attached. The colony is stable."
+    assert result.value["reply"] == result.value["summary"]
+    assert result.value["continuity"]["reason"] == "caller_identity_unavailable"
     assert runtime.calls == [("How is the colony?", plugin._agent_settings)]
 
 
@@ -826,7 +865,7 @@ def test_manifest_entries_support_discovery_without_importing_plugin_class():
             assert actual[entry_id].get(key, default) == expected[entry_id].get(key, default), (entry_id, key)
     assert "rimworld_consult" in _entry_ids_from_meta({"entries_preview": static})
     assert [entry["id"] for entry in static if entry.get("metadata", {}).get("agent_auto") is not False] == [
-        "rimworld_consult", "rimworld_report"
+        "rimworld_consult",
     ]
 
 

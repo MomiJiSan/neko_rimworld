@@ -1,4 +1,5 @@
 """Select literal field paths and return whole records within a byte budget."""
+
 from __future__ import annotations
 
 import json
@@ -15,7 +16,7 @@ def byte_size(value: Any) -> int:
 def bounded_text(value: str, limit: int) -> str:
     value = value.encode("utf-8", "replace").decode("utf-8")
     while byte_size(value) > limit + 2:
-        value = value[:max(0, len(value) - max(1, len(value) // 4))]
+        value = value[: max(0, len(value) - max(1, len(value) // 4))]
     return value
 
 
@@ -32,7 +33,7 @@ def under(path: str, prefix: str) -> bool:
 def group_path(path: str) -> str:
     # Keep the nearest indexed record's values together. Scalars have no group.
     if "]" in path:
-        return path[:path.rfind("]") + 1]
+        return path[: path.rfind("]") + 1]
     return path.rsplit(".", 1)[0] if "." in path else path
 
 
@@ -43,9 +44,10 @@ def select_groups(facts: list[dict], requested: list[str]) -> tuple[list[tuple[s
             grouped.setdefault(group_path(fact["name"]), []).append(fact)
         # Ordinary records precede null and reflection metadata groups, without
         # imposing any game-specific whitelist or changing values inside a group.
-        return sorted(grouped.items(), key=lambda item: all(
-            f.get("type") == "null" or f["name"].endswith((".$type", ".$ref"))
-            for f in item[1])), []
+        return sorted(
+            grouped.items(),
+            key=lambda item: all(f.get("type") == "null" or f["name"].endswith((".$type", ".$ref")) for f in item[1]),
+        ), []
     prefixes, missing = [], []
     for request in requested:
         matching = [f for f in facts if under(f["name"], request)]
@@ -69,7 +71,7 @@ def directory(facts: list[dict], prefixes: list[str], limit: int = 48) -> tuple[
             name = fact["name"]
             if prefix and not under(name, prefix):
                 continue
-            suffix = name[len(prefix):].lstrip(".")
+            suffix = name[len(prefix) :].lstrip(".")
             if not suffix:
                 child = name
             else:
@@ -86,26 +88,41 @@ def directory(facts: list[dict], prefixes: list[str], limit: int = 48) -> tuple[
     return values[:limit], len(values) > limit
 
 
-def render_entry(entry: dict, requested: list[str], budget: int,
-                 read_label: Callable[[str], str | None]) -> dict:
+def render_entry(entry: dict, requested: list[str], budget: int, read_label: Callable[[str], str | None]) -> dict:
     """No fact/path/type is clipped. Omitted groups stay distinct from nulls."""
-    result = {key: bounded_text(entry[key], 768 if key == "description" else 256)
-              for key in ("type", "def_name", "label", "description", "source_mod", "package_id")}
+    result = {
+        key: bounded_text(entry[key], 768 if key == "description" else 256)
+        for key in ("type", "def_name", "label", "description", "source_mod", "package_id")
+    }
     result["key"] = entry["key"]
     metadata_cut = any(result[key] != entry[key] for key in result)
     if len(entry["key"]) > 4096 or byte_size(entry["key"]) > budget - 1400:
-        result.update(key=None, key_unavailable="exceeds_query_limit" if len(entry["key"]) > 4096 else "result_byte_limit")
+        result.update(
+            key=None, key_unavailable="exceeds_query_limit" if len(entry["key"]) > 4096 else "result_byte_limit"
+        )
         metadata_cut = True
     diagnostics = sorted(entry.get("diagnostics", []), key=lambda d: d["kind"] != "incomplete")
     result["diagnostics"] = [{k: bounded_text(d[k], 128) for k in ("path", "kind", "reason")} for d in diagnostics[:4]]
     result["diagnostics_truncated"] = result["diagnostics"] != diagnostics
     result["source_truncated"] = entry["truncated"] or any(d["kind"] == "incomplete" for d in diagnostics)
     groups, missing = select_groups(entry["facts"], requested)
-    result.update(facts=[], groups=[], related=[], related_truncated=False,
-                  missing_fields=missing, not_read=[], not_read_count=0,
-                  read_complete=False, directory=[], directory_truncated=False, field_names=[],
-                  response_truncated=False, truncated=False,
-                  context_not_read=[], context_not_read_count=0)
+    result.update(
+        facts=[],
+        groups=[],
+        related=[],
+        related_truncated=False,
+        missing_fields=missing,
+        not_read=[],
+        not_read_count=0,
+        read_complete=False,
+        directory=[],
+        directory_truncated=False,
+        field_names=[],
+        response_truncated=False,
+        truncated=False,
+        context_not_read=[],
+        context_not_read_count=0,
+    )
     selected: set[str] = set()
 
     def append_group(path: str, rows: list[dict]) -> bool:
@@ -139,8 +156,12 @@ def render_entry(entry: dict, requested: list[str], budget: int,
 
     # Read completeness describes what was requested. Optional sibling context
     # can be omitted while every explicitly requested leaf is still complete.
-    omitted = [p for p in requested if p not in missing and any(
-        under(f["name"], p) and f["name"].casefold() not in selected for f in entry["facts"])]
+    omitted = [
+        p
+        for p in requested
+        if p not in missing
+        and any(under(f["name"], p) and f["name"].casefold() not in selected for f in entry["facts"])
+    ]
     if not requested:
         omitted = narrowed[:]
     result["context_not_read"] = narrowed[:8]

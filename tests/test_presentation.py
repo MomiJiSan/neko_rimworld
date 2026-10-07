@@ -145,12 +145,12 @@ def test_reference_and_conclusion_coexist_past_180_total_tokens():
     conclusion = "结论："
     while count_handoff_tokens(conclusion + "判断。")[0] <= 170:
         conclusion += "判断。"
-    assert count_handoff_tokens(conclusion)[0] <= 180      # 模型额度内
+    assert count_handoff_tokens(conclusion)[0] <= 180  # 模型额度内
 
     result = draft.apply({"answer": [{"text": conclusion}, part()]}, observations=[observed()])
-    assert conclusion in result["agent_text"]               # 判断在
-    assert "至少12" in result["agent_text"]                # 程序渲染的事实在
-    assert count_handoff_tokens(result["agent_text"])[0] > 180   # 合计超过 180，但被接受
+    assert conclusion in result["agent_text"]  # 判断在
+    assert "至少12" in result["agent_text"]  # 程序渲染的事实在
+    assert count_handoff_tokens(result["agent_text"])[0] > 180  # 合计超过 180，但被接受
 
 
 def test_restating_a_referenced_value_in_text_is_rejected():
@@ -162,8 +162,9 @@ def test_restating_a_referenced_value_in_text_is_rejected():
     assert caught.value.code == "invalid_evidence"
     assert "30" in str(caught.value)
     # 说“意思”而不是“数字”就通过。
-    result = draft.apply({"answer": [{"text": "该读数见上，单位与取值已由程序给出。"}, part()]},
-                         observations=[complete])
+    result = draft.apply(
+        {"answer": [{"text": "该读数见上，单位与取值已由程序给出。"}, part()]}, observations=[complete]
+    )
     assert "30" in result["agent_text"]
 
 
@@ -179,8 +180,7 @@ def test_reference_path_count_is_bounded_in_the_models_own_unit():
     )
 
     draft = SubmissionDraft()
-    too_many = [{"observation_id": "one",
-                 "paths": [f"/reading/p{i}" for i in range(MAX_PATHS_PER_REFERENCE + 1)]}]
+    too_many = [{"observation_id": "one", "paths": [f"/reading/p{i}" for i in range(MAX_PATHS_PER_REFERENCE + 1)]}]
     # apply() 把渲染层的 EvidenceError 折成 SubmissionPatchError 交给模型修正。
     with pytest.raises(SubmissionPatchError) as caught:
         draft.apply({"answer": too_many}, observations=[observed()])
@@ -190,9 +190,10 @@ def test_reference_path_count_is_bounded_in_the_models_own_unit():
     # 于是先撞单份上限。合计上限必须小于 4×单份上限，否则它永远不会生效。
     assert MAX_TOTAL_REFERENCE_PATHS < 4 * MAX_PATHS_PER_REFERENCE
     identities = [f"obs{i}" for i in range(4)]
-    parts = [{"observation_id": identity,
-              "paths": [f"/reading/p{part}_{i}" for i in range(MAX_PATHS_PER_REFERENCE)]}
-             for part, identity in enumerate(identities)]
+    parts = [
+        {"observation_id": identity, "paths": [f"/reading/p{part}_{i}" for i in range(MAX_PATHS_PER_REFERENCE)]}
+        for part, identity in enumerate(identities)
+    ]
     with pytest.raises(SubmissionPatchError) as total:
         draft.apply({"answer": parts}, observations=[observed(name) for name in identities])
     assert str(MAX_TOTAL_REFERENCE_PATHS) in str(total.value)
@@ -201,8 +202,10 @@ def test_reference_path_count_is_bounded_in_the_models_own_unit():
 def test_single_digit_prose_numbers_are_allowed():
     """单位数出现在普通措辞里不该被当成重写读数。"""
     draft = SubmissionDraft()
-    result = draft.apply({"answer": [{"text": "本次共读取 3 条记录，细节见上。"}, part()]},
-                         observations=[observed(exact=30, lower=30, complete=True)])
+    result = draft.apply(
+        {"answer": [{"text": "本次共读取 3 条记录，细节见上。"}, part()]},
+        observations=[observed(exact=30, lower=30, complete=True)],
+    )
     assert "3 条记录" in result["agent_text"]
 
 

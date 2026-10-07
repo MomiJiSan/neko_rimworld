@@ -20,6 +20,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 def test_nonreference_prompt_separates_short_conclusion_from_complete_facts():
     from plugin.plugins.neko_rimworld.agent.prompt import build_system_prompt
+
     prompt = build_system_prompt(4, references_supported=False)
     assert "Observation reference parts are unavailable" in prompt
     assert "detail holds the remaining requested findings and evidence" in prompt
@@ -38,8 +39,15 @@ def response():
 @pytest.mark.asyncio
 async def test_public_query_replaces_legacy_tools_without_changing_observations():
     source = catalog()
-    source["public_query"] = {"version": "public_query.v1", "parameters": {"type": "object", "properties": {"requests": {"type": "array"}}}, "rules": "canonical fields", "roots": []}
-    source["public_query"]["field_notes"] = {"HealthSummary": {"health_percent": "A native aggregate, not a causal explanation."}}
+    source["public_query"] = {
+        "version": "public_query.v1",
+        "parameters": {"type": "object", "properties": {"requests": {"type": "array"}}},
+        "rules": "canonical fields",
+        "roots": [],
+    }
+    source["public_query"]["field_notes"] = {
+        "HealthSummary": {"health_percent": "A native aggregate, not a causal explanation."}
+    }
     calls = []
 
     async def query(arguments):
@@ -59,9 +67,12 @@ async def test_public_query_replaces_legacy_tools_without_changing_observations(
 
 def _public_source(**public):
     source = catalog()
-    source["public_query"] = {"version": "public_query.v2",
-                             "parameters": {"type": "object", "properties": {"requests": {"type": "array"}}},
-                             "rules": "canonical fields", "roots": []}
+    source["public_query"] = {
+        "version": "public_query.v2",
+        "parameters": {"type": "object", "properties": {"requests": {"type": "array"}}},
+        "rules": "canonical fields",
+        "roots": [],
+    }
     source["public_query"].update(public)
     return source
 
@@ -84,10 +95,10 @@ async def test_fact_references_are_opt_in_not_the_shipped_default():
 
 
 @pytest.mark.asyncio
-async def test_reference_mode_can_be_selected_per_run(monkeypatch):
+async def test_live_reference_mode_remains_disabled_even_when_advertised(monkeypatch):
     advertised = _public_source(references={"version": "observed_values.v1"})
     monkeypatch.setenv("NEKO_PUBLIC_REFERENCES", "1")
-    assert make_game_tools(advertised, _noop_query).references_supported is True
+    assert make_game_tools(advertised, _noop_query).references_supported is False
     # 旧 Mod 没声明能力时，即使显式选择也不能发明引用。
     assert make_game_tools(_public_source(), _noop_query).references_supported is False
     monkeypatch.setenv("NEKO_PUBLIC_REFERENCES", "0")
@@ -282,7 +293,9 @@ async def test_object_sections_batch_is_one_tool_call_with_schema_in_model_conte
                         ),
                     ),
                 )
-            payload = json.loads(next(m['content'] for m in reversed(messages) if m['role'] == 'tool'))["data"]["response"]["payload"]
+            payload = json.loads(next(m["content"] for m in reversed(messages) if m["role"] == "tool"))["data"][
+                "response"
+            ]["payload"]
             pawn = payload["data"][payload["execution"]["bindings"][1]["root"]]
             assert pawn["id"] == "pawn1"
             assert {"status", "mood", "health", "equipment", "profile"}.issubset(pawn)

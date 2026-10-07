@@ -65,11 +65,13 @@ def test_import_accepts_metadata_after_entries_and_preserves_unicode(tmp_path):
     assert view.metadata["language"] == "中文"
     assert view.metadata["warnings"] == ["缺少来源"]
     assert view.read_entry(source_entry["key"]) == source_entry
-    assert view.search_rows() == [{
-        "key": source_entry["key"],
-        "names": ["钢铁"],
-        "description": "用于建造的材料",
-    }]
+    assert view.search_rows() == [
+        {
+            "key": source_entry["key"],
+            "names": ["钢铁"],
+            "description": "用于建造的材料",
+        }
+    ]
 
 
 def test_duplicate_entry_keys_and_corrupt_source_are_rejected(tmp_path):
@@ -191,7 +193,10 @@ library.close()
 """
     result = subprocess.run(
         [sys.executable, "-c", code, str(source_directory), str(cache_directory)],
-        check=True, capture_output=True, text=True, timeout=15,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
     )
     assert json.loads(result.stdout.splitlines()[-1]) == {"entry": entry, "sha256": expected_sha256}
 
@@ -210,8 +215,7 @@ def test_concurrent_views_use_independent_read_connections(tmp_path):
     with ThreadPoolExecutor(max_workers=8) as executor:
         results = list(executor.map(read, views))
     assert all(result[0] == entries[0] for result in results)
-    assert all({row["key"] for row in result[1]} == {entry["key"] for entry in entries}
-               for result in results)
+    assert all({row["key"] for row in result[1]} == {entry["key"] for entry in entries} for result in results)
 
 
 def test_background_refresh_imports_source_created_after_first_missing_attempt(tmp_path, monkeypatch):
@@ -312,10 +316,13 @@ def test_concurrent_searches_share_lightweight_directory_for_one_generation(tmp_
     with ThreadPoolExecutor(max_workers=8) as executor:
         directories = list(executor.map(search, range(8)))
     assert all(rows is directories[0] for rows in directories)
-    assert directories[0] == [{
-        "key": source_entry["key"], "names": ["steel", "钢铁"],
-        "description": "a definition",
-    }]
+    assert directories[0] == [
+        {
+            "key": source_entry["key"],
+            "names": ["steel", "钢铁"],
+            "description": "a definition",
+        }
+    ]
     assert old_view.read_entry(source_entry["key"]) == source_entry
 
     replacement = make_entry("Gold", "黄金")

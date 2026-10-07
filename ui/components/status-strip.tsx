@@ -1,8 +1,8 @@
 import { Button, StatusBadge, Toolbar, ToolbarGroup } from "@neko/plugin-ui"
 import { statusTone, text } from "../format"
-import type { PanelController } from "../controller"
+import type { PanelServices } from "../services"
 
-export function StatusStrip({ c }: { c: PanelController }) {
+export function StatusStrip({ c }: { c: PanelServices & { running: boolean } }) {
   const status = text(c.state.status, "unavailable")
   return <Toolbar>
     <ToolbarGroup>
