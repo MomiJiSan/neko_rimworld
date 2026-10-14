@@ -9,12 +9,20 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 
 from ..state import redact_text
+from . import handoff
 from .audit import AgentAuditCapacityError, AgentAuditLedger, AgentAuditRegistry, AgentRunState
 from .contracts import PreparedToolCall
-from .handoff import HandoffValidationError, SubmissionPatchError, attach_agent_handoff, count_handoff_tokens
+from .handoff import (
+    HandoffValidationError,
+    SubmissionPatchError,
+    attach_agent_handoff,
+    count_handoff_tokens,
+)
 from .model_client import AgentModelSettings, ModelClient, ModelClientError, OpenAICompatibleModelClient
 from .prompt import build_runtime_advisory, build_system_prompt
 from .session import AgentRunSession
+from .tokenizer import TokenCounter, acquire_token_counter
+from .tokenizer_work import run_tokenizer_work
 from .tools import ToolExecutionError, ToolRegistry, ToolSetup, ToolSpec
 
 
@@ -28,6 +36,8 @@ class LoggerLike(Protocol):
 
 ModelFactory = Callable[[AgentModelSettings], ModelClient]
 MAX_MODEL_ATTEMPTS = 3
+HANDOFF_TIMEOUT_SECONDS = 4.0
+CANCEL_HANDOFF_TIMEOUT_SECONDS = 1.0
 MODEL_RETRY_DELAYS_SECONDS = (0.5, 1.5)
 _RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 _RETRYABLE_PROVIDER_MARKERS = (
@@ -108,7 +118,7 @@ class AgentRuntime:
             # the result/report must not require another append or transition.
             summary = ledger.summary()
             cancelled = task is not None and task.cancelling() > 0
-            result = attach_agent_handoff({
+            result = {
                 "status": "cancelled" if cancelled else "degraded",
                 "answer": session.submission.full_text or session.last_assistant_content
                 or "The consultation reached its audit capacity before completing.",
@@ -119,7 +129,15 @@ class AgentRuntime:
                 "audit": {"run_id": ledger.run_id, "error_code": "audit_capacity_reached",
                           "cycles": summary["cycle"], "model_calls": summary["model_calls"],
                           "tool_calls": summary["tool_calls"], "duration_ms": summary["duration_ms"]},
-            })
+            }
+            if cancelled:
+                await self._retain_cancelled(question, ledger, session, reference_report, source=result)
+                raise asyncio.CancelledError
+            try:
+                result = await self._attach_handoff(result, session)
+            except asyncio.CancelledError:
+                await self._retain_cancelled(question, ledger, session, reference_report, source=result)
+                raise
             await self._retain_report(result, question, ledger, session, reference_report)
             ledger.set_result(result)
             self._logger.warning("[agent] audit capacity reached run_id={}", ledger.run_id)
@@ -137,6 +155,9 @@ class AgentRuntime:
         try:
             try:
                 async with asyncio.timeout(settings.run_budget_seconds):
+                    counter = await acquire_token_counter()
+                    self._assert_run_owner(ledger)
+                    session.token_counter = counter
                     result = await self._run_loop(question, settings, ledger, session, reference_report)
             except TimeoutError:
                 result = self._finish_degraded(
@@ -147,28 +168,15 @@ class AgentRuntime:
                     fallback_answer=session.submission.full_text or session.last_assistant_content,
                 )
             result["draft"] = session.submission.snapshot()
-            result = attach_agent_handoff(result)
+            result = await self._attach_handoff(result, session)
+            ledger.transition(AgentRunState.COMPLETED, "run_completed", {"status": result["status"]})
             ledger.record("handoff_built", result.get("delivery"))
             await self._retain_report(result, question, ledger, session, reference_report)
             self._log_handoff(ledger.run_id, result)
             ledger.set_result(result)
             return result
         except asyncio.CancelledError:
-            if ledger.state not in {AgentRunState.CANCELLED, AgentRunState.COMPLETED, AgentRunState.FAILED}:
-                ledger.transition(AgentRunState.CANCELLED, "run_cancelled")
-            cancelled = attach_agent_handoff(
-                {
-                    "status": "cancelled",
-                    "answer": session.submission.full_text
-                    or "The consultation was cancelled before a complete report was submitted.",
-                    "observations": session.observations,
-                    "draft": session.submission.snapshot(),
-                    "audit": {"run_id": ledger.run_id, "error_code": "agent_cancelled"},
-                }
-            )
-            await self._retain_report(cancelled, question, ledger, session, reference_report)
-            ledger.set_result(cancelled)
-            self._logger.info("[agent] run cancelled run_id={}", ledger.run_id)
+            await self._retain_cancelled(question, ledger, session, reference_report)
             raise
         except AgentAuditCapacityError:
             raise
@@ -198,12 +206,49 @@ class AgentRuntime:
                     already_degraded=ledger.state == AgentRunState.DEGRADED,
                 )
             result["draft"] = session.submission.snapshot()
-            result = attach_agent_handoff(result)
+            try:
+                result = await self._attach_handoff(result, session)
+            except asyncio.CancelledError:
+                await self._retain_cancelled(question, ledger, session, reference_report)
+                raise
+            if ledger.state == AgentRunState.FINALIZING:
+                ledger.transition(AgentRunState.COMPLETED, "run_completed", {"status": result["status"]})
             ledger.record("handoff_built", result.get("delivery"))
             await self._retain_report(result, question, ledger, session, reference_report)
             self._log_handoff(ledger.run_id, result)
             ledger.set_result(result)
             return result
+
+    async def _retain_cancelled(
+        self, question: str, ledger: AgentAuditLedger, session: AgentRunSession,
+        reference_report: Mapping[str, Any] | None, *, source: Mapping[str, Any] | None = None,
+    ) -> None:
+        if ledger.state not in {AgentRunState.CANCELLED, AgentRunState.COMPLETED, AgentRunState.FAILED}:
+            ledger.transition(AgentRunState.CANCELLED, "run_cancelled")
+        source = {
+            **(source if source is not None else {}),
+            "status": "cancelled",
+            "answer": session.submission.full_text
+            or "The consultation was cancelled before a complete report was submitted.",
+            "observations": session.observations,
+            "draft": session.submission.snapshot(),
+            "audit": source.get("audit") if source is not None
+            else {"run_id": ledger.run_id, "error_code": "agent_cancelled"},
+        }
+        # Keep a terminal receipt even if another cancel interrupts cleanup.
+        # This operational fallback uses only bounded UTF-8 byte lengths (the
+        # saved report is <=12,000 chars), never initialization or BPE encoding.
+        receipt = handoff.attach_agent_handoff(source, counter=TokenCounter())
+        ledger.set_result(receipt)
+        try:
+            async with asyncio.timeout(CANCEL_HANDOFF_TIMEOUT_SECONDS):
+                cancelled = await self._attach_handoff(source, session)
+        except TimeoutError:
+            cancelled = receipt
+            self._logger.warning("[agent] cancellation token projection timed out run_id={}", ledger.run_id)
+        await self._retain_report(cancelled, question, ledger, session, reference_report)
+        ledger.set_result(cancelled)
+        self._logger.info("[agent] run cancelled run_id={}", ledger.run_id)
 
     async def cancel_all(self) -> None:
         current = asyncio.current_task()
@@ -212,6 +257,48 @@ class AgentRuntime:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _assert_run_owner(self, ledger: AgentAuditLedger) -> None:
+        if self._active_tasks.get(ledger.run_id) is not asyncio.current_task():
+            raise asyncio.CancelledError
+
+    async def _attach_handoff(
+        self, result: Mapping[str, Any], session: AgentRunSession,
+    ) -> dict[str, Any]:
+        # Only a detached projection crosses the thread boundary. The run's
+        # chosen counter remains fixed through normal, error and cancel exits.
+        try:
+            async with asyncio.timeout(HANDOFF_TIMEOUT_SECONDS):
+                projected = await run_tokenizer_work(
+                    attach_agent_handoff, dict(result), counter=session.token_counter,
+                )
+        except (TimeoutError, RuntimeError) as error:
+            self._assert_run_owner(session.ledger)
+            # A saturated pool must not extend finalization indefinitely after
+            # the model/run deadline. Keep the saved report, but do not use a
+            # different counter to approve a previously validated agent text.
+            source = dict(result)
+            if source.get("status") == "ok":
+                source["status"] = "degraded"
+            source["agent_text"] = None
+            answer = source.get("answer")
+            bounded_answer = not isinstance(answer, str) or len(answer) <= handoff.MAX_FULL_TEXT_CHARS
+            if not bounded_answer:
+                source["answer"] = "Token projection was unavailable; review the full result in the plugin panel."
+            projected = handoff.attach_agent_handoff(source, counter=TokenCounter())
+            if not bounded_answer:
+                projected["answer"] = answer
+                projected["delivery"]["full_answer_tokens"] = None
+            projected["delivery"]["error_code"] = (
+                "handoff_projection_timeout" if isinstance(error, TimeoutError)
+                else "handoff_projection_unavailable"
+            )
+            self._logger.warning(
+                "[agent] token projection unavailable run_id={} error_type={}",
+                session.ledger.run_id, type(error).__name__,
+            )
+        self._assert_run_owner(session.ledger)
+        return projected
 
     def _log_handoff(self, run_id: str, result: Mapping[str, Any]) -> None:
         delivery = result.get("delivery")
@@ -281,7 +368,8 @@ class AgentRuntime:
 
         async def submit(arguments: dict[str, Any]) -> Mapping[str, Any]:
             try:
-                validated = session.submission.apply(arguments)
+                validated = await session.submission.apply_async(arguments, counter=session.token_counter)
+                self._assert_run_owner(ledger)
                 ledger.set_draft(session.submission.snapshot())
                 ledger.record(
                     "submission_patch_accepted",
@@ -597,13 +685,21 @@ class AgentRuntime:
             if turn.content:
                 # A short plain-text repair can serve as the handoff without replacing the saved full report.
                 has_full = session.submission.full_text is not None
+                short_handoff = False
+                if has_full:
+                    content_tokens = await run_tokenizer_work(
+                        count_handoff_tokens, turn.content, counter=session.token_counter,
+                    )
+                    self._assert_run_owner(ledger)
+                    short_handoff = content_tokens[0] <= 180
                 patch = (
                     {"agent_text": turn.content}
-                    if has_full and count_handoff_tokens(turn.content)[0] <= 180
+                    if short_handoff
                     else {"full_text": turn.content, "agent_text": turn.content}
                 )
                 try:
-                    validated = session.submission.apply(patch)
+                    validated = await session.submission.apply_async(patch, counter=session.token_counter)
+                    self._assert_run_owner(ledger)
                     ledger.set_draft(session.submission.snapshot())
                 except HandoffValidationError as exception:
                     ledger.set_draft(session.submission.snapshot())
@@ -649,7 +745,6 @@ class AgentRuntime:
                 "agent_text_sha256": hashlib.sha256(agent_text.encode("utf-8", "replace")).hexdigest(),
             },
         )
-        ledger.transition(AgentRunState.COMPLETED, "run_completed")
         summary = ledger.summary()
         return {
             "status": "ok",
@@ -690,7 +785,6 @@ class AgentRuntime:
             "degraded_final_created",
             {"answer": answer, "error_code": error_code},
         )
-        ledger.transition(AgentRunState.COMPLETED, "run_completed", {"status": "degraded"})
         summary = ledger.summary()
         return {
             "status": "degraded",

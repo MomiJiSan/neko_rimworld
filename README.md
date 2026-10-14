@@ -103,6 +103,49 @@ Network requests, cancellation, response sizes, and total wall time remain
 bounded for process safety. If the model cannot finish normally, the entry
 returns a structured `degraded` result instead of stopping the plugin.
 
+## Offline handoff token counting
+
+The plugin bundles the official `o200k_base.tiktoken` vocabulary in
+`agent/data/`, SHA256
+`446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d`.
+The vocabulary and encoding specification come from OpenAI's
+[tiktoken0.12.0](https://github.com/openai/tiktoken/blob/0.12.0/tiktoken_ext/openai_public.py);
+its MIT notice is included as `agent/data/LICENSE.tiktoken`.
+Initialization never downloads a vocabulary or waits for the host tokenizer
+registry. Vocabulary loading, encoding construction and BPE text counting run in
+workers, leaving the plugin event loop available for panel context requests.
+
+Pure validation and projection use a dedicated pool of two counting workers.
+At most four jobs can be queued or running, including jobs whose consumers have
+cancelled; a slot is released only when the actual job finishes. Admission is
+asynchronous, so a saturated host default executor cannot block token counting.
+Forked processes create their own tokenizer provider and counting pool.
+The pool starts all workers before accepting business jobs; a thread startup
+failure cannot leave an unaccounted job queued for later execution.
+
+Each consultation keeps one counter snapshot for validation and delivery.
+If tiktoken is missing or the packaged vocabulary is missing/corrupt, the run
+uses a strict UTF-8 byte upper bound; a later initialization can recover after
+five seconds. Consumers wait at most four seconds for shared initialization.
+A timed-out or cancelled consumer does not cancel that shared worker or create
+another worker while it remains pending, and its chosen byte metric stays
+fixed even if initialization subsequently succeeds. OS file reads and native
+construction cannot be forcibly interrupted by an async timeout.
+
+Cancellation first retains an operational byte-bound receipt. Completing its
+token projection has a one-second wait budget; timeout or repeated cancellation
+keeps that receipt without publishing a draft as a successful handoff. Normal
+submission validation retains the consultation's selected counter and budget.
+Final projection has a separate four-second budget, including admission to the
+pool. A projection timeout or worker startup failure preserves the full result
+but returns an operational fallback, rather than approving the existing agent
+text with a different metric. This finalization budget and the existing
+three-second report-save budget are outside the model/run budget.
+
+After installing updated plugin sources, reload/reactivate the plugin (or
+restart N.E.K.O) to load the new module and bundled vocabulary. The companion
+RimWorld Mod does not need a rebuild for this token-counting change.
+
 ## Audit model
 
 The Hosted panel shows the latest run's observable trace:

@@ -28,6 +28,8 @@ from .agent import (
     parse_agent_model_settings,
 )
 from .agent.handoff import count_handoff_tokens
+from .agent.tokenizer import TokenCounter, acquire_token_counter
+from .agent.tokenizer_work import run_tokenizer_work
 from .bridge import (
     BridgeBusyError,
     BridgeError,
@@ -115,6 +117,25 @@ def _agent_handoff(result: object) -> dict[str, Any]:
     """Add the single text projection consumed by N.E.K.O's Agent callback."""
 
     return attach_agent_handoff(result)
+
+
+def _report_list_summary(result: Mapping[str, Any], offset: int, counter: TokenCounter) -> str:
+    """Build the bounded report projection without tokenizing on the event loop."""
+    summary = f"{result['total']} saved historical reports. IDs on this page:"
+    included = 0
+    for row in result["reports"]:
+        title = str(row.get("question") or "").replace("\n", " ")[:50]
+        line = f"\n{row['report_id']} ({row['state']}, {str(row['created_at'])[:19]}): {title}"
+        continuation = f"\nContinue list at offset {offset + included + 1}."
+        if count_handoff_tokens(summary + line + continuation, counter=counter)[0] > 180:
+            line = f"\n{row['report_id']} ({row['state']})"
+            if count_handoff_tokens(summary + line + continuation, counter=counter)[0] > 180:
+                break
+        summary += line
+        included += 1
+    if offset + included < result["total"]:
+        summary += f"\nContinue list at offset {offset + included}."
+    return summary
 
 
 @neko_plugin
@@ -718,7 +739,12 @@ class NekoRimworldPlugin(NekoPluginBase):
             result = await self._agent_runtime.run(normalized, settings, reference_report=reference)
         if result.get("report", {}).get("saved"):
             result["report"]["export"] = await self._export_report(result["report"]["report_id"], kwargs.get("_ctx"))
-        return Ok(_agent_handoff(result))
+        # AgentRuntime has already validated the projection with its run-owned
+        # counter. Revalidating after a cache recovery could change that metric.
+        if "delivery" not in result:
+            counter = await acquire_token_counter()
+            result = await run_tokenizer_work(attach_agent_handoff, result, counter=counter)
+        return Ok(result)
 
     async def _save_report(self, record: Mapping[str, Any]) -> Mapping[str, Any]:
         return await asyncio.to_thread(self._reports.save, record)
@@ -790,22 +816,8 @@ class NekoRimworldPlugin(NekoPluginBase):
                 )
                 return Ok({"summary": summary, "report": record, "export": exported})
             result = await asyncio.to_thread(self._reports.list, offset, limit)
-            summary = f"{result['total']} saved historical reports. IDs on this page:"
-            included = 0
-            for row in result["reports"]:
-                title = str(row.get("question") or "").replace("\n", " ")[:50]
-                line = f"\n{row['report_id']} ({row['state']}, {str(row['created_at'])[:19]}): {title}"
-                continuation = f"\nContinue list at offset {offset + included + 1}."
-                if count_handoff_tokens(summary + line + continuation)[0] > 180:
-                    # Keep exact IDs discoverable even without a tokenizer or with a long title.
-                    line = f"\n{row['report_id']} ({row['state']})"
-                    if count_handoff_tokens(summary + line + continuation)[0] > 180:
-                        break
-                summary += line
-                included += 1
-            if offset + included < result["total"]:
-                summary += f"\nContinue list at offset {offset + included}."
-            result["summary"] = summary
+            counter = await acquire_token_counter()
+            result["summary"] = await run_tokenizer_work(_report_list_summary, result, offset, counter)
             return Ok(result)
         except (ReportError, OSError, ValueError) as error:
             return Err(

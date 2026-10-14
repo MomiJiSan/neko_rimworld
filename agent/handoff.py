@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+from copy import deepcopy
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Any, Mapping
 
 from ..state import redact_text
+from .tokenizer import TokenCounter, acquire_token_counter, get_token_counter
+from .tokenizer_work import run_tokenizer_work
 
 HANDOFF_TOKEN_BUDGET = 180
 MAX_FULL_TEXT_CHARS = 12_000
@@ -24,23 +27,8 @@ class HandoffValidationError(ValueError):
         self.code = code
 
 
-@lru_cache(maxsize=1)
-def _tokenizer() -> Any | None:
-    # tiktoken is supplied by the N.E.K.O host. A strict byte upper bound keeps
-    # the packaged plugin safe if it is unavailable in another environment.
-    try:
-        import tiktoken
-
-        return tiktoken.get_encoding("o200k_base")
-    except (ImportError, KeyError, RuntimeError, ValueError):
-        return None
-
-
-def count_handoff_tokens(text: str) -> tuple[int, str]:
-    encoding = _tokenizer()
-    if encoding is not None:
-        return len(encoding.encode(text)), "o200k_base"
-    return len(text.encode("utf-8", "replace")), "utf8_bytes_upper_bound"
+def count_handoff_tokens(text: str, *, counter: TokenCounter | None = None) -> tuple[int, str]:
+    return (counter if counter is not None else get_token_counter()).count(text)
 
 
 def _validated_text(value: object, *, field: str, max_chars: int) -> str:
@@ -59,9 +47,9 @@ def validate_full_text(value: object) -> str:
     return _validated_text(value, field="full_text", max_chars=MAX_FULL_TEXT_CHARS)
 
 
-def validate_agent_text(value: object) -> str:
+def validate_agent_text(value: object, *, counter: TokenCounter | None = None) -> str:
     text = _validated_text(value, field="agent_text", max_chars=MAX_AGENT_TEXT_CHARS)
-    tokens, _ = count_handoff_tokens(text)
+    tokens, _ = count_handoff_tokens(text, counter=counter)
     if tokens > HANDOFF_TOKEN_BUDGET:
         raise HandoffValidationError(
             "handoff_over_budget", f"agent_text uses {tokens} tokens; the maximum is {HANDOFF_TOKEN_BUDGET}."
@@ -81,6 +69,7 @@ class SubmissionDraft:
     agent_text: str | None = None
     revision: int = 0
     errors: dict[str, dict[str, str]] = field(default_factory=dict)
+    _patch_operation: object | None = field(default=None, init=False, repr=False, compare=False)
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -92,7 +81,9 @@ class SubmissionDraft:
             "complete": bool(self.full_text and self.agent_text and not self.errors),
         }
 
-    def apply(self, patch: Mapping[str, Any]) -> dict[str, Any]:
+    def apply(self, patch: Mapping[str, Any], *, counter: TokenCounter | None = None) -> dict[str, Any]:
+        self._patch_operation = object()
+        counter = counter if counter is not None else get_token_counter()
         if not patch or set(patch) - {"full_text", "agent_text"}:
             raise SubmissionPatchError(
                 "invalid_submission",
@@ -116,7 +107,7 @@ class SubmissionDraft:
                 self.errors["full_text"] = {"code": error.code, "message": str(error)}
         if "agent_text" in patch:
             try:
-                agent = validate_agent_text(patch["agent_text"])
+                agent = validate_agent_text(patch["agent_text"], counter=counter)
                 changed = changed or agent != self.agent_text
                 self.agent_text = agent
                 self.errors.pop("agent_text", None)
@@ -146,16 +137,57 @@ class SubmissionDraft:
                 + "; omit unchanged saved fields to reuse them."
             )
             raise SubmissionPatchError(code, message, detail)
-        return validate_submission(self.full_text, self.agent_text)
+        return validate_submission(self.full_text, self.agent_text, counter=counter)
+
+    async def apply_async(
+        self, patch: Mapping[str, Any], *, counter: TokenCounter | None = None,
+    ) -> dict[str, Any]:
+        """Validate a detached draft; publish partial fields only while still owned."""
+        operation = object()
+        self._patch_operation = operation
+        before = deepcopy(self.snapshot())
+        candidate = SubmissionDraft(
+            full_text=self.full_text, agent_text=self.agent_text, revision=self.revision,
+            errors=deepcopy(self.errors),
+        )
+        submitted = dict(patch)
+        counter = counter if counter is not None else await acquire_token_counter()
+
+        def evaluate() -> tuple[dict[str, Any] | None, SubmissionPatchError | None]:
+            try:
+                return candidate.apply(submitted, counter=counter), None
+            except SubmissionPatchError as error:
+                return None, error
+
+        result, error = await run_tokenizer_work(evaluate)
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            raise asyncio.CancelledError
+        if self._patch_operation is not operation or self.snapshot() != before:
+            raise SubmissionPatchError(
+                "submission_superseded", "The submission draft changed while validation was pending.",
+                {"saved_fields": self.snapshot()["saved_fields"]},
+            )
+        self.full_text = candidate.full_text
+        self.agent_text = candidate.agent_text
+        self.revision = candidate.revision
+        self.errors = candidate.errors
+        if error is not None:
+            raise error
+        assert result is not None
+        return result
 
 
-def validate_submission(full_text: object, agent_text: object) -> dict[str, Any]:
+def validate_submission(
+    full_text: object, agent_text: object, *, counter: TokenCounter | None = None,
+) -> dict[str, Any]:
     """Validate mechanics only; never interpret or rewrite domain content."""
 
+    counter = counter if counter is not None else get_token_counter()
     full = validate_full_text(full_text)
-    handoff = validate_agent_text(agent_text)
-    handoff_tokens, tokenizer = count_handoff_tokens(handoff)
-    full_tokens, _ = count_handoff_tokens(full)
+    handoff = validate_agent_text(agent_text, counter=counter)
+    handoff_tokens, tokenizer = count_handoff_tokens(handoff, counter=counter)
+    full_tokens, _ = count_handoff_tokens(full, counter=counter)
     return {
         "full_text": full,
         "agent_text": handoff,
@@ -170,9 +202,10 @@ def validate_submission(full_text: object, agent_text: object) -> dict[str, Any]
     }
 
 
-def attach_agent_handoff(result: object) -> dict[str, Any]:
+def attach_agent_handoff(result: object, *, counter: TokenCounter | None = None) -> dict[str, Any]:
     """Attach an already-authored handoff without deriving any game meaning."""
 
+    counter = counter if counter is not None else get_token_counter()
     source = dict(result) if isinstance(result, Mapping) else {}
     status = str(source.get("status") or "degraded").lower()
     answer = source.get("answer")
@@ -182,14 +215,14 @@ def attach_agent_handoff(result: object) -> dict[str, Any]:
         if agent_text is None and status == "ok":
             agent_text = answer
             submission_mode = "text_fallback"
-        validated = validate_submission(answer, agent_text)
+        validated = validate_submission(answer, agent_text, counter=counter)
         text = validated["agent_text"]
         delivery = dict(validated["delivery"])
         delivery["submission_mode"] = submission_mode
     except HandoffValidationError as exception:
         text = _MISSING_HANDOFF
-        handoff_tokens, tokenizer = count_handoff_tokens(text)
-        full_tokens = count_handoff_tokens(answer)[0] if isinstance(answer, str) else None
+        handoff_tokens, tokenizer = count_handoff_tokens(text, counter=counter)
+        full_tokens = count_handoff_tokens(answer, counter=counter)[0] if isinstance(answer, str) else None
         delivery = {
             "format": "natural_text",
             "token_budget": HANDOFF_TOKEN_BUDGET,

@@ -8,6 +8,7 @@ from typing import Any
 from .audit import AgentAuditLedger
 from .contracts import AssistantTurn
 from .handoff import SubmissionDraft
+from .tokenizer import TokenCounter
 
 
 @dataclass(slots=True)
@@ -19,6 +20,7 @@ class AgentRunSession:
     observations: list[dict[str, Any]] = field(default_factory=list)
     last_assistant_content: str = ""
     submission: SubmissionDraft = field(default_factory=SubmissionDraft)
+    token_counter: TokenCounter = field(default_factory=TokenCounter)
 
     @classmethod
     def create(cls, *, ledger: AgentAuditLedger, system_prompt: str, question: str) -> AgentRunSession:

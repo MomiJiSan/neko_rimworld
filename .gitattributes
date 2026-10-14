@@ -1,0 +1,2 @@
+# The vocabulary is verified by its upstream SHA256; never rewrite its bytes.
+agent/data/o200k_base.tiktoken -text
